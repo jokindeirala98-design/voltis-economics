@@ -17,6 +17,13 @@ import ReportView from '@/components/ReportView';
 import { motion, AnimatePresence } from 'framer-motion';
 import { fetchAllProjectsFromDB, syncProjectToDB, deleteProjectFromDB } from '@/lib/supabase-sync';
 
+const StatusItem = ({ label, status }: { label: string; status: boolean }) => (
+  <div className="flex items-center justify-between p-3 rounded-xl bg-white/5 border border-white/5">
+    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-tight">{label}</span>
+    <div className={`w-2 h-2 rounded-full ${status ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.4)]' : 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.4)]'}`} />
+  </div>
+);
+
 export default function EnergyBillsApp() {
   const [bills, setBills] = useState<ExtractedBill[]>([]);
   const [isExtracting, setIsExtracting] = useState(false);
@@ -31,6 +38,21 @@ export default function EnergyBillsApp() {
   const [renameValue, setRenameValue] = useState('');
   const [extractionQueue, setExtractionQueue] = useState<{ id: string; fileName: string; status: 'loading' | 'success' | 'error'; error?: string; file?: File }[]>([]);
   const [cloudSyncStatus, setCloudSyncStatus] = useState<'synced' | 'syncing' | 'error' | 'local'>('local');
+  const [showDiag, setShowDiag] = useState(false);
+  const [diagInfo, setDiagInfo] = useState<any>(null);
+  const [isCheckingDiag, setIsCheckingDiag] = useState(false);
+
+  const runDiagnostic = async () => {
+    setIsCheckingDiag(true);
+    try {
+      const res = await fetch('/api/diag');
+      const data = await res.json();
+      setDiagInfo(data);
+    } catch (e) {
+      setDiagInfo({ error: 'Fallo al conectar con el servidor de diagnóstico' });
+    }
+    setIsCheckingDiag(false);
+  };
 
   useEffect(() => {
     if (typeof window !== 'undefined' && sessionStorage.getItem('voltis_auth') === 'true') {
@@ -439,15 +461,25 @@ export default function EnergyBillsApp() {
           </div>
         </div>
 
-        <div className="mt-auto px-8 pb-10 flex flex-col gap-4 relative z-10">
-          <div className="glass p-4 rounded-2xl border border-white/5 flex items-center gap-4">
-             <div className="w-8 h-8 rounded-full bg-slate-800 border border-white/10" />
-             <div className="flex flex-col">
-               <span className="text-xs font-bold text-white uppercase tracking-tight">User Admin</span>
-               <span className="text-[10px] text-slate-500 tracking-wider">Plan Premium</span>
-             </div>
+          <div className="mt-auto px-8 pb-10 flex flex-col gap-4 relative z-10">
+            <button 
+              onClick={() => { setShowDiag(true); runDiagnostic(); }}
+              className="glass p-3 rounded-2xl border border-white/5 flex items-center justify-between group hover:bg-white/10 transition-all"
+            >
+              <div className="flex items-center gap-3">
+                <Settings className="w-4 h-4 text-slate-500 group-hover:text-blue-400" />
+                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Sistema</span>
+              </div>
+              <div className={`w-1.5 h-1.5 rounded-full ${cloudSyncStatus === 'synced' ? 'bg-emerald-500' : 'bg-red-500 animate-pulse'}`} />
+            </button>
+            <div className="glass p-4 rounded-2xl border border-white/5 flex items-center gap-4">
+               <div className="w-8 h-8 rounded-full bg-slate-800 border border-white/10" />
+               <div className="flex flex-col">
+                 <span className="text-xs font-bold text-white uppercase tracking-tight">Admin Voltis</span>
+                 <span className="text-[10px] text-slate-500 tracking-wider">Plan Expert</span>
+               </div>
+            </div>
           </div>
-        </div>
       </aside>
 
       {/* MAIN CONTENT CANVAS */}
@@ -643,6 +675,88 @@ export default function EnergyBillsApp() {
 
         </div>
       </main>
+
+      {/* DIAGNOSTIC MODAL */}
+      <AnimatePresence>
+        {showDiag && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[60] flex items-center justify-center p-6 bg-black/80 backdrop-blur-md"
+          >
+            <motion.div 
+              initial={{ scale: 0.9, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              className="glass-card w-full max-w-lg rounded-[40px] p-10 border border-white/10 shadow-3xl text-white relative"
+            >
+              <button onClick={() => setShowDiag(false)} className="absolute top-8 right-8 text-slate-500 hover:text-white">
+                <X className="w-6 h-6" />
+              </button>
+
+              <div className="flex flex-col gap-8">
+                <div className="flex items-center gap-4">
+                  <div className="p-3 bg-blue-500/10 rounded-2xl">
+                    <Settings className="w-8 h-8 text-blue-400" />
+                  </div>
+                  <div>
+                    <h2 className="text-2xl font-black tracking-tighter italic">DIAGNÓSTICO DE SISTEMAS</h2>
+                    <p className="text-xs font-bold text-blue-400 tracking-widest uppercase opacity-60">Auditoría Técnica en Vivo</p>
+                  </div>
+                </div>
+
+                {isCheckingDiag ? (
+                  <div className="flex flex-col items-center gap-4 py-12">
+                     <Loader2 className="w-10 h-10 text-blue-500 animate-spin" />
+                     <span className="text-xs font-black tracking-widest">ANALIZANDO CONEXIONES...</span>
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-6">
+                    {/* ENTORNO */}
+                    <div className="flex flex-col gap-3">
+                       <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Llaves de API (Variables Vercel)</h3>
+                       <div className="grid grid-cols-2 gap-4">
+                          <StatusItem label="Groq AI" status={diagInfo?.env?.has_groq_key} />
+                          <StatusItem label="Supabase URL" status={diagInfo?.env?.has_supabase_url} />
+                          <StatusItem label="Supabase Key" status={diagInfo?.env?.has_supabase_key} />
+                          <StatusItem label="Gemini AI" status={diagInfo?.env?.has_gemini_key} />
+                       </div>
+                    </div>
+
+                    {/* BASE DE DATOS */}
+                    <div className="flex flex-col gap-3">
+                       <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Base de Datos (Supabase)</h3>
+                       <div className={`p-4 rounded-2xl border ${diagInfo?.database?.status === 'connected' ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-red-500/5 border-red-500/20'}`}>
+                          <div className="flex items-center justify-between mb-2">
+                             <span className="text-[12px] font-bold">Estado del Enlace Cloud</span>
+                             <span className={`text-[10px] font-black px-3 py-1 rounded-full ${diagInfo?.database?.status === 'connected' ? 'bg-emerald-500 text-white' : 'bg-red-500 text-white'}`}>
+                                {diagInfo?.database?.status?.toUpperCase() || 'DESCONECTADO'}
+                             </span>
+                          </div>
+                          {diagInfo?.database?.error && (
+                            <p className="text-[10px] text-red-300 font-mono bg-red-950/30 p-2 rounded-lg mt-2 break-all">
+                               {diagInfo.database.error}
+                            </p>
+                          )}
+                          <p className="text-[10px] opacity-40 mt-2">
+                             Este indicador verifica si la app puede leer/escribir proyectos en la nube. Si está en rojo, tus datos solo se guardarán localmente en este navegador.
+                          </p>
+                       </div>
+                    </div>
+                    
+                    <button 
+                      onClick={runDiagnostic}
+                      className="w-full py-4 bg-white text-black font-black text-xs uppercase tracking-widest rounded-2xl hover:bg-slate-200 transition-all flex items-center justify-center gap-2"
+                    >
+                      <Sparkles className="w-4 h-4" /> Re-Scanear
+                    </button>
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <style jsx global>{`
         .custom-scrollbar::-webkit-scrollbar { width: 4px; }

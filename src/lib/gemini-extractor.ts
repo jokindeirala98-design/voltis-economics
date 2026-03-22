@@ -95,15 +95,17 @@ async function callGroqWithFallback(messages: any[], modelIndex = 0): Promise<{ 
 }
 
 export async function extractBillDataWithAI(pdfText: string) {
-  if (!process.env.GROQ_API_KEY) {
-    throw new Error('GROQ_API_KEY no está configurado en las variables de entorno.');
+  if (!process.env.GROQ_API_KEY && !process.env.GEMINI_API_KEY) {
+    throw new Error('No se han configurado llaves de API (GROQ o GEMINI) en Vercel.');
   }
 
   const messages: any[] = [{ role: 'user', content: `${SYSTEM_PROMPT}\n\nTEXTO DE LA FACTURA:\n${pdfText}` }];
 
   try {
     // ATTEMPT 1: Best available model in the chain
-    const { content: output1, usedModel } = await callGroqWithFallback(messages);
+    // If Groq is missing, start directly with Gemini
+    const startIndex = !process.env.GROQ_API_KEY ? MODELS.indexOf('gemini-emergency') : 0;
+    const { content: output1, usedModel } = await callGroqWithFallback(messages, startIndex);
     let parsedData = JSON.parse(output1);
 
     // VALIDATION
