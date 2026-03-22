@@ -27,6 +27,8 @@ export default function EnergyBillsApp() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [password, setPassword] = useState('');
   const [authError, setAuthError] = useState(false);
+  const [renamingProjectId, setRenamingProjectId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
 
   useEffect(() => {
     if (typeof window !== 'undefined' && sessionStorage.getItem('voltis_auth') === 'true') {
@@ -150,6 +152,17 @@ export default function EnergyBillsApp() {
       if (currentProjectId === id) loadWorkspace(next[0] || { id: crypto.randomUUID(), name: 'HUÉRFANO', bills: [] });
       toast.success('Proyecto eliminado');
     }
+  };
+
+  const renameProject = async (id: string, newName: string) => {
+    if (!newName.trim()) return;
+    const upperName = newName.toUpperCase();
+    const next = savedProjects.map(p => p.id === id ? { ...p, name: upperName } : p);
+    setSavedProjects(next);
+    const updated = next.find(p => p.id === id);
+    if (updated) await syncProjectToDB(updated);
+    toast.success('Nombre actualizado');
+    setRenamingProjectId(null);
   };
 
   const handleUpdateBills = (newBills: ExtractedBill[]) => {
@@ -303,25 +316,48 @@ export default function EnergyBillsApp() {
               {savedProjects.sort((a,b) => b.updatedAt - a.updatedAt).map(proj => {
                 const isActive = proj.id === currentProjectId;
                 return (
-                  <motion.div 
+                   <motion.div 
                     key={proj.id}
-                    whileHover={{ x: 4 }}
-                    onClick={() => loadWorkspace(proj)}
+                    whileHover={{ x: renamingProjectId === proj.id ? 0 : 4 }}
+                    onClick={() => renamingProjectId !== proj.id && loadWorkspace(proj)}
                     className={`group flex items-center justify-between p-4 rounded-2xl cursor-pointer transition-all border ${
                       isActive 
                         ? 'bg-blue-600/10 border-blue-500/30 text-white shadow-xl shadow-blue-900/10' 
                         : 'bg-transparent border-transparent text-slate-500 hover:bg-white/5 hover:text-white'
                     }`}
                   >
-                    <div className="flex flex-col gap-1 overflow-hidden">
-                      <span className={`font-bold truncate text-[12px] uppercase tracking-wider ${isActive ? 'text-blue-400' : ''}`}>{proj.name}</span>
+                    <div className="flex flex-col gap-1 overflow-hidden flex-1 min-w-0">
+                      {renamingProjectId === proj.id ? (
+                        <input
+                          autoFocus
+                          value={renameValue}
+                          onChange={e => setRenameValue(e.target.value)}
+                          onClick={e => e.stopPropagation()}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') renameProject(proj.id, renameValue);
+                            if (e.key === 'Escape') setRenamingProjectId(null);
+                          }}
+                          onBlur={() => renameProject(proj.id, renameValue)}
+                          className="bg-transparent border-b border-blue-500 text-blue-300 font-bold text-[12px] uppercase tracking-wider focus:outline-none w-full"
+                        />
+                      ) : (
+                        <span className={`font-bold truncate text-[12px] uppercase tracking-wider ${isActive ? 'text-blue-400' : ''}`}>{proj.name}</span>
+                      )}
                       <span className="text-[10px] opacity-40 font-medium">{proj.bills?.length || 0} Facturas</span>
                     </div>
-                    {isActive ? (
-                      <button onClick={(e) => deleteProject(proj.id, e)} className="opacity-0 group-hover:opacity-100 p-2 hover:bg-red-500/20 text-red-500 rounded-lg transition-all">
-                        <Trash2 className="w-4 h-4" />
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={e => { e.stopPropagation(); setRenamingProjectId(proj.id); setRenameValue(proj.name); }}
+                        className="opacity-0 group-hover:opacity-100 p-2 hover:bg-blue-500/20 text-blue-400 rounded-lg transition-all"
+                      >
+                        <Edit2 className="w-3 h-3" />
                       </button>
-                    ) : <ChevronRight className="w-4 h-4 opacity-0 group-hover:opacity-50" />}
+                      {isActive && (
+                        <button onClick={(e) => deleteProject(proj.id, e)} className="opacity-0 group-hover:opacity-100 p-2 hover:bg-red-500/20 text-red-500 rounded-lg transition-all">
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
                   </motion.div>
                 );
               })}
