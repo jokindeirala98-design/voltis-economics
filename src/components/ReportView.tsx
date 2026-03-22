@@ -22,13 +22,13 @@ interface ReportViewProps {
 
 const COLORS = ['#3b82f6', '#818cf8', '#10b981', '#f59e0b', '#ef4444', '#6366f1'];
 
-const CountUp = ({ value, duration = 1.2 }: { value: number, duration?: number }) => {
+const CountUp = ({ value, duration = 1.2, decimals = 0 }: { value: number, duration?: number, decimals?: number }) => {
   const [count, setCount] = React.useState(0);
   const elementRef = useRef<HTMLSpanElement>(null);
 
   useEffect(() => {
     let start = 0;
-    const end = Math.floor(value);
+    const end = value;
     if (start === end) return;
 
     ScrollTrigger.create({
@@ -40,7 +40,7 @@ const CountUp = ({ value, duration = 1.2 }: { value: number, duration?: number }
           if (!startTime) startTime = currentTime;
           const progress = Math.min((currentTime - startTime) / (duration * 1000), 1);
           const easeProgress = 1 - Math.pow(1 - progress, 3); // easeOutCubic
-          setCount(Math.floor(easeProgress * end));
+          setCount(easeProgress * end);
           if (progress < 1) requestAnimationFrame(animate);
         };
         requestAnimationFrame(animate);
@@ -49,7 +49,14 @@ const CountUp = ({ value, duration = 1.2 }: { value: number, duration?: number }
     });
   }, [value, duration]);
 
-  return <span ref={elementRef}>{count.toLocaleString('es-ES')}</span>;
+  return (
+    <span ref={elementRef}>
+      {count.toLocaleString('es-ES', { 
+        minimumFractionDigits: decimals, 
+        maximumFractionDigits: decimals 
+      })}
+    </span>
+  );
 };
 
 export default function ReportView({ bills, customOCs, onBack }: ReportViewProps) {
@@ -288,10 +295,10 @@ export default function ReportView({ bills, customOCs, onBack }: ReportViewProps
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
               {[
-                { label: 'Inversión Global', value: summaryStats.global, unit: '€', icon: DollarSign, color: 'text-blue-500' },
-                { label: 'Flujo Energético', value: summaryStats.kwh, unit: 'kWh', icon: Zap, color: 'text-sky-400' },
-                { label: 'Precio Promedio', value: summaryStats.global / summaryStats.kwh, unit: '€/kWh', icon: TrendingUp, color: 'text-teal-400' },
-                { label: 'Integridad IA', value: validBills.length, unit: 'DOCS', icon: LayoutGrid, color: 'text-indigo-400' },
+                { label: 'Inversión Global', value: summaryStats.global, unit: '€', icon: DollarSign, color: 'text-blue-500', decimals: 2 },
+                { label: 'Flujo Energético', value: summaryStats.kwh, unit: 'kWh', icon: Zap, color: 'text-sky-400', decimals: 0 },
+                { label: 'Precio Promedio', value: summaryStats.global / (summaryStats.kwh || 1), unit: '€/kWh', icon: TrendingUp, color: 'text-teal-400', decimals: 4 },
+                { label: 'Integridad IA', value: validBills.length, unit: 'DOCS', icon: LayoutGrid, color: 'text-indigo-400', decimals: 0 },
               ].map((kpi, idx) => (
                 <div key={idx} className="kpi-card glass group p-10 rounded-[48px] border border-white/5 relative overflow-hidden transition-all duration-500 hover:border-blue-500/30">
                    <div className={`w-12 h-12 rounded-2xl bg-white/5 flex items-center justify-center mb-10 ${kpi.color} group-hover:scale-110 transition-all duration-500`}>
@@ -301,7 +308,7 @@ export default function ReportView({ bills, customOCs, onBack }: ReportViewProps
                      <span className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500 group-hover:text-slate-400 transition-colors">{kpi.label}</span>
                      <div className="flex items-baseline gap-2">
                        <p className="text-4xl font-black tracking-tighter tabular-nums">
-                         <CountUp value={kpi.value} duration={1} />
+                         <CountUp value={kpi.value} duration={1} decimals={kpi.decimals} />
                        </p>
                        <span className="text-[10px] font-black text-slate-600">{kpi.unit}</span>
                      </div>
