@@ -55,41 +55,70 @@ export async function extractBillDataWithAI(pdfText: string) {
     throw new Error('GROQ_API_KEY no está configurado en las variables de entorno.');
   }
 
-  const prompt = `${SYSTEM_PROMPT}\n\nTEXTO DE LA FACTURA:\n${pdfText}`;
+  const messages: any[] = [{ role: 'user', content: `${SYSTEM_PROMPT}\n\nTEXTO DE LA FACTURA:\n${pdfText}` }];
 
   try {
-    const chatCompletion = await groq.chat.completions.create({
-      messages: [{ role: 'user', content: prompt }],
+    // ATTEMPT 1
+    const res1 = await groq.chat.completions.create({
+      messages,
       model: 'llama-3.3-70b-versatile',
       temperature: 0,
       response_format: { type: 'json_object' }
     });
     
-    let output = chatCompletion.choices[0]?.message?.content || '{}';
-    
-    const parsedData = JSON.parse(output);
+    let output = res1.choices[0]?.message?.content || '{}';
+    let parsedData = JSON.parse(output);
 
-    // --- SECONDARY VALIDATION: Mathematical Integrity ---
-    const e = parsedData.costeTotalConsumo || 0;
-    const p = parsedData.costeTotalPotencia || 0;
-    let ocs = 0;
-    if (Array.isArray(parsedData.otrosConceptos)) {
-      parsedData.otrosConceptos.forEach((oc: any) => ocs += (oc.total || 0));
+    // VALIDATION
+    const validate = (data: any) => {
+      const e = data.costeTotalConsumo || 0;
+      const p = data.costeTotalPotencia || 0;
+      let ocs = 0;
+      if (Array.isArray(data.otrosConceptos)) {
+        data.otrosConceptos.forEach((oc: any) => ocs += (oc.total || 0));
+      }
+      const calculated = Number((e + p + ocs).toFixed(2));
+      const reported = Number((data.totalFactura || 0).toFixed(2));
+      return { isMatch: Math.abs(calculated - reported) <= 0.05, calculated, reported, diff: Number((reported - calculated).toFixed(2)) };
+    };
+
+    let check = validate(parsedData);
+
+    // ATTEMPT 2 (SELF-CORRECTION)
+    if (!check.isMatch) {
+      console.warn(`Attempt 1 failed. Mismatch: ${check.diff}€. Attempting self-correction...`);
+      
+      messages.push({ role: 'assistant', content: output });
+      messages.push({ role: 'user', content: `
+        ERROR DE CUADRE: Tus conceptos suman ${check.calculated}€ pero el total de la factura es ${check.reported}€.
+        FALTAN ${check.diff}€ por encontrar. 
+        Por favor, busca en el texto conceptos que hayas omitido como:
+        - Energía Reactiva (muy común en Ayuntamientos)
+        - Excesos de Potencia (Penalizaciones)
+        - Canon de Aguas o Tasa de Basuras (si es factura mixta)
+        - Otros cargos u abonos.
+        Devuelve el JSON corregido asegurando que el sumatorio sea EXACTO.
+      `});
+
+      const res2 = await groq.chat.completions.create({
+        messages,
+        model: 'llama-3.3-70b-versatile',
+        temperature: 0,
+        response_format: { type: 'json_object' }
+      });
+
+      output = res2.choices[0]?.message?.content || '{}';
+      parsedData = JSON.parse(output);
+      check = validate(parsedData);
     }
-    
-    const calculatedTotal = Number((e + p + ocs).toFixed(2));
-    const reportedTotal = Number((parsedData.totalFactura || 0).toFixed(2));
 
-    if (Math.abs(calculatedTotal - reportedTotal) > 0.05) { // Allow 5 cents rounding diff
-      console.warn(`Math mismatch: Calculated ${calculatedTotal} vs Reported ${reportedTotal}`);
-      // If the mismatch is significant, we trust the sum of components more for auditing, 
-      // but we should warn the AI/User.
-      throw new Error(`Inconsistencia matemática detectada: La suma de conceptos (${calculatedTotal}€) no coincide con el total (${reportedTotal}€).`);
+    if (!check.isMatch) {
+      throw new Error(`Inconsistencia matemática detectada: La suma de conceptos (${check.calculated}€) no coincide con el total (${check.reported}€). Faltan ${check.diff}€.`);
     }
 
     return parsedData;
   } catch (error: any) {
-    console.error('Error in Groq AI extraction:', error);
+    console.error('Extraction Error:', error);
     throw new Error(error.message.includes('Inconsistencia') ? error.message : `Detalle técnico: ${error.message}`);
   }
 }
