@@ -243,7 +243,7 @@ export default function ReportView({ bills, customOCs, onBack }: ReportViewProps
                </h4>
                <div className="h-[350px]">
                  <ResponsiveContainer width="100%" height="100%">
-                   <BarChart data={chartData}>
+                   <BarChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                      <XAxis dataKey="name" stroke="#64748b" fontSize={10} tickLine={false} axisLine={false} interval={0} />
                      <YAxis stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} />
                      <RechartsTooltip 
@@ -298,7 +298,7 @@ export default function ReportView({ bills, customOCs, onBack }: ReportViewProps
                   </h4>
                   <div className="h-[300px]">
                     <ResponsiveContainer width="100%" height="100%">
-                      <ComposedChart data={chartData}>
+                      <ComposedChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                         <XAxis dataKey="name" hide />
                         <YAxis yAxisId="left" hide />
                         <YAxis yAxisId="right" orientation="right" stroke="#64748b" fontSize={10} tickLine={false} axisLine={false} tickFormatter={(v) => `${v.toFixed(3)}€`} />
