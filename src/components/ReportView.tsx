@@ -156,35 +156,51 @@ export default function ReportView({ bills, customOCs, onBack }: ReportViewProps
     return { chartData: cData, pieData: pData, summaryStats: totals, tableData: cData };
   }, [validBills, customOCs]);
 
-  // GSAP Orchestration Optimized
+  // GSAP Orchestration Refined for "Unified Page" flow
   useEffect(() => {
     const ctx = gsap.context(() => {
-      // Smoother scroll entry for non-hero sections
-      const sections = gsap.utils.toArray('section:not(.hero-scene)');
+      // 1. Hero Content Fade & Scale (Receding)
+      gsap.to('.hero-content', {
+        opacity: 0,
+        y: -100,
+        scale: 0.9,
+        scrollTrigger: {
+          trigger: '.hero-scene',
+          start: 'top top',
+          end: 'bottom 40%',
+          scrub: true,
+        }
+      });
+
+      // 2. Sections Reveal Logic 
+      const sections = gsap.utils.toArray('section:not(.no-gsap):not(.hero-scene)');
       sections.forEach((section: any) => {
         gsap.fromTo(section, 
-          { opacity: 0, y: 60, filter: 'blur(8px)' },
+          { opacity: 0, y: 100, filter: 'blur(10px)' },
           {
             opacity: 1, y: 0, filter: 'blur(0px)',
-            ease: 'power2.out',
+            ease: 'expo.out',
             scrollTrigger: {
               trigger: section,
-              start: 'top 80%',
-              end: 'top 20%',
-              scrub: 0.5, // Faster scrub for snappiness
+              start: 'top 85%',
+              end: 'top 30%', // Extended end for smoother blend
+              scrub: 1,
             }
           }
         );
       });
 
-      // Optimized Hero pinning - Using anticipatePin to prevent "stuck" feeling
-      ScrollTrigger.create({
-        trigger: 'section.hero-scene',
-        start: 'top top',
-        end: '+=400',
-        pin: true,
-        pinSpacing: false,
-        anticipatePin: 1 
+      // 3. KPI Scene Specific: Staggered entrance
+      gsap.from('.kpi-card', {
+        scale: 0.8,
+        opacity: 0,
+        stagger: 0.1,
+        scrollTrigger: {
+          trigger: '.kpi-scene',
+          start: 'top 70%',
+          end: 'top 30%',
+          scrub: 1
+        }
       });
 
     }, containerRef);
@@ -220,46 +236,48 @@ export default function ReportView({ bills, customOCs, onBack }: ReportViewProps
       <div ref={contentRef} className="relative z-10 report-container">
         
         {/* ESCENA 1 — HERO / PORTADA PREMIUM */}
-        <section className="hero-scene min-h-screen flex flex-col items-center justify-center p-8 relative overflow-hidden page-break-after">
+        <section className="hero-scene min-h-screen flex flex-col items-center justify-center p-8 relative overflow-hidden page-break-after no-gsap">
           <div className="absolute inset-0 pointer-events-none">
              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] border border-blue-500/5 rounded-full animate-pulse" />
              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] border border-white/2 rounded-full" />
           </div>
           
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95, y: 20 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            transition={{ duration: 1.2, ease: "circOut" }}
-            className="text-center relative z-20"
-          >
-            <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-blue-500/10 border border-blue-500/20 text-[9px] font-black uppercase tracking-[0.5em] text-blue-400 mb-12 shadow-[0_0_20px_rgba(59,130,246,0.1)]">
-              <Cpu className="w-3.5 h-3.5" /> Voltis AI Core
-            </div>
+          <div className="hero-content text-center relative z-20">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              transition={{ duration: 1.2, ease: "circOut" }}
+              className="space-y-12"
+            >
+              <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-blue-500/10 border border-blue-500/20 text-[9px] font-black uppercase tracking-[0.5em] text-blue-400 mb-12 shadow-[0_0_20px_rgba(59,130,246,0.1)]">
+                <Cpu className="w-3.5 h-3.5" /> Voltis AI Core
+              </div>
 
-            <div className="space-y-0 mb-16 px-4">
-              <h1 className="text-8xl md:text-[140px] font-black tracking-[-0.07em] leading-[0.8] text-white">
-                VOLTIS
-              </h1>
-              <h2 className="text-6xl md:text-9xl font-black tracking-[-0.05em] leading-[0.8] bg-gradient-to-b from-white/40 to-transparent bg-clip-text text-transparent italic">
-                ANUAL
-              </h2>
-            </div>
+              <div className="space-y-0 mb-16 px-4">
+                <h1 className="text-8xl md:text-[140px] font-black tracking-[-0.07em] leading-[0.8] text-white">
+                  VOLTIS
+                </h1>
+                <h2 className="text-6xl md:text-9xl font-black tracking-[-0.05em] leading-[0.8] bg-gradient-to-b from-white/40 to-transparent bg-clip-text text-transparent italic">
+                  ANUAL
+                </h2>
+              </div>
 
-            <div className="space-y-8">
-               <div className="h-0.5 w-16 bg-blue-500 mx-auto rounded-full shadow-[0_0_10px_rgba(59,130,246,0.5)]" />
-               <div className="space-y-3">
-                 <h3 className="text-4xl md:text-5xl font-black tracking-tighter text-white uppercase text-glow">{validBills[0]?.titular?.split(' ')[0] || 'HUMICLIMA'}</h3>
-                 <div className="flex flex-wrap justify-center gap-4 text-[9px] font-black uppercase tracking-[0.3em] text-slate-500">
-                   <span className="flex items-center gap-2 px-3 py-1 rounded bg-white/5">{validBills[0]?.cups || 'ES00000'}</span>
-                   <span className="flex items-center gap-2 px-3 py-1 rounded bg-white/5">TARIFA {validBills[0]?.tarifa || '3.0TD'}</span>
+              <div className="space-y-8">
+                 <div className="h-0.5 w-16 bg-blue-500 mx-auto rounded-full shadow-[0_0_10px_rgba(59,130,246,0.5)]" />
+                 <div className="space-y-3">
+                   <h3 className="text-4xl md:text-5xl font-black tracking-tighter text-white uppercase text-glow">{validBills[0]?.titular?.split(' ')[0] || 'HUMICLIMA'}</h3>
+                   <div className="flex flex-wrap justify-center gap-4 text-[9px] font-black uppercase tracking-[0.3em] text-slate-500">
+                     <span className="flex items-center gap-2 px-3 py-1 rounded bg-white/5">{validBills[0]?.cups || 'ES00000'}</span>
+                     <span className="flex items-center gap-2 px-3 py-1 rounded bg-white/5">TARIFA {validBills[0]?.tarifa || '3.0TD'}</span>
+                   </div>
                  </div>
-               </div>
-            </div>
-          </motion.div>
+              </div>
+            </motion.div>
+          </div>
         </section>
 
         {/* ESCENA 2 — KPIs / AGILIZADA */}
-        <section className="min-h-screen flex flex-col items-center justify-center py-20 px-8 relative page-break-after">
+        <section className="kpi-scene min-h-screen flex flex-col items-center justify-center py-20 px-8 relative page-break-after">
           <div className="max-w-7xl w-full">
             <div className="mb-20 space-y-3">
               <span className="text-[10px] font-black uppercase tracking-[0.6em] text-blue-500 flex items-center gap-2">
@@ -275,7 +293,7 @@ export default function ReportView({ bills, customOCs, onBack }: ReportViewProps
                 { label: 'Precio Promedio', value: summaryStats.global / summaryStats.kwh, unit: '€/kWh', icon: TrendingUp, color: 'text-teal-400' },
                 { label: 'Integridad IA', value: validBills.length, unit: 'DOCS', icon: LayoutGrid, color: 'text-indigo-400' },
               ].map((kpi, idx) => (
-                <div key={idx} className="glass group p-10 rounded-[48px] border border-white/5 relative overflow-hidden transition-all duration-500 hover:border-blue-500/30">
+                <div key={idx} className="kpi-card glass group p-10 rounded-[48px] border border-white/5 relative overflow-hidden transition-all duration-500 hover:border-blue-500/30">
                    <div className={`w-12 h-12 rounded-2xl bg-white/5 flex items-center justify-center mb-10 ${kpi.color} group-hover:scale-110 transition-all duration-500`}>
                      <kpi.icon className="w-6 h-6" />
                    </div>
