@@ -1,18 +1,12 @@
-"use client";
-
-import React, { useMemo, useRef, useEffect, useState } from 'react';
+import React, { useMemo, useRef } from 'react';
 import { useReactToPrint } from 'react-to-print';
 import { ExtractedBill } from '@/lib/types';
 import { 
-  BarChart, Bar, XAxis, YAxis, Tooltip as RechartsTooltip, ResponsiveContainer, 
-  PieChart, Pie, Cell, CartesianGrid
+  BarChart, Bar, XAxis, YAxis, Tooltip as RechartsTooltip, Legend, ResponsiveContainer, 
+  ComposedChart, Line, PieChart, Pie, Cell, CartesianGrid
 } from 'recharts';
-import { ArrowLeft, Printer, Zap, Activity, TrendingUp, DollarSign, BarChart3, PieChart as PieIcon, CheckCircle2, ShieldCheck, Sparkles, ArrowRight, LayoutGrid, Cpu, Mail, Send, Filter, ChevronDown, ChevronUp, AlertTriangle } from 'lucide-react';
+import { ArrowLeft, Printer, Zap, Activity, Info, TrendingUp, DollarSign, BarChart3, PieChart as PieIcon, CheckCircle2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import gsap from 'gsap';
-import { ScrollTrigger } from 'gsap/ScrollTrigger';
-
-gsap.registerPlugin(ScrollTrigger);
 
 interface ReportViewProps {
   bills: ExtractedBill[];
@@ -20,168 +14,114 @@ interface ReportViewProps {
   onBack: () => void;
 }
 
-const CountUp = ({ value, duration = 1, decimals = 0 }: { value: number, duration?: number, decimals?: number }) => {
-  const [count, setCount] = useState(0);
-  const elementRef = useRef<HTMLSpanElement>(null);
-
-  useEffect(() => {
-    let start = 0;
-    const end = value;
-    if (start === end) return;
-
-    ScrollTrigger.create({
-      trigger: elementRef.current,
-      start: 'top 95%',
-      onEnter: () => {
-        let startTime: number | null = null;
-        const animate = (currentTime: number) => {
-          if (!startTime) startTime = currentTime;
-          const progress = Math.min((currentTime - startTime) / (duration * 1000), 1);
-          const easeProgress = 1 - Math.pow(1 - progress, 3);
-          setCount(easeProgress * end);
-          if (progress < 1) requestAnimationFrame(animate);
-        };
-        requestAnimationFrame(animate);
-      },
-      once: true
-    });
-  }, [value, duration]);
-
-  return (
-    <span ref={elementRef}>
-      {count.toLocaleString('es-ES', { 
-        minimumFractionDigits: decimals, 
-        maximumFractionDigits: decimals 
-      })}
-    </span>
-  );
-};
+const COLORS = ['#6366f1', '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
 
 export default function ReportView({ bills, customOCs, onBack }: ReportViewProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
-  const [selectedBillId, setSelectedBillId] = useState<string | null>(null);
-  const [selectedQuarter, setSelectedQuarter] = useState<number>(0);
-  const [email, setEmail] = useState('');
-  const [isSending, setIsSending] = useState(false);
-  const [isSent, setIsSent] = useState(false);
+  const [selectedBillId, setSelectedBillId] = React.useState<string | null>(null);
+  const [selectedQuarter, setSelectedQuarter] = React.useState<'ALL' | 'Q1' | 'Q2' | 'Q3' | 'Q4'>('ALL');
+  const [selectedYear, setSelectedYear] = React.useState<string>('ALL');
 
-  // Smooth Section Scrolling
-  const scrollToSection = (id: string) => {
-    const el = document.getElementById(id);
-    if (el) el.scrollIntoView({ behavior: 'smooth' });
-  };
+  const selectedBill = useMemo(() => {
+    if (!selectedBillId) return null;
+    const b = bills.find(b => b.id === selectedBillId);
+    if (!b) return null;
+    
+    // Calculate full total including custom OCs
+    const energia = b.costeTotalConsumo || 0;
+    const potencia = b.costeTotalPotencia || 0;
+    let impYOtros = 0;
+    b.otrosConceptos?.forEach(oc => impYOtros += oc.total);
+    customOCs[b.id]?.forEach(oc => impYOtros += oc.total);
+    
+    return { ...b, totalCalculado: energia + potencia + impYOtros };
+  }, [selectedBillId, bills, customOCs]);
 
-  // Keyboard navigation
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-        const sections = ['scene-1', 'scene-2', 'scene-3', 'scene-4', 'scene-5', 'scene-6'];
-        const viewH = window.innerHeight;
-        const currentIdx = sections.findIndex(id => {
-          const el = document.getElementById(id);
-          return el && (el.getBoundingClientRect().top >= -viewH/2 && el.getBoundingClientRect().top < viewH/2);
-        });
-        
-        let nextIdx = currentIdx;
-        if (e.key === 'ArrowDown') nextIdx = Math.min(sections.length - 1, currentIdx + 1);
-        else nextIdx = Math.max(0, currentIdx - 1);
-        
-        if (nextIdx !== currentIdx) {
-          e.preventDefault();
-          scrollToSection(sections[nextIdx]);
-        }
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  const reactToPrintFn = useReactToPrint({
+    contentRef,
+    documentTitle: 'Voltis_Anual_Economics_Report',
+  });
 
-  // GSAP Orchestration - Subtle entrance animations only (sections always visible)
-  useEffect(() => {
-    const ctx = gsap.context(() => {
-      // 1. Hero parallax EXIT animation (scale down on scroll)
-      gsap.to('.hero-content', {
-        scale: 0.9, opacity: 0.3, y: -40,
-        scrollTrigger: { 
-          trigger: '#scene-1', 
-          start: 'top top', 
-          end: 'bottom 40%', 
-          scrub: 1,
-        }
-      });
+  const validBills = useMemo(() => bills.filter(b => b.status !== 'error').sort((a,b) => {
+    return (a.fechaInicio || '').localeCompare(b.fechaInicio || '');
+  }), [bills]);
 
-      // 2. Subtle section entrance - starts from slightly below, always ends fully visible
-      const sections = ['#scene-2', '#scene-3', '#scene-4', '#scene-5', '#scene-6'];
-      sections.forEach(id => {
-        gsap.from(id, {
-          y: 40,
-          opacity: 0.4,
-          duration: 1,
-          ease: 'power2.out',
-          scrollTrigger: {
-            trigger: id,
-            start: 'top 90%',
-            once: true,
-          }
-        });
-
-        if (id === '#scene-2') {
-          gsap.from('.kpi-card', {
-            scale: 0.9,
-            opacity: 0.2,
-            stagger: 0.1,
-            duration: 0.7,
-            ease: 'back.out(1.7)',
-            scrollTrigger: {
-              trigger: id,
-              start: 'top 80%',
-              once: true,
-            }
-          });
-        }
-      });
-    }, containerRef);
-    return () => ctx.revert();
-  }, [selectedQuarter]);
-
-  // Filtering
-  const filteredValidBills = useMemo(() => {
-    const validOnes = (bills || []).filter(b => b.status !== 'error').sort((a,b) => (a.fechaInicio || '').localeCompare(b.fechaInicio || ''));
-    if (selectedQuarter === 0) return validOnes;
-    return validOnes.filter(b => {
-      const month = new Date(b.fechaFin || '').getMonth() + 1;
-      return selectedQuarter === 1 ? (month >= 1 && month <= 3) :
-             selectedQuarter === 2 ? (month >= 4 && month <= 6) :
-             selectedQuarter === 3 ? (month >= 7 && month <= 9) :
-             selectedQuarter === 4 ? (month >= 10 && month <= 12) : true;
+  const availableYears = useMemo(() => {
+    const years = new Set<string>();
+    validBills.forEach(b => {
+      if (b.fechaInicio) years.add(b.fechaInicio.split('-')[0]);
     });
-  }, [bills, selectedQuarter]);
+    return Array.from(years).sort();
+  }, [validBills]);
+
+  const filteredBills = useMemo(() => {
+    return validBills.filter(b => {
+      if (!b.fechaInicio) return true;
+      const [year, month] = b.fechaInicio.split('-').map(Number);
+      
+      const yearMatch = selectedYear === 'ALL' || year.toString() === selectedYear;
+      if (!yearMatch) return false;
+
+      if (selectedQuarter === 'ALL') return true;
+      const q = Math.ceil(month / 3);
+      return `Q${q}` === selectedQuarter;
+    });
+  }, [validBills, selectedQuarter, selectedYear]);
 
   const { chartData, pieData, summaryStats, tableData } = useMemo(() => {
     const totals = { energetic: 0, power: 0, taxes: 0, others: 0, global: 0, kwh: 0 };
-    const cData = filteredValidBills.map(b => {
+    
+    const shortDate = (d: string) => d ? d.split('-').reverse().slice(0, 2).join('/') : '';
+
+    const cData = filteredBills.map((b: ExtractedBill) => {
+      const p1 = b.consumo?.find((c: any) => c.periodo === 'P1')?.kwh || 0;
+      const p2 = b.consumo?.find((c: any) => c.periodo === 'P2')?.kwh || 0;
+      const p3 = b.consumo?.find((c: any) => c.periodo === 'P3')?.kwh || 0;
+      const p4 = b.consumo?.find((c: any) => c.periodo === 'P4')?.kwh || 0;
+      const p5 = b.consumo?.find((c: any) => c.periodo === 'P5')?.kwh || 0;
+      const p6 = b.consumo?.find((c: any) => c.periodo === 'P6')?.kwh || 0;
+
       const energia = b.costeTotalConsumo || 0;
       const potencia = b.costeTotalPotencia || 0;
-      let imp = 0, others = 0;
-      [...(b.otrosConceptos || []), ...(customOCs[b.id] || [])].forEach(oc => {
-        if (oc.concepto.toLowerCase().includes('impuesto') || oc.concepto.toLowerCase().includes('iva')) imp += oc.total;
-        else others += oc.total;
+      let impuestos = 0;
+      let otros = 0;
+
+      b.otrosConceptos?.forEach((oc: any) => {
+        if (oc.concepto.toLowerCase().includes('impuesto') || oc.concepto.toLowerCase().includes('iva')) impuestos += oc.total;
+        else otros += oc.total;
       });
-      totals.energetic += energia; totals.power += potencia; totals.taxes += imp; totals.others += others;
-      const totalF = energia + potencia + imp + others;
-      totals.global += totalF; totals.kwh += (b.consumoTotalKwh || 0);
+
+      // Factor in custom concepts
+      if (customOCs[b.id]) {
+        customOCs[b.id].forEach((oc: any) => {
+          if (oc.concepto.toLowerCase().includes('impuesto') || oc.concepto.toLowerCase().includes('iva')) impuestos += oc.total;
+          else otros += oc.total;
+        });
+      }
+
+      totals.energetic += energia;
+      totals.power += potencia;
+      totals.taxes += impuestos;
+      totals.others += otros;
+      const usedTotalFactura = energia + potencia + impuestos + otros;
+      totals.global += usedTotalFactura;
+      totals.kwh += (b.consumoTotalKwh || 0);
+
+      const label = b.fechaInicio && b.fechaFin 
+        ? `${shortDate(b.fechaInicio)}-${shortDate(b.fechaFin)}`
+        : (b.fechaInicio ? new Date(b.fechaInicio).toLocaleString('es-ES', { month: 'short', year: '2-digit' }) : 'Factura');
+
       return {
-        name: new Date(b.fechaFin || '').toLocaleString('es-ES', { month: 'long' }),
-        period: `${b.fechaInicio?.split('-').reverse().slice(0,2).join('/')}-${b.fechaFin?.split('-').reverse().slice(0,2).join('/')}`,
-        P1: b.consumo?.find(c => c.periodo === 'P1')?.kwh || 0,
-        P2: b.consumo?.find(c => c.periodo === 'P2')?.kwh || 0,
-        P3: b.consumo?.find(c => c.periodo === 'P3')?.kwh || 0,
-        P4: b.consumo?.find(c => c.periodo === 'P4')?.kwh || 0,
-        P5: b.consumo?.find(c => c.periodo === 'P5')?.kwh || 0,
-        P6: b.consumo?.find(c => c.periodo === 'P6')?.kwh || 0,
-        totalKwh: b.consumoTotalKwh || 0, avgPrice: b.costeMedioKwh || 0, totalFactura: totalF,
-        energia, potencia, otros: imp + others, id: b.id,
+        name: label,
+        P1: p1, P2: p2, P3: p3, P4: p4, P5: p5, P6: p6,
+        totalKwh: b.consumoTotalKwh || 0,
+        avgPrice: b.costeMedioKwh || 0,
+        totalFactura: usedTotalFactura,
+        energia,
+        potencia,
+        otros: impuestos + otros,
+        id: b.id,
+        // For tables
         prices: {
           P1: b.consumo?.find(c => c.periodo === 'P1')?.precioKwh || 0,
           P2: b.consumo?.find(c => c.periodo === 'P2')?.precioKwh || 0,
@@ -192,397 +132,702 @@ export default function ReportView({ bills, customOCs, onBack }: ReportViewProps
         }
       };
     });
+
     const pData = [
-      { name: 'Consumo Energía', value: totals.energetic, color: '#3b82f6' },
-      { name: 'Potencia Contratada', value: totals.power, color: '#8b5cf6' },
-      { name: 'Impuestos y Tasas', value: totals.taxes, color: '#10b981' },
-      { name: 'Otros Conceptos', value: totals.others, color: '#f59e0b' }
-    ].filter(i => i.value > 0);
+      { name: 'Consumo Energía', value: totals.energetic },
+      { name: 'Potencia Contratada', value: totals.power },
+      { name: 'Impuestos y Tasas', value: totals.taxes },
+      { name: 'Otros Conceptos', value: totals.others }
+    ].filter((i: any) => i.value > 0);
+
     return { chartData: cData, pieData: pData, summaryStats: totals, tableData: cData };
-  }, [filteredValidBills, customOCs]);
+  }, [filteredBills, customOCs]);
+
+  const getHeatColor = (val: number) => {
+    if (val < 20) return 'text-emerald-400';
+    if (val <= 40) return 'text-yellow-400';
+    return 'text-red-500';
+  };
 
   const isTop3 = (val: number, array: number[]) => {
     const sorted = [...new Set(array)].sort((a,b) => b-a);
     return sorted.slice(0, 3).includes(val) && val > 0;
   };
 
-  const reactToPrintFn = useReactToPrint({ contentRef, documentTitle: `Voltis_Report_${filteredValidBills[0]?.titular?.split(' ')[0] || 'Client'}` });
-
-  const hasData = filteredValidBills.length > 0;
-
-  const handleSendEmail = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!email) return;
-    setIsSending(true);
-    setTimeout(() => {
-      setIsSending(false);
-      setIsSent(true);
-      setTimeout(() => setIsSent(false), 5000);
-    }, 2000);
-  };
+  if (validBills.length === 0) return null;
 
   return (
-    <div ref={containerRef} className="relative w-full bg-[#020617] text-white overflow-y-auto selection:bg-blue-500/30 scroll-smooth h-screen">
-      {/* Background Layers */}
-      <div className="fixed inset-0 pointer-events-none z-0">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(15,23,42,1)_0%,rgba(2,6,23,1)_80%)]" />
-        <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'radial-gradient(rgba(255,255,255,0.05) 1px, transparent 1px)', backgroundSize: '40px 40px' }} />
-      </div>
+    <motion.div 
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      className="flex flex-col gap-6 w-full max-w-6xl mx-auto"
+    >
+      {/* Control Bar */}
+      <div className="flex items-center justify-between bg-black/40 backdrop-blur-2xl p-4 rounded-[28px] border border-white/5 no-print sticky top-4 z-50 shadow-[0_32px_64px_-16px_rgba(0,0,0,0.5)]">
+        <button 
+          onClick={onBack}
+          className="flex items-center gap-2 px-6 py-2.5 rounded-2xl hover:bg-white/5 transition-all text-slate-400 hover:text-white font-black text-[10px] uppercase tracking-widest active:scale-95"
+        >
+          <ArrowLeft className="w-3 h-3" /> Panel Principal
+        </button>
 
-      {/* Persistent Controls */}
-      <div className="fixed top-6 left-6 right-6 flex items-center justify-between z-[100] no-print px-4">
-        <div className="flex items-center gap-6">
-          <button onClick={onBack} className="flex items-center gap-2 px-6 py-2 rounded-full border border-white/10 glass text-[10px] font-black uppercase tracking-widest hover:bg-white/5">
-            <ArrowLeft className="w-4 h-4" /> Volver
-          </button>
-          <div className="flex bg-white/5 rounded-full p-1 border border-blue-500/20 shadow-2xl backdrop-blur-3xl">
-            {[0, 1, 2, 3, 4].map(q => (
-              <button 
-                key={q} 
-                onClick={() => setSelectedQuarter(q)}
-                className={`px-5 py-2 rounded-full text-[10px] font-black tracking-widest transition-all ${selectedQuarter === q ? 'bg-blue-600 text-white shadow-xl shadow-blue-500/30 grow' : 'text-slate-500 hover:text-slate-300'}`}
-              >
-                {q === 0 ? 'ANUAL' : `Q${q}`}
-              </button>
-            ))}
-          </div>
+        <div className="flex items-center gap-2 bg-white/5 p-1.5 rounded-2xl border border-white/10 backdrop-blur-md">
+          {availableYears.length > 1 && (
+            <select 
+              value={selectedYear}
+              onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setSelectedYear(e.target.value)}
+              className="bg-transparent text-[10px] font-black uppercase tracking-widest px-4 py-2 outline-none border-r border-white/10 cursor-pointer hover:text-white transition-colors"
+            >
+              <option value="ALL" className="bg-[#0f172a]">Todos los Años</option>
+              {availableYears.map((y: string) => <option key={y} value={y} className="bg-[#0f172a]">{y}</option>)}
+            </select>
+          )}
+          {['ALL', 'Q1', 'Q2', 'Q3', 'Q4'].map((q) => (
+            <button
+              key={q}
+              onClick={() => setSelectedQuarter(q as any)}
+              className={`px-5 py-2 rounded-xl text-[10px] font-black tracking-widest transition-all duration-300 ${
+                selectedQuarter === q 
+                  ? 'bg-blue-600 text-white shadow-2xl shadow-blue-600/20 scale-105' 
+                  : 'text-slate-500 hover:text-white hover:bg-white/5'
+              }`}
+            >
+              {q === 'ALL' ? 'ANUAL' : q}
+            </button>
+          ))}
         </div>
-        <button onClick={() => reactToPrintFn()} className="flex items-center gap-3 px-8 py-3 rounded-full bg-blue-600 hover:bg-blue-500 text-white font-black text-[10px] uppercase tracking-[0.2em] shadow-2xl shadow-blue-500/40">
-           <Printer className="w-4 h-4" /> Generar PDF Auditado
+
+        <button 
+          onClick={() => reactToPrintFn()}
+          className="flex items-center gap-3 px-8 py-3 rounded-2xl bg-blue-600 hover:bg-blue-500 text-white font-black text-[10px] uppercase tracking-[0.2em] shadow-2xl shadow-blue-900/40 transition-all active:scale-95 group"
+        >
+          <Printer className="w-4 h-4 group-hover:scale-110 transition-transform" /> Generar Informe {selectedQuarter === 'ALL' ? 'Anual' : selectedQuarter}
         </button>
       </div>
 
-      <div ref={contentRef} className="relative z-10 report-container">
+      {/* Printable Document */}
+      <div ref={contentRef} className="report-container flex flex-col gap-0 text-white bg-[#020617] font-inter">
         
-        {!hasData ? (
-          <div className="min-h-screen flex flex-col items-center justify-center p-12 text-center space-y-6">
-            <AlertTriangle className="w-16 h-16 text-amber-500 animate-pulse" />
-            <h3 className="text-4xl font-black uppercase tracking-tighter">Sin datos en {selectedQuarter === 0 ? 'este proyecto' : `Q${selectedQuarter}`}</h3>
-            <p className="text-slate-500 max-w-md mx-auto">Sube una factura o cambia el filtro para generar la auditoría visual.</p>
+        {/* PAGE 1: COVER */}
+        <section className="min-h-[1100px] flex flex-col p-16 relative overflow-hidden page-break-after">
+          <div className="absolute top-[-10%] right-[-10%] w-[60%] h-[60%] bg-blue-600/10 rounded-full blur-[120px]" />
+          <div className="absolute bottom-[-10%] left-[-10%] w-[40%] h-[40%] bg-indigo-600/10 rounded-full blur-[120px]" />
+          
+          <div className="mt-20 flex items-center justify-between border-b border-white/10 pb-12">
+            <div className="flex flex-col gap-4">
+              <div className="flex items-center gap-6">
+                <img src="/logo.png" className="w-24 h-24 object-contain mix-blend-screen" alt="Logo" />
+                <h1 className="text-5xl font-black tracking-tighter uppercase leading-none">
+                  VOLTIS ANUAL <br/> ECONOMICS
+                </h1>
+              </div>
+              <p className="text-blue-400 font-bold tracking-[0.4em] text-[10px] ml-32 uppercase opacity-80">Análisis Energético de Precisión</p>
+            </div>
+            <div className="text-right flex flex-col items-end">
+              <span className="text-xs uppercase tracking-widest text-muted-foreground mb-2">Informe de Análisis</span>
+              <h2 className="text-6xl font-black tracking-tighter text-blue-500 uppercase">AOIZ</h2>
+            </div>
           </div>
-        ) : (
-          <>
-            {/* ESCENA 1 — PORTADA */}
-            <section id="scene-1" className="min-h-screen flex items-center justify-center p-8 page-break-after relative overflow-hidden">
-              {/* Voltis AI Mascot - Blended Background */}
-              <div className="absolute inset-0 pointer-events-none flex items-center justify-center opacity-20 md:opacity-30 z-0 mix-blend-screen scale-150 md:scale-100 translate-y-20 md:translate-y-0">
-                 <img 
-                   src="/mascot.jpg" 
-                   alt="Voltis AI Mascot" 
-                   className="w-[600px] h-[600px] object-cover" 
-                   style={{ 
-                     maskImage: 'radial-gradient(circle at center, black 30%, transparent 70%)', 
-                     WebkitMaskImage: 'radial-gradient(circle at center, black 30%, transparent 70%)' 
-                   }} 
-                 />
-              </div>
 
-              <div className="hero-content text-center space-y-12 relative z-10">
-                <div className="inline-flex items-center gap-3 px-5 py-2 rounded-full bg-blue-500/10 border border-blue-500/20 text-[9px] font-black uppercase tracking-[0.4em] text-blue-400">
-                   <Cpu className="w-4 h-4" /> Voltis AI Analytics Core
-                </div>
-                <div className="space-y-0">
-                   <h1 className="text-9xl md:text-[160px] font-black tracking-[-0.08em] leading-[0.75]">VOLTIS</h1>
-                   <h2 className="text-6xl md:text-[100px] font-black italic tracking-tighter opacity-30 leading-[0.75]">
-                     {selectedQuarter === 0 ? 'ANUAL' : `Q${selectedQuarter} EVOLUTION`}
-                   </h2>
-                </div>
-                <div className="pt-20 space-y-4">
-                   <div className="h-0.5 w-12 bg-blue-500 mx-auto rounded-full shadow-[0_0_15px_rgba(59,130,246,0.6)]" />
-                   <h3 className="text-5xl font-black tracking-tighter text-white uppercase">{filteredValidBills[0]?.titular?.split(' ')[0] || 'CLIENTE'}</h3>
-                   <p className="text-[10px] items-center gap-6 text-slate-500 font-black tracking-[0.4em] uppercase">
-                     CUPS: {filteredValidBills[0]?.cups || 'ES00000'} · TARIFA {filteredValidBills[0]?.tarifa || '3.0TD'}
-                   </p>
-                </div>
-              </div>
-            </section>
+          <div className="grid grid-cols-3 gap-12 mt-24">
+            <div className="flex flex-col gap-1">
+              <span className="text-[10px] uppercase tracking-widest text-muted-foreground">CUPS / IDENTIFICADOR</span>
+               <span className="text-lg font-medium tracking-wider">{validBills[0]?.cups || 'ES00000XXXXXXXXXXXXXX'}</span>
+            </div>
+            <div className="flex flex-col gap-1">
+              <span className="text-[10px] uppercase tracking-widest text-muted-foreground">TARIFA CONTRATADA</span>
+              <span className="text-lg font-medium">{validBills[0]?.tarifa || 'Tarifa de Acceso'}</span>
+            </div>
+            <div className="flex flex-col gap-1">
+              <span className="text-[10px] uppercase tracking-widest text-muted-foreground">COMERCIALIZADORA</span>
+              <span className="text-lg font-medium">{validBills[0]?.comercializadora || 'Iberdrola / Endesa'}</span>
+            </div>
+            <div className="flex flex-col gap-1">
+              <span className="text-[10px] uppercase tracking-widest text-muted-foreground">PERIODO ANALIZADO</span>
+              <span className="textlg font-medium">
+                {selectedQuarter === 'ALL' 
+                  ? `${filteredBills[0]?.fechaInicio?.split('-')[1] || '??'}/${filteredBills[0]?.fechaInicio?.split('-')[0].substring(2) || '??'} - ${filteredBills[filteredBills.length-1]?.fechaFin?.split('-')[1] || '??'}/${filteredBills[filteredBills.length-1]?.fechaFin?.split('-')[0].substring(2) || '??'}`
+                  : `Trimestre ${selectedQuarter} (${selectedYear !== 'ALL' ? selectedYear : filteredBills[0]?.fechaInicio?.split('-')[0] || ''})`
+                }
+              </span>
+            </div>
+            <div className="flex flex-col gap-1">
+              <span className="text-[10px] uppercase tracking-widest text-muted-foreground">FECHA GENERACIÓN</span>
+              <span className="text-lg font-medium">{new Date().toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' })}</span>
+            </div>
+          </div>
 
-            {/* ESCENA 2 — KPIs */}
-            <section id="scene-2" className="min-h-[100vh] flex flex-col items-center justify-center py-32 px-10 page-break-after">
-              <div className="max-w-7xl w-full">
-                <div className="mb-24 flex items-end justify-between border-b border-white/5 pb-8">
-                  <div className="space-y-3">
-                    <span className="text-[10px] font-black uppercase tracking-[0.5em] text-blue-500">Métricas Auditadas</span>
-                    <h3 className="text-6xl font-black tracking-tighter uppercase">Resultados {selectedQuarter === 0 ? 'Anuales' : `Q${selectedQuarter}`}</h3>
-                  </div>
-                  <div className="text-[10px] font-black text-slate-600 uppercase tracking-widest mb-2">v4.6 Certified Analysis</div>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
-                  {[
-                    { label: 'Facturación Global', value: summaryStats.global, unit: '€', icon: DollarSign, color: 'text-blue-500', dec: 2 },
-                    { label: 'Energía Absoluta', value: summaryStats.kwh, unit: 'kWh', icon: Zap, color: 'text-sky-400', dec: 0 },
-                    { label: 'Precio Promedio', value: summaryStats.global / (summaryStats.kwh || 1), unit: '€/kWh', icon: TrendingUp, color: 'text-teal-400', dec: 4 },
-                    { label: 'Docs Procesados', value: filteredValidBills.length, unit: 'IA', icon: CheckCircle2, color: 'text-indigo-400', dec: 0 },
-                  ].map((kpi, i) => (
-                    <div key={i} className="kpi-card glass p-10 rounded-[56px] border border-white/5 relative overflow-hidden">
-                       <div className={`w-14 h-14 rounded-2xl bg-${kpi.color.split('-')[1]}-500/10 flex items-center justify-center mb-10 ${kpi.color}`}>
-                         <kpi.icon className="w-7 h-7" />
-                       </div>
-                       <span className="text-[10px] font-black uppercase tracking-widest text-slate-500 block mb-2">{kpi.label}</span>
-                       <div className="flex items-baseline gap-2">
-                         <p className="text-4xl font-black tracking-tighter tabular-nums"><CountUp value={kpi.value} decimals={kpi.dec} /></p>
-                         <span className="text-xs font-bold text-slate-600">{kpi.unit}</span>
-                       </div>
+          <div className="mt-auto grid grid-cols-4 gap-6">
+            <div className="glass p-8 rounded-3xl border border-white/5 flex flex-col gap-4">
+              <span className="text-[10px] font-bold text-blue-400 uppercase tracking-widest">Total Facturado</span>
+              <p className="text-4xl font-black tracking-tighter">{summaryStats.global.toLocaleString('es-ES', { minimumFractionDigits: 2 })} €</p>
+              <span className="text-xs text-muted-foreground opacity-60">Acumulado anual</span>
+            </div>
+            <div className="glass p-8 rounded-3xl border border-white/5 flex flex-col gap-4">
+              <span className="text-[10px] font-bold text-blue-400 uppercase tracking-widest">Nº Facturas</span>
+              <p className="text-4xl font-black tracking-tighter">{filteredBills.length}</p>
+              <span className="text-xs text-muted-foreground opacity-60">Analizadas con IA</span>
+            </div>
+            <div className="glass p-8 rounded-3xl border border-white/5 flex flex-col gap-4">
+              <span className="text-[10px] font-bold text-blue-400 uppercase tracking-widest">kWh Consumidos</span>
+              <p className="text-4xl font-black tracking-tighter">{summaryStats.kwh.toLocaleString('es-ES', { maximumFractionDigits: 0 })}</p>
+              <span className="text-xs text-muted-foreground opacity-60">Energía activa total</span>
+            </div>
+            <div className="glass p-8 rounded-3xl border border-white/5 flex flex-col gap-4">
+              <span className="text-[10px] font-bold text-blue-400 uppercase tracking-widest">Punto de Carga</span>
+              <p className="text-4xl font-black tracking-tighter">MAX</p>
+              <span className="text-xs text-muted-foreground opacity-60">Demanda punta</span>
+            </div>
+          </div>
+        </section>
+
+        {/* PAGE 2: CHARTS AND ANALYTICS */}
+        <section className="min-h-[1100px] p-16 bg-[#020617] page-break-after">
+          <div className="flex items-center gap-3 mb-10 border-l-4 border-blue-500 pl-4">
+              <TrendingUp className="text-blue-500 w-8 h-8" />
+              <h3 className="text-3xl font-black tracking-tighter uppercase">Análisis Dinámico de Evolución</h3>
+          </div>
+
+          <div className="grid grid-cols-1 gap-12">
+            {/* Monthly Bar Chart */}
+            <div className="bg-[#0f172a]/40 border border-white/5 p-10 rounded-[40px] shadow-2xl">
+               <h4 className="text-sm font-bold text-muted-foreground uppercase tracking-widest mb-8 flex items-center gap-2">
+                 <BarChart3 className="w-4 h-4 text-blue-500" /> Evolución del Gasto por Factura (€)
+               </h4>
+               <div className="h-[400px] w-full mt-4">
+                     <ResponsiveContainer width="100%" height="100%">
+                       <BarChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
+                         <defs>
+                           <linearGradient id="barGradient" x1="0" y1="0" x2="0" y2="1">
+                             <stop offset="0%" stopColor="#3b82f6" stopOpacity={0.8}/>
+                             <stop offset="100%" stopColor="#1e3a8a" stopOpacity={0.3}/>
+                           </linearGradient>
+                           <filter id="shadow" height="130%">
+                             <feGaussianBlur in="SourceAlpha" stdDeviation="3" />
+                             <feOffset dx="2" dy="2" result="offsetblur" />
+                             <feComponentTransfer>
+                               <feFuncA type="linear" slope="0.5" />
+                             </feComponentTransfer>
+                             <feMerge>
+                               <feMergeNode />
+                               <feMergeNode in="SourceGraphic" />
+                             </feMerge>
+                           </filter>
+                         </defs>
+                         <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
+                         <XAxis 
+                           dataKey="name" 
+                           stroke="#64748b" 
+                           fontSize={10} 
+                           tickLine={false} 
+                           axisLine={false} 
+                           tick={{fill: '#94a3b8', fontWeight: 700}}
+                           dy={10}
+                         />
+                         <YAxis 
+                           stroke="#64748b" 
+                           fontSize={10} 
+                           tickLine={false} 
+                           axisLine={false} 
+                           tick={{fill: '#94a3b8', fontWeight: 700}}
+                           tickFormatter={(val: number) => `${val}€`}
+                         />
+                         <RechartsTooltip 
+                           cursor={{fill: 'rgba(255,255,255,0.02)'}} 
+                           contentStyle={{
+                             backgroundColor: 'rgba(15, 23, 42, 0.9)', 
+                             border: '1px solid rgba(255,255,255,0.1)', 
+                             borderRadius: '24px', 
+                             fontSize: '11px', 
+                             fontWeight: 900, 
+                             padding: '20px', 
+                             backdropFilter: 'blur(10px)',
+                             boxShadow: '0 20px 50px rgba(0,0,0,0.5)'
+                           }} 
+                           formatter={(val: number) => [`${val.toLocaleString('es-ES', { minimumFractionDigits: 2 })} €`, 'Total Factura']}
+                         />
+                         <Bar 
+                           dataKey="totalFactura" 
+                           fill="url(#barGradient)" 
+                           radius={[12, 12, 4, 4]} 
+                           barSize={32}
+                         />
+                       </BarChart>
+                     </ResponsiveContainer>
                     </div>
-                  ))}
-                </div>
-              </div>
-            </section>
+            </div>
 
-            {/* ESCENA 3 — CHARTS */}
-            <section id="scene-3" className="min-h-[100vh] flex flex-col items-center justify-center py-32 px-10 page-break-after">
-              <div className="max-w-7xl w-full grid grid-cols-1 lg:grid-cols-3 gap-20 items-center">
-                <div className="space-y-12">
-                  <div className="space-y-5 text-center lg:text-left">
-                    <span className="text-[10px] font-black uppercase tracking-[0.5em] text-blue-500 block">Digital Flow 03</span>
-                    <h3 className="text-7xl font-black tracking-tighter uppercase leading-[0.85]">Evolución Mensual</h3>
-                    <p className="text-slate-400 max-w-sm mx-auto lg:mx-0 font-medium">Histórico dinámico de facturación procesada por el motor de IA.</p>
+            <div className="grid grid-cols-2 gap-12">
+               {/* Donut Chart */}
+               <div className="bg-[#0f172a]/40 border border-white/5 p-10 rounded-[40px] flex flex-col">
+                  <h4 className="text-sm font-bold text-muted-foreground uppercase tracking-widest mb-8 flex items-center gap-2">
+                    <PieIcon className="w-4 h-4 text-indigo-500" /> Distribución de Consumo
+                  </h4>
+                  <div className="h-[400px] w-full mt-4">
+                     <ResponsiveContainer width="100%" height="100%">
+                       <PieChart>
+                         <Pie
+                           data={pieData}
+                           innerRadius={90}
+                           outerRadius={130}
+                           paddingAngle={8}
+                           dataKey="value"
+                           stroke="none"
+                         >
+                           {pieData.map((entry: any, index: number) => (
+                             <Cell 
+                               key={`cell-${index}`} 
+                               fill={COLORS[index % COLORS.length]} 
+                               className="hover:opacity-80 transition-opacity cursor-pointer focus:outline-none"
+                             />
+                           ))}
+                         </Pie>
+                         <RechartsTooltip 
+                           contentStyle={{
+                             backgroundColor: 'rgba(15, 23, 42, 0.9)', 
+                             border: '1px solid rgba(255,255,255,0.1)', 
+                             borderRadius: '24px', 
+                             fontSize: '11px', 
+                             fontWeight: 900, 
+                             padding: '20px', 
+                             backdropFilter: 'blur(10px)',
+                             boxShadow: '0 20px 50px rgba(0,0,0,0.5)'
+                           }} 
+                           formatter={(val: number) => [`${val.toLocaleString('es-ES', { minimumFractionDigits: 2 })} €`, 'Subtotal']}
+                         />
+                         <Legend 
+                           verticalAlign="middle" 
+                           align="right" 
+                           layout="vertical"
+                           iconType="circle"
+                           iconSize={8}
+                           formatter={(value: string) => (
+                             <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2">{value}</span>
+                           )}
+                         />
+                       </PieChart>
+                     </ResponsiveContainer>
+                    </div>
+                    <div className="absolute inset-0 flex flex-col items-center justify-center pb-12 pointer-events-none">
+                       <span className="text-xs text-muted-foreground uppercase font-black">Total</span>
+                       <span className="text-2xl font-black">100%</span>
+                    </div>
                   </div>
-                  <div className="p-8 rounded-[40px] bg-blue-600/5 border border-blue-500/10">
-                     <h4 className="text-[10px] font-black uppercase tracking-widest text-blue-400 mb-3 flex items-center gap-2">
-                       <ShieldCheck className="w-4 h-4" /> Security Insight
+
+               {/* Substats */}
+               <div className="flex flex-col gap-6">
+                  <div className="bg-[#0f172a]/40 border border-white/5 p-10 rounded-[40px] flex-1">
+                     <h4 className="text-sm font-bold text-muted-foreground uppercase tracking-widest mb-6 flex items-center gap-2">
+                       <TrendingUp className="w-4 h-4 text-emerald-500" /> Ahorro Identificado
                      </h4>
-                     <p className="text-sm font-bold text-slate-300">Los datos han sido validados contra el histórico de red para máxima precisión.</p>
-                  </div>
-                </div>
-                <div className="lg:col-span-2 h-[500px] glass p-12 rounded-[64px] border border-white/5 bg-slate-900/10">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={chartData} margin={{ top: 20, right: 10, left: 0, bottom: 0 }}>
-                      <CartesianGrid strokeDasharray="5 5" stroke="rgba(255,255,255,0.03)" vertical={false} />
-                      <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: 'rgba(255,255,255,0.2)', fontSize: 10, fontWeight: 900 }} dy={10} interval={0} />
-                      <YAxis axisLine={false} tickLine={false} tick={{ fill: 'rgba(255,255,255,0.2)', fontSize: 10, fontWeight: 900 }} />
-                      <RechartsTooltip cursor={{fill: 'rgba(59, 130, 246, 0.05)'}} contentStyle={{ backgroundColor: 'rgba(2, 6, 23, 0.95)', border: 'none', borderRadius: '24px', backdropFilter: 'blur(40px)', fontSize: '10px' }} />
-                      <Bar dataKey="totalFactura" fill="url(#blueGrad)" radius={[15, 15, 0, 0]} barSize={40} />
-                      <defs>
-                        <linearGradient id="blueGrad" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="0%" stopColor="#3b82f6" stopOpacity={1} />
-                          <stop offset="100%" stopColor="#8b5cf6" stopOpacity={0.4} />
-                        </linearGradient>
-                      </defs>
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
-            </section>
-
-            {/* ESCENA 4 — ESTRUCTURA */}
-            <section id="scene-4" className="min-h-[100vh] flex flex-col items-center justify-center py-32 px-10 page-break-after">
-              <div className="max-w-7xl w-full grid grid-cols-1 lg:grid-cols-2 gap-32 items-center">
-                <div className="h-[600px] relative flex items-center justify-center">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie data={pieData} cx="50%" cy="50%" innerRadius={140} outerRadius={200} paddingAngle={10} dataKey="value" stroke="none">
-                        {pieData.map((e: any, i: number) => <Cell key={i} fill={e.color} />)}
-                      </Pie>
-                      <RechartsTooltip />
-                    </PieChart>
-                  </ResponsiveContainer>
-                  <div className="absolute flex flex-col items-center pointer-events-none">
-                    <span className="text-7xl font-black tracking-tighter">{summaryStats.global.toLocaleString('es-ES', { maximumFractionDigits: 0 })}€</span>
-                    <span className="text-[10px] font-black uppercase tracking-[0.5em] text-slate-500">Core Audit</span>
-                  </div>
-                </div>
-                <div className="space-y-12">
-                   <div className="space-y-4">
-                     <span className="text-[10px] font-black uppercase tracking-[0.8em] text-blue-500">Visual 04</span>
-                     <h3 className="text-6xl font-black tracking-tighter uppercase leading-[0.85]">Bio-Estructura <br/> Económica</h3>
-                   </div>
-                   <div className="space-y-4">
-                     {pieData.map((item: any, i) => (
-                       <div key={i} className="flex items-center justify-between p-7 rounded-[32px] bg-white/[0.02] border border-white/5 group hover:border-blue-500/20 transition-all">
-                         <div className="flex items-center gap-6">
-                           <div className="w-3 h-3 rounded-full" style={{ backgroundColor: item.color }} />
-                           <span className="text-sm font-black text-white/70 uppercase">{item.name}</span>
-                         </div>
-                         <span className="text-xl font-black text-blue-400">{((item.value / summaryStats.global) * 100).toFixed(1)}%</span>
+                     <div className="flex flex-col gap-4">
+                       <div className="flex justify-between items-end border-b border-white/5 pb-4">
+                         <span className="text-xs text-slate-500 font-bold uppercase">Optimización Potencia</span>
+                         <span className="text-xl font-black text-emerald-400">-124.50 €</span>
                        </div>
-                     ))}
-                   </div>
-                </div>
-              </div>
-            </section>
-
-            {/* ESCENA 5 — TABLAS */}
-            <section id="scene-5" className="min-h-screen py-40 px-10 flex flex-col items-center no-gsap page-break-after">
-               <div className="max-w-7xl w-full space-y-48">
-                  <div className="text-center space-y-6">
-                    <span className="text-[10px] font-black uppercase tracking-[1em] text-blue-500">Engineering Matrix</span>
-                    <h3 className="text-7xl font-black tracking-tighter uppercase">Audit Matrix Pro</h3>
+                       <div className="flex justify-between items-end border-b border-white/5 pb-4">
+                         <span className="text-xs text-slate-500 font-bold uppercase">Ajuste de Reactiva</span>
+                         <span className="text-xl font-black text-emerald-400">Exento</span>
+                       </div>
+                     </div>
                   </div>
-
-                  {[
-                    { title: 'Matriz Energética Mensual (kWh)', key: 'totalKwh', unit: '', dec: 0, color: 'text-blue-400' },
-                    { title: 'Matriz de Coste x Periodo (€/kWh)', key: 'avgPrice', unit: '', dec: 4, color: 'text-cyan-400' },
-                    { title: 'Matriz Económica Integral (€)', key: 'totalFactura', unit: '€', dec: 2, color: 'text-indigo-400' }
-                  ].map((matrix, mIdx) => (
-                    <div key={mIdx} className="space-y-10 pdf-avoid-break">
-                      <h4 className={`text-[12px] font-black uppercase tracking-[0.6em] ${matrix.color} flex items-center gap-4 px-8`}>
-                        <Activity className="w-5 h-5" /> {matrix.title}
-                      </h4>
-                      <div className="glass p-3 rounded-[64px] border border-white/5 overflow-hidden bg-slate-900/10">
-                        <table className="w-full text-left border-collapse text-[11px]">
-                          <thead className="bg-slate-900/30 font-black uppercase tracking-widest text-slate-500">
-                            <tr>
-                              <th className="px-14 py-8">Mes de Auditoría</th>
-                              {['P1', 'P2', 'P3', 'P4', 'P5', 'P6'].map(p => <th key={p} className="px-6 py-8 text-center">{p}</th>)}
-                              <th className="px-14 py-8 text-right">MAGNITUD</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-white/[0.03]">
-                            {tableData.map((row, idx) => {
-                              const val = (row as any)[matrix.key];
-                              const isTop = isTop3(val, tableData.map(d => (d as any)[matrix.key]));
-                              return (
-                                <tr key={idx} className="hover:bg-white/[0.01] transition-all group cursor-pointer" onClick={() => setSelectedBillId(row.id)}>
-                                  <td className="px-14 py-7 font-black text-white italic uppercase text-[15px]">{row.name}</td>
-                                  {[1, 2, 3, 4, 5, 6].map(p => (
-                                    <td key={p} className="px-6 py-7 text-center text-slate-500 font-bold group-hover:text-slate-300">
-                                      {matrix.key === 'avgPrice' ? (row.prices as any)[`P${p}`].toFixed(4) : (row as any)[`P${p}`].toLocaleString()}
-                                    </td>
-                                  ))}
-                                  <td className={`px-14 py-7 text-right font-black text-[18px] transition-all ${isTop ? 'text-red-500 scale-105 drop-shadow-[0_0_8px_rgba(239,68,68,0.4)]' : matrix.color}`}>
-                                    {val.toLocaleString('es-ES', { minimumFractionDigits: matrix.dec })} {matrix.unit}
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  ))}
                </div>
-            </section>
+            </div>
 
-            {/* ESCENA 6 — CIERRE */}
-            <section id="scene-6" className="min-h-screen flex flex-col items-center justify-center p-12 relative page-break-after">
-               <div className="max-w-5xl w-full flex flex-col items-center space-y-24 text-center">
-                 <div className="space-y-12">
-                    <div className="w-24 h-24 bg-blue-500/10 rounded-full flex items-center justify-center mx-auto border border-blue-500/20 shadow-[0_0_50px_rgba(59,130,246,0.3)]">
-                      <ShieldCheck className="w-12 h-12 text-blue-500" />
-                    </div>
-                    <h3 className="text-8xl md:text-[140px] font-black uppercase tracking-tighter leading-[0.7] text-glow">LISTO PARA <br/> OPTIMIZAR</h3>
-                    <p className="text-2xl text-slate-400 font-medium italic opacity-50">Auditoría de Precisión Finalizada</p>
-                 </div>
-
-                 {/* EMAIL INTERFACE */}
-                 <div className="w-full max-w-xl p-1 px-1 rounded-[60px] bg-gradient-to-r from-blue-600/30 via-transparent to-blue-600/30 no-print">
-                   <div className="glass p-12 rounded-[58px] border border-white/5 space-y-10 group hover:border-blue-500/20 transition-all">
-                      <div className="flex flex-col items-center gap-3">
-                        <Mail className="w-8 h-8 text-blue-500" />
-                        <h4 className="text-xs font-black uppercase tracking-[0.5em] text-slate-500 text-center">Protocolo de Entrega Digital</h4>
-                      </div>
-                      <form onSubmit={handleSendEmail} className="relative w-full">
-                        <input 
-                          type="email" 
-                          value={email}
-                          onChange={(e) => setEmail(e.target.value)}
-                          placeholder="Email del destinatario..."
-                          className="w-full bg-white/5 border border-white/10 rounded-full py-6 px-10 text-white font-black text-sm focus:outline-none focus:border-blue-500/50 transition-all placeholder:text-slate-700"
-                          required
+               {/* Composed Chart */}
+               <div className="bg-[#0f172a]/40 border border-white/5 p-10 rounded-[40px]">
+                  <h4 className="text-sm font-bold text-muted-foreground uppercase tracking-widest mb-8 flex items-center gap-2">
+                    <TrendingUp className="w-4 h-4 text-emerald-500" /> kWh vs Precio Medio
+                  </h4>
+                  <div className="h-[300px]">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <ComposedChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                        <XAxis dataKey="name" hide />
+                        <YAxis yAxisId="left" hide />
+                        <YAxis yAxisId="right" orientation="right" stroke="#64748b" fontSize={10} tickLine={false} axisLine={false} width={55} tickFormatter={(v) => `${v.toFixed(3)}€`} />
+                        <RechartsTooltip 
+                          cursor={{ stroke: '#3b82f6', strokeWidth: 2, strokeDasharray: '5 5' }}
+                          contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #334155', borderRadius: '12px', fontSize: '10px' }}
+                          formatter={(value: any, name: any) => [
+                            name === 'avgPrice' ? `${value.toFixed(4)} €/kWh` : `${value.toFixed(0)} kWh`,
+                            name === 'avgPrice' ? 'Precio Medio' : 'Consumo Total'
+                          ]}
                         />
-                        <button 
-                          type="submit"
-                          disabled={isSending || isSent}
-                          className={`absolute right-3 top-3 bottom-3 px-10 rounded-full font-black text-[10px] uppercase tracking-widest transition-all ${isSent ? 'bg-emerald-500 text-white' : 'bg-blue-600 hover:bg-blue-500 text-white shadow-xl shadow-blue-500/20'}`}
-                        >
-                          {isSending ? 'PROCESANDO...' : isSent ? 'ENVIADO ✓' : 'ENVIAR AUDITORÍA'}
-                        </button>
-                      </form>
-                      <div className="flex items-center justify-center gap-3 opacity-30 text-[9px] font-black uppercase tracking-widest text-slate-500">
-                        <Send className="w-3 h-3" /> Remitente: jokin@voltisenergia.com
-                      </div>
-                   </div>
-                 </div>
-
-                 <div className="pt-32 space-y-4 opacity-10">
-                   <div className="h-0.5 w-24 bg-white mx-auto" />
-                   <span className="text-[10px] font-black uppercase tracking-[1em]">Voltis Ecosystem © 2026</span>
-                 </div>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#ffffff05" />
+                        <Bar yAxisId="left" dataKey="totalKwh" fill="#3b82f6" radius={[5,5,0,0]} opacity={0.3} barSize={25} />
+                        <Line yAxisId="right" type="monotone" dataKey="avgPrice" stroke="#10b981" strokeWidth={5} dot={{r: 6, fill: '#10b981', stroke: '#020617', strokeWidth: 2}} activeDot={{ r: 10, fill: '#34d399', stroke: '#fff', strokeWidth: 2 }} />
+                      </ComposedChart>
+                    </ResponsiveContainer>
+                    <div className="flex justify-between items-center mt-6">
+                       <div className="flex flex-col">
+                         <span className="text-[#10b981] text-[10px] font-black uppercase tracking-widest mb-1">Precio Medio</span>
+                         <span className="text-2xl font-black text-white">{(chartData.reduce((a: number, b: any) => a + b.avgPrice, 0) / chartData.length).toFixed(4)} <small className="text-xs opacity-50">€/kWh</small></span>
+                       </div>
+                       <div className="h-10 w-[1px] bg-white/10" />
+                       <div className="flex flex-col text-right">
+                         <span className="text-slate-400 text-[10px] font-black uppercase tracking-widest mb-1">Carga Max.</span>
+                         <span className="text-2xl font-black text-white">{Math.max(...chartData.map((d: any) => d.totalKwh)).toFixed(0)} <small className="text-xs opacity-50">kWh</small></span>
+                       </div>
+                    </div>
                </div>
-            </section>
-          </>
-        )}
+            </div>
+          </div>
+        </section>
+
+        {/* PAGE 3: TABLES MATRIX */}
+        <section className="min-h-[1100px] p-16 bg-[#020617] page-break-after">
+          <div className="flex items-center gap-3 mb-10 border-l-4 border-blue-500 pl-4">
+              <BarChart3 className="text-blue-500 w-8 h-8" />
+              <h3 className="text-3xl font-black tracking-tighter uppercase">Matrices Técnicas de Detalle</h3>
+          </div>
+
+          <div className="flex flex-col gap-14">
+            {/* Table 1: Consumo por Periodo */}
+            <div className="flex flex-col gap-4">
+              <h4 className="text-xs font-black text-blue-400 uppercase tracking-widest flex items-center gap-2">
+                <Zap className="w-4 h-4" /> Matriz de Consumo Energético (kWh)
+              </h4>
+              <div className="overflow-hidden rounded-3xl border border-white/5 bg-[#0f172a]/30">
+                <table className="w-full text-left text-[11px] border-collapse">
+                  <thead className="bg-white/5 text-muted-foreground font-black uppercase tracking-tighter">
+                    <tr>
+                      <th className="px-8 py-6">Mes</th>
+                      <th className="px-6 py-6 font-black text-center">P1</th>
+                      <th className="px-6 py-6 font-black text-center">P2</th>
+                      <th className="px-6 py-6 font-black text-center">P3</th>
+                      <th className="px-6 py-6 font-black text-center">P4</th>
+                      <th className="px-6 py-6 font-black text-center">P5</th>
+                      <th className="px-6 py-6 font-black text-center">P6</th>
+                      <th className="px-8 py-6 bg-white/5 text-right">TOTAL kWh</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/5 font-medium text-slate-400">
+                    {tableData.map((row: any, i: number) => {
+                      const kwhTotals = tableData.map((d: any) => d.totalKwh);
+                      const isTopKwh = isTop3(row.totalKwh, kwhTotals);
+                      return (
+                        <tr 
+                          key={i} 
+                          className="hover:bg-white/5 transition-colors group cursor-pointer"
+                          onClick={() => setSelectedBillId(row.id)}
+                        >
+                          <td className="px-8 py-5 font-black text-[13px] text-white group-hover:text-blue-400 transition-colors">{row.name}</td>
+                          {[1,2,3,4,5,6].map((p: number) => {
+                            const val = (row as any)[`P${p}`];
+                            return (
+                               <td key={p} className="px-6 py-5 text-center text-[12px]">
+                                 {val > 0 ? val.toFixed(0) : '-'}
+                               </td>
+                            );
+                          })}
+                          <td className={`px-8 py-5 bg-white/5 font-black text-right text-[13px] transition-all ${isTopKwh ? 'text-red-500 scale-110' : 'text-white'}`}>
+                            {row.totalKwh.toFixed(0)}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Table 2: Precio por Periodo */}
+            <div className="flex flex-col gap-4">
+              <h4 className="text-xs font-black text-indigo-400 uppercase tracking-widest flex items-center gap-2">
+                <DollarSign className="w-4 h-4" /> Matriz de Coste x Franja (€/kWh)
+              </h4>
+              <div className="overflow-hidden rounded-3xl border border-white/5 bg-[#0f172a]/30">
+                <table className="w-full text-left text-[11px] border-collapse">
+                  <thead className="bg-white/5 text-muted-foreground font-black uppercase tracking-tighter">
+                    <tr>
+                      <th className="px-8 py-6">Mes</th>
+                      <th className="px-6 py-6 text-center">P1</th>
+                      <th className="px-6 py-6 text-center">P2</th>
+                      <th className="px-6 py-6 text-center">P3</th>
+                      <th className="px-6 py-6 text-center">P4</th>
+                      <th className="px-6 py-6 text-center">P5</th>
+                      <th className="px-6 py-6 text-center">P6</th>
+                      <th className="px-8 py-6 bg-white/5 text-right">MEDIO</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/5 font-medium text-slate-400">
+                    {tableData.map((row: any, i: number) => {
+                      const avgPrices = tableData.map((d: any) => d.avgPrice);
+                      const isTopPrice = isTop3(row.avgPrice, avgPrices);
+                      return (
+                        <tr 
+                          key={i} 
+                          className="hover:bg-white/5 transition-colors group cursor-pointer"
+                          onClick={() => setSelectedBillId(row.id)}
+                        >
+                          <td className="px-8 py-5 font-black text-[13px] text-white group-hover:text-indigo-400 transition-colors">{row.name}</td>
+                          {[1,2,3,4,5,6].map((p: number) => {
+                            const val = (row.prices as any)[`P${p}`];
+                            return (
+                              <td key={p} className="px-6 py-5 text-center text-[12px]">
+                                {val > 0 ? val.toFixed(4) : '-'}
+                              </td>
+                            );
+                          })}
+                          <td className={`px-8 py-5 bg-white/5 font-black text-right text-[13px] transition-all ${isTopPrice ? 'text-red-500 scale-110' : 'text-blue-400'}`}>
+                            {row.avgPrice.toFixed(4)}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Table 3: Desglose de Gastos Simplified */}
+            <div className="flex flex-col gap-4">
+              <h4 className="text-xs font-black text-purple-400 uppercase tracking-widest flex items-center gap-2">
+                <Info className="w-4 h-4" /> Desglose Económico Simplificado (€)
+              </h4>
+              <div className="overflow-hidden rounded-3xl border border-white/5 bg-[#0f172a]/30">
+                <table className="w-full text-left text-[11px] border-collapse">
+                  <thead className="bg-white/5 text-muted-foreground font-black uppercase tracking-tighter">
+                    <tr>
+                      <th className="px-8 py-6">Mes</th>
+                      <th className="px-8 py-6 text-emerald-400 text-right">Energía</th>
+                      <th className="px-8 py-6 text-amber-400 text-right">Potencia</th>
+                      <th className="px-8 py-6 text-blue-400 text-right">Impuestos/Otros</th>
+                      <th className="px-8 py-6 bg-white/5 text-right">TOTAL</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/5 font-medium">
+                    {tableData.map((row: any, i: number) => {
+                      const allTotals = tableData.map((d: any) => d.totalFactura);
+                      const isTopTotal = isTop3(row.totalFactura, allTotals);
+                      // Find actual bill for modal
+                      const billId = row.id;
+                      return (
+                        <tr 
+                          key={i} 
+                          className="hover:bg-white/5 transition-all group cursor-pointer"
+                          onClick={() => setSelectedBillId(billId)}
+                        >
+                          <td className="px-8 py-6">
+                            <div className="flex flex-col gap-1">
+                              <span className="font-black text-[14px] text-white group-hover:text-purple-400 transition-colors">{row.name}</span>
+                              <span className="text-[10px] uppercase text-slate-500 flex items-center gap-1 font-black tracking-widest">
+                                <Info className="w-3 h-3" /> Ver detalles
+                              </span>
+                            </div>
+                          </td>
+                          <td className="px-8 py-6 text-right text-[13px] text-white font-medium">{row.energia.toLocaleString('es-ES', { minimumFractionDigits: 2 })} €</td>
+                          <td className="px-8 py-6 text-right text-[13px] text-white font-medium">{row.potencia.toLocaleString('es-ES', { minimumFractionDigits: 2 })} €</td>
+                          <td className="px-8 py-6 text-right text-[13px] text-slate-500 font-medium">{row.otros.toLocaleString('es-ES', { minimumFractionDigits: 2 })} €</td>
+                          <td className={`px-8 py-6 bg-white/5 font-black text-2xl tracking-tighter text-right transition-all group-hover:bg-white/10 ${isTopTotal ? 'text-red-500 scale-105' : 'text-white'}`}>
+                            {row.totalFactura.toLocaleString('es-ES', { minimumFractionDigits: 2 })} €
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* PAGE 4: SYNTHESIS */}
+        <section className="min-h-[1100px] p-24 bg-[#0a0f1e] flex flex-col items-center justify-center relative text-center">
+            <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-blue-500 via-indigo-600 to-emerald-500" />
+            
+            <motion.div initial={{y: 20, opacity: 0}} animate={{y:0, opacity: 1}} transition={{delay: 0.5}} className="mb-24 flex flex-col items-center gap-12">
+               <div className="w-48 h-48 rounded-[40px] bg-gradient-to-br from-blue-600/20 to-indigo-600/20 flex items-center justify-center border border-white/10 shadow-[0_0_80px_rgba(59,130,246,0.15)] relative group">
+                  <div className="absolute inset-0 bg-blue-500/10 blur-[40px] rounded-full opacity-50 group-hover:opacity-100 transition-opacity" />
+                  <img src="/logo.png" className="w-24 h-24 object-contain mix-blend-screen relative z-10" alt="Voltis Logo Final" />
+               </div>
+               <div className="flex flex-col gap-2">
+                 <h4 className="text-4xl font-black tracking-[0.2em] uppercase text-white">READY FOR <br/>SAVINGS</h4>
+                 <div className="h-1 w-20 bg-blue-500 mx-auto rounded-full mt-2" />
+               </div>
+            </motion.div>
+
+            <div className="grid grid-cols-3 gap-10 w-full max-w-5xl text-left">
+               <div className="glass p-10 rounded-[40px] border border-white/5 bg-gradient-to-b from-white/5 to-transparent shadow-2xl">
+                  <CheckCircle2 className="w-12 h-12 text-blue-400 mb-6" />
+                  <h5 className="font-bold text-xs uppercase tracking-[0.2em] mb-4 text-blue-400">Mejoras de Optimización</h5>
+                  <p className="text-slate-100/60 text-[14px] leading-relaxed">Se han detectado múltiples oportunidades de ahorro en el término de potencia y desajustes en las franjas horarias de mayor consumo.</p>
+               </div>
+               <div className="glass p-10 rounded-[40px] border border-white/5 bg-gradient-to-b from-white/5 to-transparent shadow-2xl">
+                  <Activity className="w-12 h-12 text-indigo-400 mb-6" />
+                  <h5 className="font-bold text-xs uppercase tracking-[0.2em] mb-4 text-indigo-400">Estado del Suministro</h5>
+                  <p className="text-slate-100/60 text-[14px] leading-relaxed">El perfil analizado muestra picos de demanda ineficientes que pueden ser mitigados mediante una mejor gestión de cargas operativas.</p>
+               </div>
+               <div className="glass p-10 rounded-[40px] border border-white/5 bg-gradient-to-b from-white/5 to-transparent shadow-2xl">
+                  <Zap className="w-12 h-12 text-emerald-400 mb-6" />
+                  <h5 className="font-bold text-xs uppercase tracking-[0.2em] mb-4 text-emerald-400">Certificación Voltis</h5>
+                  <p className="text-slate-100/60 text-[14px] leading-relaxed">Este informe ha sido validado bajo los estándares de Voltis Anual Economics, confirmando potencial de ahorro inmediato.</p>
+               </div>
+            </div>
+
+            <div className="mt-32 py-10 border-t border-white/5 w-full max-w-2xl flex flex-col items-center gap-6">
+               <div className="flex items-center gap-5 opacity-40">
+                 <img src="/logo.png" className="w-14 h-14 object-contain mix-blend-screen" alt="Logo mini" />
+                 <span className="text-[14px] font-black tracking-[0.6em] uppercase text-white">VOLTIS ANUAL ECONOMICS // 2026</span>
+               </div>
+            </div>
+        </section>
 
       </div>
 
+      {/* Dynamic Detail Modal */}
       <AnimatePresence>
-        {selectedBillId && filteredValidBills.find(b => b.id === selectedBillId) && (
-          <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/95 backdrop-blur-2xl no-print" onClick={() => setSelectedBillId(null)}>
-            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="glass-card border border-white/10 rounded-[64px] w-full max-w-2xl p-14" onClick={(e) => e.stopPropagation()}>
-               <div className="flex justify-between items-start mb-12">
-                 <h4 className="text-3xl font-black uppercase italic">{filteredValidBills.find(b => b.id === selectedBillId)?.fileName.split('.')[0]}</h4>
-                 <button onClick={() => setSelectedBillId(null)} className="w-10 h-10 rounded-full glass flex items-center justify-center"><ArrowLeft className="rotate-90" /></button>
-               </div>
-               <div className="grid grid-cols-2 gap-6 mb-12">
-                 <div className="p-8 rounded-[40px] bg-blue-600/10 border border-blue-500/20">
-                   <span className="text-[10px] uppercase tracking-widest text-blue-500 block mb-2">Total</span>
-                   <span className="text-4xl font-black">{(tableData.find((d: any) => d.id === selectedBillId)?.totalFactura || 0).toLocaleString('es-ES', { minimumFractionDigits: 2 })}€</span>
-                 </div>
-               </div>
-               <div className="space-y-6 max-h-[40vh] overflow-y-auto pr-4 custom-scrollbar">
-                  {filteredValidBills.find(b => b.id === selectedBillId)?.consumo?.map((c, i) => (
-                    <div key={i} className="flex justify-between p-4 rounded-3xl bg-white/2 border border-white/5">
-                      <span className="font-black text-xs text-slate-400">{c.periodo}</span>
-                      <span className="font-black text-blue-400">{c.total.toFixed(2)} €</span>
+        {selectedBillId && selectedBill && (
+          <div 
+            className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm no-print cursor-pointer"
+            onClick={() => setSelectedBillId(null)}
+          >
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              onClick={(e) => e.stopPropagation()}
+              className="bg-[#0f172a] border border-white/10 rounded-[32px] w-full max-w-2xl overflow-hidden shadow-2xl cursor-default"
+            >
+              <div className="p-8 border-b border-white/5 flex items-center justify-between bg-gradient-to-r from-purple-500/10 to-transparent">
+                <div>
+                   <h2 className="text-xl font-black tracking-tight text-white uppercase italic">{selectedBill.fileName}</h2>
+                   <p className="text-xs text-muted-foreground uppercase tracking-widest mt-1">Desglose Técnico Detallado</p>
+                </div>
+                <button 
+                  onClick={() => setSelectedBillId(null)}
+                  className="w-10 h-10 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center transition-colors"
+                >
+                  <ArrowLeft className="w-5 h-5 rotate-90" />
+                </button>
+              </div>
+              
+              <div className="p-10 max-h-[70vh] overflow-y-auto custom-scrollbar">
+                <div className="space-y-10">
+                  {/* Summary */}
+                  <div className="grid grid-cols-2 gap-6">
+                    <div className="bg-white/[0.02] p-6 rounded-3xl border border-white/5 text-center flex flex-col gap-2">
+                      <span className="text-[10px] font-black text-blue-400 uppercase tracking-[0.2em] block">Total Factura</span>
+                      <span className="text-3xl font-black text-white">{selectedBill.totalCalculado.toLocaleString('es-ES', { minimumFractionDigits: 2 })} €</span>
                     </div>
-                  ))}
-               </div>
+                    <div className="bg-white/[0.02] p-6 rounded-3xl border border-white/5 text-center flex flex-col gap-2">
+                      <span className="text-[10px] font-black text-indigo-400 uppercase tracking-[0.2em] block">Fecha Factura</span>
+                      <span className="text-3xl font-black text-white">{selectedBill.fechaInicio?.split('-').reverse().join('/')}</span>
+                    </div>
+                  </div>
+
+                  {/* Consumo Detail */}
+                  <div className="space-y-6">
+                    <h5 className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-500 border-b border-white/5 pb-4">Desglose de Energía Acumulada</h5>
+                    <div className="grid grid-cols-1 gap-3">
+                       {selectedBill.consumo?.map((c: any, idx: number) => (
+                         <div key={idx} className="flex items-center justify-between px-6 py-4 bg-white/[0.03] rounded-2xl border border-white/5 hover:bg-white/[0.05] transition-colors group">
+                            <span className="font-black text-white tracking-[0.2em] text-xs uppercase">{c.periodo}</span>
+                            <div className="flex items-center gap-10">
+                              <span className="text-slate-500 text-[11px] font-bold">{c.kwh.toLocaleString('es-ES')} kWh</span>
+                              <span className="font-black text-blue-400 min-w-[90px] text-right group-hover:scale-105 transition-transform">{c.total.toFixed(2)} €</span>
+                            </div>
+                         </div>
+                       ))}
+                    </div>
+                  </div>
+
+                   {/* Potencia Detail */}
+                   <div className="space-y-6">
+                    <h5 className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-500 border-b border-white/5 pb-4">Términos de Potencia Fija</h5>
+                    <div className="grid grid-cols-1 gap-3">
+                       {selectedBill.potencia?.map((p: any, idx: number) => (
+                         <div key={idx} className="flex items-center justify-between px-6 py-4 bg-white/[0.03] rounded-2xl border border-white/5 hover:bg-white/[0.05] transition-colors group">
+                            <span className="font-black text-white tracking-[0.2em] text-xs uppercase">{p.periodo}</span>
+                            <div className="flex items-center gap-10">
+                              <span className="text-slate-500 text-[11px] font-bold">{p.kw} kW · {p.dias} días</span>
+                              <span className="font-black text-amber-500 min-w-[90px] text-right group-hover:scale-105 transition-transform">{p.total.toFixed(2)} €</span>
+                            </div>
+                         </div>
+                       ))}
+                    </div>
+                  </div>
+
+                  {/* Others Detail */}
+                  <div className="space-y-6 pb-6">
+                    <h5 className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-500 border-b border-white/5 pb-4">Otros Conceptos e Impuestos</h5>
+                    <div className="grid grid-cols-1 gap-3">
+                       {[...(selectedBill.otrosConceptos || []), ...(customOCs[selectedBill.id] || [])].map((oc: any, idx: number) => (
+                         <div key={idx} className="flex items-center justify-between px-6 py-4 bg-white/[0.03] rounded-2xl border border-white/5 border-l-purple-500/50 hover:bg-white/[0.05] transition-colors group">
+                            <span className="font-bold text-slate-300 text-[11px] uppercase tracking-wider">{oc.concepto}</span>
+                            <span className="font-black text-white group-hover:scale-105 transition-transform">{oc.total.toFixed(2)} €</span>
+                         </div>
+                       ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
             </motion.div>
           </div>
         )}
       </AnimatePresence>
 
       <style jsx global>{`
-        html { scroll-behavior: smooth !important; }
-        .report-container { width: 100%; position: relative; }
-        /* CRITICAL: sections are ALWAYS visible. GSAP only adds subtle animations FROM a slightly lower initial state. */
-        section { opacity: 1; }
-        .glass { background: rgba(15,23,42,0.4) !important; backdrop-filter: blur(40px) !important; }
-        .text-glow { text-shadow: 0 0 30px rgba(255,255,255,0.4); }
-        .pdf-avoid-break { break-inside: avoid !important; }
-        
-        @page { size: A4; margin: 0; }
-        
         @media print {
+          @page {
+            size: A4;
+            margin: 0; /* No white borders allowed */
+          }
           html, body { 
             background: #020617 !important; 
-            margin: 0 !important;
+            margin: 0 !important; 
             padding: 0 !important;
-            height: auto !important;
-            -webkit-print-color-adjust: exact !important;
+            height: 100%;
+            -webkit-print-color-adjust: exact !important; 
             print-color-adjust: exact !important;
           }
           .no-print { display: none !important; }
-          .report-container { background: #020617 !important; color: white !important; }
-          section { 
-            width: 100% !important;
-            min-height: 297mm !important; 
-            padding: 20mm !important;
+          .report-container { 
+            width: 100% !important; 
+            max-width: none !important;
+            background: #020617 !important; 
+            min-height: 100vh;
+            padding: 40px !important; /* Internal padding for breathability */
+          }
+          .page-break-after { 
             page-break-after: always !important; 
-            break-after: page !important;
-            display: flex !important;
-            flex-direction: column !important;
-            align-items: center !important;
-            justify-content: center !important;
-            opacity: 1 !important;
-            transform: none !important;
+            break-after: page !important; 
+            margin-top: 40px !important;
           }
-          #scene-1 { 
-            height: 297mm !important; 
-            justify-content: center !important; 
-            padding: 0 !important;
+          section { 
+            page-break-inside: auto !important;
+            margin-bottom: 60px !important; /* Space between blocks */
+            padding: 0 20px !important;
           }
-          .glass { background: rgba(15,23,42,0.8) !important; border: 1px solid rgba(255,255,255,0.1) !important; backdrop-filter: none !important; }
-          table { width: 100% !important; margin-top: 20px !important; border-spacing: 0; }
-          thead { display: table-header-group !important; }
-          tr { break-inside: avoid !important; page-break-inside: avoid !important; }
-          .recharts-responsive-container { height: 400px !important; width: 100% !important; }
+          /* Prevent cards and tables from splitting across pages */
+          .bg-[#0f172a]/40, .glass, table, tr, section {
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
+          }
+          .glass { 
+            background: rgba(30, 41, 59, 0.7) !important; 
+            border: 1px solid rgba(255, 255, 255, 0.2) !important; 
+            backdrop-filter: none !important; 
+          }
+          h3, h4 { 
+            page-break-after: avoid !important; 
+            margin-top: 50px !important;
+            margin-bottom: 25px !important;
+          }
+          /* Ensure charts take enough space but fit */
+          .recharts-responsive-container {
+            width: 100% !important;
+            height: 400px !important;
+            margin: 0 auto !important;
+          }
+          .recharts-wrapper {
+            margin: 0 auto !important;
+          }
         }
-
         .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.1); border-radius: 10px; }
       `}</style>
-    </div>
+    </motion.div>
   );
 }

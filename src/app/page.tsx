@@ -6,7 +6,7 @@ import {
   FileText, Upload, Trash2, Download, AlertTriangle, 
   CheckCircle, Loader2, Plus, FolderOpen, Edit2, 
   BarChart3, LayoutDashboard, Settings, LogOut,
-  ChevronRight, Sparkles, Zap, Smartphone, Layers, X
+  ChevronRight, Sparkles, Zap, Smartphone, Layers
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { ExtractedBill, ProjectWorkspace } from '@/lib/types';
@@ -15,14 +15,6 @@ import { exportBillsToExcel } from '@/lib/export';
 import { importBillsFromExcel } from '@/lib/import-bills';
 import ReportView from '@/components/ReportView';
 import { motion, AnimatePresence } from 'framer-motion';
-import { fetchAllProjectsFromDB, syncProjectToDB, deleteProjectFromDB } from '@/lib/supabase-sync';
-
-const StatusItem = ({ label, status }: { label: string; status: boolean }) => (
-  <div className="flex items-center justify-between p-3 rounded-xl bg-white/5 border border-white/5">
-    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-tight">{label}</span>
-    <div className={`w-2 h-2 rounded-full ${status ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.4)]' : 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.4)]'}`} />
-  </div>
-);
 
 export default function EnergyBillsApp() {
   const [bills, setBills] = useState<ExtractedBill[]>([]);
@@ -34,25 +26,6 @@ export default function EnergyBillsApp() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [password, setPassword] = useState('');
   const [authError, setAuthError] = useState(false);
-  const [renamingProjectId, setRenamingProjectId] = useState<string | null>(null);
-  const [renameValue, setRenameValue] = useState('');
-  const [extractionQueue, setExtractionQueue] = useState<{ id: string; fileName: string; status: 'loading' | 'success' | 'error'; error?: string; file?: File }[]>([]);
-  const [cloudSyncStatus, setCloudSyncStatus] = useState<'synced' | 'syncing' | 'error' | 'local'>('local');
-  const [showDiag, setShowDiag] = useState(false);
-  const [diagInfo, setDiagInfo] = useState<any>(null);
-  const [isCheckingDiag, setIsCheckingDiag] = useState(false);
-
-  const runDiagnostic = async () => {
-    setIsCheckingDiag(true);
-    try {
-      const res = await fetch('/api/diag');
-      const data = await res.json();
-      setDiagInfo(data);
-    } catch (e) {
-      setDiagInfo({ error: 'Fallo al conectar con el servidor de diagnóstico' });
-    }
-    setIsCheckingDiag(false);
-  };
 
   useEffect(() => {
     if (typeof window !== 'undefined' && sessionStorage.getItem('voltis_auth') === 'true') {
@@ -72,100 +45,34 @@ export default function EnergyBillsApp() {
     }
   };
 
-  // Multi-layer Initialization (LocalStorage -> Cloud)
+  // Persistence logic...
   useEffect(() => {
-    const initStorage = async () => {
-      // 1. Load from LocalStorage (Immediate feedback)
-      const localData = localStorage.getItem('voltis_saved_projects');
-      if (localData) {
-        try {
-          const parsed = JSON.parse(localData);
-          if (parsed && parsed.length > 0) {
-            setSavedProjects(parsed);
-            const lastId = localStorage.getItem('voltis_last_project') || parsed[0].id;
-            setCurrentProjectId(lastId);
-            const active = parsed.find((p: any) => p.id === lastId) || parsed[0];
-            setBills(active.bills || []);
-            setCustomOCs(active.customOCs || {});
-          }
-        } catch (e) { console.warn('Local storage parse error', e); }
+    const saved = localStorage.getItem('voltis_projects');
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      setSavedProjects(parsed);
+      const last = localStorage.getItem('voltis_last_project') || parsed[0]?.id || 'default';
+      setCurrentProjectId(last);
+      const active = parsed.find((p: any) => p.id === last);
+      if (active) {
+        setBills(active.bills || []);
+        setCustomOCs(active.customOCs || {});
       }
-
-      // 2. Sync from Cloud (Background)
-      setCloudSyncStatus('syncing');
-      const dbProjects = await fetchAllProjectsFromDB();
-      if (dbProjects && dbProjects.length > 0) {
-        setSavedProjects(dbProjects);
-        localStorage.setItem('voltis_saved_projects', JSON.stringify(dbProjects));
-        
-        // Update view if cloud is newer or if we had no local data
-        const lastId = localStorage.getItem('voltis_last_project') || dbProjects[0].id;
-        const active = dbProjects.find(p => p.id === lastId) || dbProjects[0];
-        if (active) {
-          setBills(active.bills || []);
-          setCustomOCs(active.customOCs || {});
-        }
-        setCloudSyncStatus('synced');
-      } else if (dbProjects) {
-        setCloudSyncStatus('synced');
-      } else {
-        setCloudSyncStatus('error');
-      }
-    };
-    initStorage();
+    } else {
+      const init = [{ id: 'default', name: 'PROYECTO INICIAL', bills: [], customOCs: {}, updatedAt: Date.now() }];
+      setSavedProjects(init);
+      setBills([]);
+      setCustomOCs({});
+    }
   }, []);
 
-  const saveToDisk = useCallback(async (updatedBills: ExtractedBill[], updatedOCs: Record<string, any>) => {
+  const saveToDisk = useCallback((updatedBills: ExtractedBill[], updatedOCs: Record<string, any>) => {
     setSavedProjects(prev => {
-      const next = prev.map(p => p.id === currentProjectId ? { 
-        ...p, bills: updatedBills, customOCs: updatedOCs, updatedAt: Date.now() 
-      } : p);
-      
-      // Immediate Local Save
-      localStorage.setItem('voltis_saved_projects', JSON.stringify(next));
-
-      // Background Cloud Sync
-      const activeProject = next.find(p => p.id === currentProjectId);
-      if (activeProject) {
-        setCloudSyncStatus('syncing');
-        syncProjectToDB(activeProject)
-          .then(() => setCloudSyncStatus('synced'))
-          .catch(() => setCloudSyncStatus('error'));
-      }
+      const next = prev.map(p => p.id === currentProjectId ? { ...p, bills: updatedBills, customOCs: updatedOCs, updatedAt: Date.now() } : p);
+      localStorage.setItem('voltis_projects', JSON.stringify(next));
       return next;
     });
   }, [currentProjectId]);
-
-  const processFile = useCallback(async (file: File, queueId: string) => {
-    const formData = new FormData();
-    formData.append('file', file);
-
-    try {
-      const res = await fetch('/api/extract', { method: 'POST', body: formData });
-      const data = await res.json();
-      
-      if (data.status === 'success') {
-        setBills(prev => {
-          const next = [...prev, data.bill];
-          saveToDisk(next, customOCs);
-          return next;
-        });
-        setExtractionQueue(prev => prev.map(item => 
-          item.id === queueId ? { ...item, status: 'success' } : item
-        ));
-      } else {
-        setExtractionQueue(prev => prev.map(item => 
-          item.id === queueId ? { ...item, status: 'error', error: data.error } : item
-        ));
-        toast.error(`Error en ${file.name}: ${data.error}`);
-      }
-    } catch (err) {
-      setExtractionQueue(prev => prev.map(item => 
-        item.id === queueId ? { ...item, status: 'error', error: 'Error de red' } : item
-      ));
-      toast.error(`Error de red en ${file.name}`);
-    }
-  }, [customOCs, saveToDisk]);
 
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
     const excelFiles = acceptedFiles.filter(f => f.name.endsWith('.xlsx'));
@@ -182,42 +89,43 @@ export default function EnergyBillsApp() {
     }
 
     setIsExtracting(true);
-    
-    // Initialize queue with all dropped files
-    const newItems = acceptedFiles.map(file => ({
-      id: Math.random().toString(36).substr(2, 9),
-      fileName: file.name,
-      status: 'loading' as const,
-      file // Store raw file for retries
-    }));
-    setExtractionQueue(prev => [...newItems, ...prev]);
+    for (const file of acceptedFiles) {
+      const formData = new FormData();
+      formData.append('file', file);
 
-    for (let i = 0; i < acceptedFiles.length; i++) {
-       await processFile(acceptedFiles[i], newItems[i].id);
+      try {
+        const res = await fetch('/api/extract', { method: 'POST', body: formData });
+        const data = await res.json();
+        if (data.status === 'success') {
+          setBills(prev => {
+            const next = [...prev, data.bill];
+            saveToDisk(next, customOCs);
+            return next;
+          });
+        } else {
+          toast.error(`Error en ${file.name}: ${data.error}`);
+        }
+      } catch (err) {
+        toast.error(`Error de red en ${file.name}`);
+      }
     }
     setIsExtracting(false);
-  }, [customOCs, saveToDisk, processFile]);
+  }, [customOCs, saveToDisk]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({ 
     onDrop, 
     accept: { 'application/pdf': ['.pdf'], 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'] } 
   });
 
-  const createNewProject = async () => {
+  const createNewProject = () => {
     const name = prompt('Nombre del nuevo proyecto:');
     if (!name) return;
-    const project: ProjectWorkspace = { id: crypto.randomUUID(), name: name.toUpperCase(), bills: [], customOCs: {}, updatedAt: Date.now() };
-    
-    setSavedProjects(prev => {
-      const next = [...prev, project];
-      localStorage.setItem('voltis_saved_projects', JSON.stringify(next));
-      setCloudSyncStatus('syncing');
-      syncProjectToDB(project).then(() => setCloudSyncStatus('synced')).catch(() => setCloudSyncStatus('error'));
-      return next;
-    });
-    
+    const project: ProjectWorkspace = { id: Math.random().toString(36).substr(2, 9), name: name.toUpperCase(), bills: [], customOCs: {}, updatedAt: Date.now() };
+    const next = [...savedProjects, project];
+    setSavedProjects(next);
+    localStorage.setItem('voltis_projects', JSON.stringify(next));
     loadWorkspace(project);
-    toast.success('Proyecto creado localmente y sincronizando...');
+    toast.success('Proyecto creado');
   };
 
   const loadWorkspace = (proj: ProjectWorkspace) => {
@@ -228,37 +136,14 @@ export default function EnergyBillsApp() {
     setShowReport(false);
   };
 
-  const deleteProject = async (id: string, e: React.MouseEvent) => {
+  const deleteProject = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (confirm('¿Eliminar este proyecto permanentemente de la nube y del navegador?')) {
+    if (confirm('¿Eliminar este proyecto permanentemente?')) {
       const next = savedProjects.filter(p => p.id !== id);
       setSavedProjects(next);
-      localStorage.setItem('voltis_saved_projects', JSON.stringify(next));
-      
-      setCloudSyncStatus('syncing');
-      deleteProjectFromDB(id).then(() => setCloudSyncStatus('synced')).catch(() => setCloudSyncStatus('error'));
-      
-      if (currentProjectId === id) loadWorkspace(next[0] || { id: crypto.randomUUID(), name: 'HUÉRFANO', bills: [] });
-      toast.success('Proyecto eliminado');
+      localStorage.setItem('voltis_projects', JSON.stringify(next));
+      if (currentProjectId === id) loadWorkspace(next[0] || { id: 'default', name: 'HUÉRFANO', bills: [] });
     }
-  };
-
-  const renameProject = async (id: string, newName: string) => {
-    if (!newName.trim()) return;
-    const upperName = newName.toUpperCase();
-    setSavedProjects(prev => {
-      const next = prev.map(p => p.id === id ? { ...p, name: upperName, updatedAt: Date.now() } : p);
-      localStorage.setItem('voltis_saved_projects', JSON.stringify(next));
-      
-      const updated = next.find(p => p.id === id);
-      if (updated) {
-        setCloudSyncStatus('syncing');
-        syncProjectToDB(updated).then(() => setCloudSyncStatus('synced')).catch(() => setCloudSyncStatus('error'));
-      }
-      return next;
-    });
-    toast.success('Nombre actualizado');
-    setRenamingProjectId(null);
   };
 
   const handleUpdateBills = (newBills: ExtractedBill[]) => {
@@ -412,48 +297,25 @@ export default function EnergyBillsApp() {
               {savedProjects.sort((a,b) => b.updatedAt - a.updatedAt).map(proj => {
                 const isActive = proj.id === currentProjectId;
                 return (
-                   <motion.div 
+                  <motion.div 
                     key={proj.id}
-                    whileHover={{ x: renamingProjectId === proj.id ? 0 : 4 }}
-                    onClick={() => renamingProjectId !== proj.id && loadWorkspace(proj)}
+                    whileHover={{ x: 4 }}
+                    onClick={() => loadWorkspace(proj)}
                     className={`group flex items-center justify-between p-4 rounded-2xl cursor-pointer transition-all border ${
                       isActive 
                         ? 'bg-blue-600/10 border-blue-500/30 text-white shadow-xl shadow-blue-900/10' 
                         : 'bg-transparent border-transparent text-slate-500 hover:bg-white/5 hover:text-white'
                     }`}
                   >
-                    <div className="flex flex-col gap-1 overflow-hidden flex-1 min-w-0">
-                      {renamingProjectId === proj.id ? (
-                        <input
-                          autoFocus
-                          value={renameValue}
-                          onChange={e => setRenameValue(e.target.value)}
-                          onClick={e => e.stopPropagation()}
-                          onKeyDown={e => {
-                            if (e.key === 'Enter') renameProject(proj.id, renameValue);
-                            if (e.key === 'Escape') setRenamingProjectId(null);
-                          }}
-                          onBlur={() => renameProject(proj.id, renameValue)}
-                          className="bg-transparent border-b border-blue-500 text-blue-300 font-bold text-[12px] uppercase tracking-wider focus:outline-none w-full"
-                        />
-                      ) : (
-                        <span className={`font-bold truncate text-[12px] uppercase tracking-wider ${isActive ? 'text-blue-400' : ''}`}>{proj.name}</span>
-                      )}
+                    <div className="flex flex-col gap-1 overflow-hidden">
+                      <span className={`font-bold truncate text-[12px] uppercase tracking-wider ${isActive ? 'text-blue-400' : ''}`}>{proj.name}</span>
                       <span className="text-[10px] opacity-40 font-medium">{proj.bills?.length || 0} Facturas</span>
                     </div>
-                    <div className="flex items-center gap-1">
-                      <button
-                        onClick={e => { e.stopPropagation(); setRenamingProjectId(proj.id); setRenameValue(proj.name); }}
-                        className="opacity-0 group-hover:opacity-100 p-2 hover:bg-blue-500/20 text-blue-400 rounded-lg transition-all"
-                      >
-                        <Edit2 className="w-3 h-3" />
+                    {isActive ? (
+                      <button onClick={(e) => deleteProject(proj.id, e)} className="opacity-0 group-hover:opacity-100 p-2 hover:bg-red-500/20 text-red-500 rounded-lg transition-all">
+                        <Trash2 className="w-4 h-4" />
                       </button>
-                      {isActive && (
-                        <button onClick={(e) => deleteProject(proj.id, e)} className="opacity-0 group-hover:opacity-100 p-2 hover:bg-red-500/20 text-red-500 rounded-lg transition-all">
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      )}
-                    </div>
+                    ) : <ChevronRight className="w-4 h-4 opacity-0 group-hover:opacity-50" />}
                   </motion.div>
                 );
               })}
@@ -461,25 +323,15 @@ export default function EnergyBillsApp() {
           </div>
         </div>
 
-          <div className="mt-auto px-8 pb-10 flex flex-col gap-4 relative z-10">
-            <button 
-              onClick={() => { setShowDiag(true); runDiagnostic(); }}
-              className="glass p-3 rounded-2xl border border-white/5 flex items-center justify-between group hover:bg-white/10 transition-all"
-            >
-              <div className="flex items-center gap-3">
-                <Settings className="w-4 h-4 text-slate-500 group-hover:text-blue-400" />
-                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Sistema</span>
-              </div>
-              <div className={`w-1.5 h-1.5 rounded-full ${cloudSyncStatus === 'synced' ? 'bg-emerald-500' : 'bg-red-500 animate-pulse'}`} />
-            </button>
-            <div className="glass p-4 rounded-2xl border border-white/5 flex items-center gap-4">
-               <div className="w-8 h-8 rounded-full bg-slate-800 border border-white/10" />
-               <div className="flex flex-col">
-                 <span className="text-xs font-bold text-white uppercase tracking-tight">Admin Voltis</span>
-                 <span className="text-[10px] text-slate-500 tracking-wider">Plan Expert</span>
-               </div>
-            </div>
+        <div className="mt-auto px-8 pb-10 flex flex-col gap-4 relative z-10">
+          <div className="glass p-4 rounded-2xl border border-white/5 flex items-center gap-4">
+             <div className="w-8 h-8 rounded-full bg-slate-800 border border-white/10" />
+             <div className="flex flex-col">
+               <span className="text-xs font-bold text-white uppercase tracking-tight">User Admin</span>
+               <span className="text-[10px] text-slate-500 tracking-wider">Plan Premium</span>
+             </div>
           </div>
+        </div>
       </aside>
 
       {/* MAIN CONTENT CANVAS */}
@@ -493,18 +345,6 @@ export default function EnergyBillsApp() {
           
           <header className="flex flex-col md:flex-row items-end justify-between gap-8">
             <div className="flex flex-col gap-3">
-              <div className="flex items-center gap-3 mb-2">
-                 <div className={`w-2 h-2 rounded-full ${
-                  cloudSyncStatus === 'synced' ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' :
-                  cloudSyncStatus === 'syncing' ? 'bg-blue-500 animate-pulse' :
-                  cloudSyncStatus === 'error' ? 'bg-red-500' : 'bg-slate-500'
-                }`} />
-                <span className="text-[10px] font-black tracking-[0.2em] text-white/40 uppercase">
-                  {cloudSyncStatus === 'synced' ? 'Cloud Synced' :
-                   cloudSyncStatus === 'syncing' ? 'Syncing...' :
-                   cloudSyncStatus === 'error' ? 'Cloud Error' : 'Offline Mode'}
-                </span>
-              </div>
               <h1 className="text-5xl font-black tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-white via-white to-blue-500 leading-none py-2">
                 VOLTIS ANUAL <br/> ECONOMICS
               </h1>
@@ -563,86 +403,6 @@ export default function EnergyBillsApp() {
               </div>
             </div>
           </div>
-          
-          {/* EXTRACTION QUEUE UI */}
-          <AnimatePresence>
-            {extractionQueue.length > 0 && (
-              <motion.div 
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: 'auto' }}
-                exit={{ opacity: 0, height: 0 }}
-                className="flex flex-col gap-4"
-              >
-                <div className="flex items-center justify-between">
-                   <h3 className="text-[11px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
-                     <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" /> Cola de Procesamiento
-                   </h3>
-                   <button 
-                    onClick={() => setExtractionQueue([])}
-                    className="text-[10px] font-bold text-slate-500 hover:text-white transition-colors uppercase tracking-widest"
-                   >
-                     Limpiar Cola
-                   </button>
-                </div>
-                
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                  {extractionQueue.map((item) => (
-                    <motion.div 
-                      key={item.id}
-                      layout
-                      initial={{ opacity: 0, scale: 0.9 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      className={`glass p-4 rounded-2xl border flex items-center justify-between transition-all ${
-                        item.status === 'loading' ? 'border-blue-500/20 bg-blue-500/5' :
-                        item.status === 'success' ? 'border-emerald-500/20 bg-emerald-500/5' :
-                        'border-red-500/20 bg-red-500/5'
-                      }`}
-                    >
-                      <div className="flex items-center gap-3 overflow-hidden">
-                        <div className={`p-2 rounded-lg ${
-                          item.status === 'loading' ? 'bg-blue-500/10 text-blue-400' :
-                          item.status === 'success' ? 'bg-emerald-500/10 text-emerald-400' :
-                          'bg-red-500/10 text-red-400'
-                        }`}>
-                          {item.status === 'loading' ? <Loader2 className="w-4 h-4 animate-spin" /> :
-                           item.status === 'success' ? <CheckCircle className="w-4 h-4" /> :
-                           <X className="w-4 h-4" />}
-                        </div>
-                        <div className="flex flex-col overflow-hidden">
-                          <span className="text-xs font-bold text-white truncate">{item.fileName}</span>
-                          {item.error && <span className="text-[10px] text-red-400 font-medium truncate">{item.error}</span>}
-                          {item.status === 'success' && <span className="text-[10px] text-emerald-400 font-medium">Extraída correctamente</span>}
-                          {item.status === 'loading' && <span className="text-[10px] text-blue-400 font-medium animate-pulse">Analizando con Llama 3.3...</span>}
-                        </div>
-                      </div>
-                      
-                      <div className="flex items-center gap-2">
-                        {item.status === 'error' && item.file && (
-                          <button 
-                            onClick={() => {
-                              setExtractionQueue(prev => prev.map(q => q.id === item.id ? { ...q, status: 'loading' as const, error: undefined } : q));
-                              processFile(item.file!, item.id);
-                            }}
-                            className="px-3 py-1 bg-blue-600/20 text-blue-400 text-[10px] font-bold rounded-lg border border-blue-500/30 hover:bg-blue-600/40 transition-all uppercase tracking-tighter"
-                          >
-                            Reintentar
-                          </button>
-                        )}
-                        {item.status !== 'loading' && (
-                          <button 
-                            onClick={() => setExtractionQueue(prev => prev.filter(q => q.id !== item.id))}
-                            className="p-1 hover:bg-white/10 rounded-md text-slate-500 transition-colors"
-                          >
-                            <X className="w-3 h-3" />
-                          </button>
-                        )}
-                      </div>
-                    </motion.div>
-                  ))}
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
 
           <AnimatePresence>
             {bills.length > 0 && (
@@ -675,88 +435,6 @@ export default function EnergyBillsApp() {
 
         </div>
       </main>
-
-      {/* DIAGNOSTIC MODAL */}
-      <AnimatePresence>
-        {showDiag && (
-          <motion.div 
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[60] flex items-center justify-center p-6 bg-black/80 backdrop-blur-md"
-          >
-            <motion.div 
-              initial={{ scale: 0.9, y: 20 }}
-              animate={{ scale: 1, y: 0 }}
-              className="glass-card w-full max-w-lg rounded-[40px] p-10 border border-white/10 shadow-3xl text-white relative"
-            >
-              <button onClick={() => setShowDiag(false)} className="absolute top-8 right-8 text-slate-500 hover:text-white">
-                <X className="w-6 h-6" />
-              </button>
-
-              <div className="flex flex-col gap-8">
-                <div className="flex items-center gap-4">
-                  <div className="p-3 bg-blue-500/10 rounded-2xl">
-                    <Settings className="w-8 h-8 text-blue-400" />
-                  </div>
-                  <div>
-                    <h2 className="text-2xl font-black tracking-tighter italic">DIAGNÓSTICO DE SISTEMAS</h2>
-                    <p className="text-xs font-bold text-blue-400 tracking-widest uppercase opacity-60">Auditoría Técnica en Vivo</p>
-                  </div>
-                </div>
-
-                {isCheckingDiag ? (
-                  <div className="flex flex-col items-center gap-4 py-12">
-                     <Loader2 className="w-10 h-10 text-blue-500 animate-spin" />
-                     <span className="text-xs font-black tracking-widest">ANALIZANDO CONEXIONES...</span>
-                  </div>
-                ) : (
-                  <div className="flex flex-col gap-6">
-                    {/* ENTORNO */}
-                    <div className="flex flex-col gap-3">
-                       <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Llaves de API (Variables Vercel)</h3>
-                       <div className="grid grid-cols-2 gap-4">
-                          <StatusItem label="Groq AI" status={diagInfo?.env?.has_groq_key} />
-                          <StatusItem label="Supabase URL" status={diagInfo?.env?.has_supabase_url} />
-                          <StatusItem label="Supabase Key" status={diagInfo?.env?.has_supabase_key} />
-                          <StatusItem label="Gemini AI" status={diagInfo?.env?.has_gemini_key} />
-                       </div>
-                    </div>
-
-                    {/* BASE DE DATOS */}
-                    <div className="flex flex-col gap-3">
-                       <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Base de Datos (Supabase)</h3>
-                       <div className={`p-4 rounded-2xl border ${diagInfo?.database?.status === 'connected' ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-red-500/5 border-red-500/20'}`}>
-                          <div className="flex items-center justify-between mb-2">
-                             <span className="text-[12px] font-bold">Estado del Enlace Cloud</span>
-                             <span className={`text-[10px] font-black px-3 py-1 rounded-full ${diagInfo?.database?.status === 'connected' ? 'bg-emerald-500 text-white' : 'bg-red-500 text-white'}`}>
-                                {diagInfo?.database?.status?.toUpperCase() || 'DESCONECTADO'}
-                             </span>
-                          </div>
-                          {diagInfo?.database?.error && (
-                            <p className="text-[10px] text-red-300 font-mono bg-red-950/30 p-2 rounded-lg mt-2 break-all">
-                               {diagInfo.database.error}
-                            </p>
-                          )}
-                          <p className="text-[10px] opacity-40 mt-2">
-                             Este indicador verifica si la app puede leer/escribir proyectos en la nube. Si está en rojo, tus datos solo se guardarán localmente en este navegador.
-                          </p>
-                       </div>
-                    </div>
-                    
-                    <button 
-                      onClick={runDiagnostic}
-                      className="w-full py-4 bg-white text-black font-black text-xs uppercase tracking-widest rounded-2xl hover:bg-slate-200 transition-all flex items-center justify-center gap-2"
-                    >
-                      <Sparkles className="w-4 h-4" /> Re-Scanear
-                    </button>
-                  </div>
-                )}
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
 
       <style jsx global>{`
         .custom-scrollbar::-webkit-scrollbar { width: 4px; }

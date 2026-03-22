@@ -43,7 +43,7 @@ export async function POST(req: Request) {
         status: 'success',
         bill: {
           ...extractedData,
-          id: crypto.randomUUID(),
+          id: Math.random().toString(36).substr(2, 9),
           fileName: (file as File).name || 'factura.pdf',
           status: 'success'
         }

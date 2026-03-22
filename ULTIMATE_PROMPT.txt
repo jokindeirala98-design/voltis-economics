@@ -126,7 +126,7 @@ export async function extractBillDataWithAI(pdfText: string) {
 
 ---
 
-## 4. ESTILOS GLOBALES (src/app/globals.css)
+### D. Estilos Globales (src/app/globals.css)
 ```css
 @import "tailwindcss";
 
@@ -137,8 +137,8 @@ export async function extractBillDataWithAI(pdfText: string) {
 
 @layer components {
   .glass {
-    background-color: rgba(255, 255, 255, 0.05);
-    @apply backdrop-blur-xl border border-white/10;
+    background-color: rgba(255, 255, 255, 0.08);
+    @apply backdrop-blur-2xl border border-white/20;
   }
   .glass-card {
     background-color: rgba(15, 23, 42, 0.3);
@@ -147,11 +147,11 @@ export async function extractBillDataWithAI(pdfText: string) {
 }
 
 @media print {
-  @page { size: A4; margin: 0; }
-  html, body { background: #020617 !important; -webkit-print-color-adjust: exact !important; height: 100%; }
-  .report-container { padding: 40px !important; background: #020617 !important; min-height: 100vh; }
-  .bg-[#0f172a]/40, .glass, table, tr { break-inside: avoid !important; margin-bottom: 30px !important; }
-  section { page-break-inside: auto !important; margin-bottom: 60px !important; padding: 0 20px !important; }
+  @page { size: A4; margin: 15mm; }
+  html, body { background: #020617 !important; -webkit-print-color-adjust: exact !important; }
+  .bg-[#0f172a]/40, .glass, table, tr, section { break-inside: avoid !important; page-break-inside: avoid !important; }
+  section { margin-bottom: 30px !important; }
+  .recharts-responsive-container { height: 400px !important; width: 100% !important; }
 }
 ```
 

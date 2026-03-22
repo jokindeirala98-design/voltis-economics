@@ -6,26 +6,25 @@ Este documento sirve como la única fuente de la verdad para el núcleo, la misi
 Proporcionar una herramienta visual y extremadamente premium (estética futurista, *Dark Mode*, *Glassmorphism*) para analizar facturas eléctricas anuales, permitiendo extraer automáticamente datos con IA, unificar conceptos, y generar un análisis de optimización o exportar los reportes a Excel.
 
 ## 2. Tecnologías y Arquitectura
-- **Stack**: Next.js (React 19), Tailwind CSS 4, TypeScript.
-- **Gráficos y UI**: Recharts para visualización, Framer Motion y GSAP para micro-animaciones cinematicas.
-- **IA**: Groq Cloud utilizando el modelo `llama-3.3-70b-versatile` (ultra-rápido) para extracción JSON estructurada.
-- **Persistencia**: Supabase (PostgreSQL Cloud) con sincronización en tiempo real. Se abandonó `localStorage` por Supabase Cloud Storage.
-- **Seguridad**: Autenticación maestra y variables de entorno seguras en Vercel.
+- **Stack**: Next.js (React 19), Tailwind CSS, TypeScript.
+- **Gráficos y UI**: Recharts para visualización de datos de la energía, Framer Motion para micro-animaciones, Lucide React para iconos.
+- **IA**: Google Gemini AI (`gemini-flash-latest`) usando Prompts robustos con instrucciones de extraer JSON con estructura fina.
+- **Persistencia**: `localStorage` (para proyectos y configuraciones locales).
 
 ## 3. Funcionalidades Core
 1. **Autenticación Maestra**: Pantalla de login inicial con contraseña única (`voltis2026` por defecto) para proteger la info.
 2. **Gestión de Proyectos**: Creación de múltiples proyectos o "workspaces" independientes donde se agrupan las facturas analizadas.
-33. **Subida y Procesamiento (Drag & Drop)**:
-   - **PDFs**: Se envían a la IA de Groq (Llama 3.3), la cual extrae periodos de consumo (P1-P6) en kWh y Euros, periodos de potencia (P1-P6), y *Otros Conceptos*.
-   - **Excel (.xlsx)**: Sistema de importación que inyecta datos previos siguiendo la estructura técnica.
+3. **Subida y Procesamiento (Drag & Drop)**:
+   - **PDFs**: Se envían a la IA Gemini, la cual extrae periodos de consumo (P1-P6) en kWh y Euros, periodos de potencia (P1-P6), y *Otros Conceptos*.
+   - **Excel (.xlsx)**: Sistema de sincronización bidireccional que inyecta manualmente facturas previas usando una plantilla específica.
 4. **Tabla de Auditoría Visual (Matrix Editor)**:
    - Visualiza en formato vertical los conceptos por factura (columnas).
-   - Permite edición manual y gestión de proyectos con guardado automático en la nube (Supabase).
-5. **Reporte Anual IA (Visual Report)**:
-   - Pantallas cinematicas con GSAP: Portada con mascota, Dashboard KPIs, Evolución con Recharts, Matriz de Auditoría y cierre con envío de email.
-6. **Sincronización Cloud**:
-   - Todo cambio en local se empuja a GitHub y se despliega automáticamente en Vercel (CI/CD).
-   - Los datos son persistentes entre dispositivos gracias a Supabase.
+   - Permite **Fusionar** "Otros Conceptos" mediante Drag & Drop (arrastrar y soltar) para limpieza visual de la tabla.
+   - Edición manual "click-to-edit" de cualquier celda calculada.
+5. **Reporte Anual Inteligente (Printable/PDF)**:
+   - Dashboard de KPIs, Gráficas de barras de evolución mensual, gráfico de donut de distribución y matriz técnica imprimible.
+6. **Exportación (XLSX)**:
+   - Vuelca todos los datos limpios y organizados a un archivo Excel transpuesta.
 
 ## 4. Reglas de Negocio Vitales (Extracción IA)
 Todo cambio a la IA o cálculos debe someterse a estas leyes irrevocables:
