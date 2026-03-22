@@ -6,7 +6,7 @@ import {
   FileText, Upload, Trash2, Download, AlertTriangle, 
   CheckCircle, Loader2, Plus, FolderOpen, Edit2, 
   BarChart3, LayoutDashboard, Settings, LogOut,
-  ChevronRight, Sparkles, Zap, Smartphone, Layers
+  ChevronRight, Sparkles, Zap, Smartphone, Layers, X
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { ExtractedBill, ProjectWorkspace } from '@/lib/types';
@@ -29,6 +29,7 @@ export default function EnergyBillsApp() {
   const [authError, setAuthError] = useState(false);
   const [renamingProjectId, setRenamingProjectId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
+  const [extractionQueue, setExtractionQueue] = useState<{ id: string; fileName: string; status: 'loading' | 'success' | 'error'; error?: string }[]>([]);
 
   useEffect(() => {
     if (typeof window !== 'undefined' && sessionStorage.getItem('voltis_auth') === 'true') {
@@ -96,23 +97,44 @@ export default function EnergyBillsApp() {
     }
 
     setIsExtracting(true);
-    for (const file of acceptedFiles) {
+    
+    // Initialize queue with all dropped files
+    const newItems = acceptedFiles.map(file => ({
+      id: Math.random().toString(36).substr(2, 9),
+      fileName: file.name,
+      status: 'loading' as const
+    }));
+    setExtractionQueue(prev => [...newItems, ...prev]);
+
+    for (let i = 0; i < acceptedFiles.length; i++) {
+      const file = acceptedFiles[i];
+      const queueId = newItems[i].id;
       const formData = new FormData();
       formData.append('file', file);
 
       try {
         const res = await fetch('/api/extract', { method: 'POST', body: formData });
         const data = await res.json();
+        
         if (data.status === 'success') {
           setBills(prev => {
             const next = [...prev, data.bill];
             saveToDisk(next, customOCs);
             return next;
           });
+          setExtractionQueue(prev => prev.map(item => 
+            item.id === queueId ? { ...item, status: 'success' } : item
+          ));
         } else {
+          setExtractionQueue(prev => prev.map(item => 
+            item.id === queueId ? { ...item, status: 'error', error: data.error } : item
+          ));
           toast.error(`Error en ${file.name}: ${data.error}`);
         }
       } catch (err) {
+        setExtractionQueue(prev => prev.map(item => 
+          item.id === queueId ? { ...item, status: 'error', error: 'Error de red' } : item
+        ));
         toast.error(`Error de red en ${file.name}`);
       }
     }
@@ -445,6 +467,73 @@ export default function EnergyBillsApp() {
               </div>
             </div>
           </div>
+          
+          {/* EXTRACTION QUEUE UI */}
+          <AnimatePresence>
+            {extractionQueue.length > 0 && (
+              <motion.div 
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }}
+                className="flex flex-col gap-4"
+              >
+                <div className="flex items-center justify-between">
+                   <h3 className="text-[11px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
+                     <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" /> Cola de Procesamiento
+                   </h3>
+                   <button 
+                    onClick={() => setExtractionQueue([])}
+                    className="text-[10px] font-bold text-slate-500 hover:text-white transition-colors uppercase tracking-widest"
+                   >
+                     Limpiar Cola
+                   </button>
+                </div>
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {extractionQueue.map((item) => (
+                    <motion.div 
+                      key={item.id}
+                      layout
+                      initial={{ opacity: 0, scale: 0.9 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      className={`glass p-4 rounded-2xl border flex items-center justify-between transition-all ${
+                        item.status === 'loading' ? 'border-blue-500/20 bg-blue-500/5' :
+                        item.status === 'success' ? 'border-emerald-500/20 bg-emerald-500/5' :
+                        'border-red-500/20 bg-red-500/5'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3 overflow-hidden">
+                        <div className={`p-2 rounded-lg ${
+                          item.status === 'loading' ? 'bg-blue-500/10 text-blue-400' :
+                          item.status === 'success' ? 'bg-emerald-500/10 text-emerald-400' :
+                          'bg-red-500/10 text-red-400'
+                        }`}>
+                          {item.status === 'loading' ? <Loader2 className="w-4 h-4 animate-spin" /> :
+                           item.status === 'success' ? <CheckCircle className="w-4 h-4" /> :
+                           <X className="w-4 h-4" />}
+                        </div>
+                        <div className="flex flex-col overflow-hidden">
+                          <span className="text-xs font-bold text-white truncate">{item.fileName}</span>
+                          {item.error && <span className="text-[10px] text-red-400 font-medium truncate">{item.error}</span>}
+                          {item.status === 'success' && <span className="text-[10px] text-emerald-400 font-medium">Extraída correctamente</span>}
+                          {item.status === 'loading' && <span className="text-[10px] text-blue-400 font-medium animate-pulse">Analizando con Llama 3.3...</span>}
+                        </div>
+                      </div>
+                      
+                      {item.status !== 'loading' && (
+                        <button 
+                          onClick={() => setExtractionQueue(prev => prev.filter(q => q.id !== item.id))}
+                          className="p-1 hover:bg-white/10 rounded-md text-slate-500 transition-colors"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      )}
+                    </motion.div>
+                  ))}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
           <AnimatePresence>
             {bills.length > 0 && (
