@@ -105,32 +105,33 @@ export default function ReportView({ bills, customOCs, onBack }: ReportViewProps
         }
       });
 
-      const sections = gsap.utils.toArray('section:not(.no-gsap):not(.hero-scene)');
+      // 2. Continuous Sections Reveal (Excluding Hero)
+      const sections = gsap.utils.toArray('section:not(.hero-scene)');
       sections.forEach((section: any) => {
-        gsap.fromTo(section, 
-          { opacity: 0, y: 100, filter: 'blur(10px)' },
-          {
-            opacity: 1, y: 0, filter: 'blur(0px)',
-            ease: 'expo.out',
-            scrollTrigger: {
-              trigger: section,
-              start: 'top 85%',
-              end: 'top 30%',
-              scrub: 1,
-            }
+        const isKPI = section.classList.contains('kpi-scene');
+        
+        const tl = gsap.timeline({
+          scrollTrigger: {
+            trigger: section,
+            start: 'top 90%',
+            end: 'top 20%',
+            scrub: 0.5,
           }
-        );
-      });
+        });
 
-      gsap.from('.kpi-card', {
-        scale: 0.8,
-        opacity: 0,
-        stagger: 0.1,
-        scrollTrigger: {
-          trigger: '.kpi-scene',
-          start: 'top 70%',
-          end: 'top 30%',
-          scrub: 1
+        tl.fromTo(section, 
+          { opacity: 0, y: 50, filter: 'blur(10px)' },
+          { opacity: 1, y: 0, filter: 'blur(0px)', ease: 'power2.out' }
+        );
+
+        // If it's the KPI scene, add the card stagger to the same timeline
+        if (isKPI) {
+          tl.from('.kpi-card', {
+            scale: 0.9,
+            opacity: 0,
+            stagger: 0.1,
+            ease: 'back.out(1.7)'
+          }, "-=0.2");
         }
       });
     }, containerRef);
