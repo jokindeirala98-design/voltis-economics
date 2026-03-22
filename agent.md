@@ -5,6 +5,15 @@
 **Objetivo:** Auditar, depurar y elevar la calidad de todo el código (Frontend y Backend) de la aplicación "Voltis Anual Economics" para garantizar que alcance la perfección funcional, rendimiento superior y un diseño de impacto.
 **Tecnologías Clave:** Next.js (App Router), React, TypeScript, Tailwind CSS v4, Framer Motion, GSAP, Recharts, API Routes.
 
+## 👨‍💻 Perfil del Desarrollador Esperado
+Para mantener la coherencia con el estilo del proyecto, todo el código propuesto o refactorizado por este agente debe alinearse con este perfil:
+- **Nivel:** Senior React + TypeScript developer.
+- **Arquitectura:** Patrones de *Clean Architecture* (separación clara de lógica de negocio, interfaz y servicios).
+- **Componentes:** Preferencia estricta por componentes funcionales (Functional Components) y Hooks.
+- **Estilos:** Uso exclusivo de Tailwind CSS para todo el estilizado (evitar CSS in JS o estilos en línea, salvo para hojas de estilo dinámicas calculadas).
+- **Enfoque:** Máxima prioridad al rendimiento (*performance*) y legibilidad del código (*readability*).
+- **Backend:** Node.js + Express (si aplica) o rutas API de Next.js siguiendo convenciones REST/Serverless.
+
 ---
 
 ## 🔍 Instrucciones Generales de Auditoría
