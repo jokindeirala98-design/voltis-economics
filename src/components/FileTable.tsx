@@ -161,7 +161,20 @@ export default function FileTable({ bills, onUpdateBills, customOCs, onUpdateOCs
              {bills.map((bill, idx) => (
                <th key={bill.id} className="p-4 bg-[#0a0f1c] border-b border-white/10 border-l border-white/5 w-64">
                  <div className="flex flex-col gap-1">
-                   <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Factura {idx + 1}</span>
+                   <div className="flex items-center justify-between">
+                     <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Factura {idx + 1}</span>
+                     <button
+                       onClick={() => {
+                         if (confirm(`¿Eliminar la factura "${bill.fileName}" del proyecto?`)) {
+                           onUpdateBills(bills.filter(b => b.id !== bill.id));
+                         }
+                       }}
+                       className="p-1 rounded-lg hover:bg-red-500/20 text-slate-600 hover:text-red-400 transition-all"
+                       title="Eliminar factura"
+                     >
+                       <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                     </button>
+                   </div>
                    <span className="text-sm font-bold text-white truncate" title={bill.fileName}>{bill.fileName}</span>
                    {bill.status !== 'error' ? (
                      <span className="text-[10px] text-emerald-400 flex items-center gap-1 mt-1"><div className="w-1.5 h-1.5 rounded-full bg-emerald-400" /> Extraído</span>

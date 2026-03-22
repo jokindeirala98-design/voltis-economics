@@ -36,6 +36,8 @@ export default function EnergyBillsApp() {
   const [authError, setAuthError] = useState(false);
   const [renamingProjectId, setRenamingProjectId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
+  const [showNewProjectModal, setShowNewProjectModal] = useState(false);
+  const [newProjectName, setNewProjectName] = useState('');
   const [extractionQueue, setExtractionQueue] = useState<{ id: string; fileName: string; status: 'loading' | 'success' | 'error'; error?: string; file?: File }[]>([]);
   const [cloudSyncStatus, setCloudSyncStatus] = useState<'synced' | 'syncing' | 'error' | 'local'>('local');
   const [showDiag, setShowDiag] = useState(false);
@@ -146,7 +148,24 @@ export default function EnergyBillsApp() {
       
       if (data.status === 'success') {
         setBills(prev => {
-          const next = [...prev, data.bill];
+          // Duplicate detection: same CUPS + same date range
+          const newBill = data.bill;
+          const isDuplicate = prev.some(b => 
+            b.cups && newBill.cups && 
+            b.cups === newBill.cups && 
+            b.fechaInicio === newBill.fechaInicio && 
+            b.fechaFin === newBill.fechaFin
+          );
+
+          if (isDuplicate) {
+            setExtractionQueue(q => q.map(item => 
+              item.id === queueId ? { ...item, status: 'error', error: 'Factura duplicada (mismo CUPS y período)' } : item
+            ));
+            toast.error(`Factura duplicada: ${file.name} ya está en el proyecto`);
+            return prev;
+          }
+
+          const next = [...prev, newBill];
           saveToDisk(next, customOCs);
           return next;
         });
@@ -203,9 +222,8 @@ export default function EnergyBillsApp() {
     accept: { 'application/pdf': ['.pdf'], 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'] } 
   });
 
-  const createNewProject = async () => {
-    const name = prompt('Nombre del nuevo proyecto:');
-    if (!name) return;
+  const createNewProject = async (name: string) => {
+    if (!name.trim()) return;
     const project: ProjectWorkspace = { id: crypto.randomUUID(), name: name.toUpperCase(), bills: [], customOCs: {}, updatedAt: Date.now() };
     
     setSavedProjects(prev => {
@@ -217,7 +235,9 @@ export default function EnergyBillsApp() {
     });
     
     loadWorkspace(project);
-    toast.success('Proyecto creado localmente y sincronizando...');
+    setShowNewProjectModal(false);
+    setNewProjectName('');
+    toast.success('Proyecto creado');
   };
 
   const loadWorkspace = (proj: ProjectWorkspace) => {
@@ -401,7 +421,7 @@ export default function EnergyBillsApp() {
                 <Layers className="w-3 h-3" /> Proyectos Activos
               </h3>
               <button 
-                onClick={createNewProject}
+                onClick={() => { setShowNewProjectModal(true); setNewProjectName(''); }}
                 className="p-1.5 hover:bg-white/5 text-blue-500 rounded-lg transition-all"
               >
                 <Plus className="w-4 h-4" />
@@ -752,6 +772,66 @@ export default function EnergyBillsApp() {
                     </button>
                   </div>
                 )}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* NEW PROJECT MODAL */}
+      <AnimatePresence>
+        {showNewProjectModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[500] flex items-center justify-center p-4 bg-black/80 backdrop-blur-xl"
+            onClick={() => setShowNewProjectModal(false)}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="glass-card border border-white/10 rounded-[40px] w-full max-w-md p-10 flex flex-col gap-8"
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="flex items-center gap-4">
+                <div className="w-11 h-11 rounded-2xl bg-blue-600/20 border border-blue-500/30 flex items-center justify-center">
+                  <Plus className="w-5 h-5 text-blue-400" />
+                </div>
+                <div>
+                  <h3 className="text-xl font-black tracking-tight text-white">Nuevo Proyecto</h3>
+                  <p className="text-[11px] text-slate-500 font-medium">Introduce un nombre identificador</p>
+                </div>
+              </div>
+
+              <input
+                autoFocus
+                type="text"
+                value={newProjectName}
+                onChange={e => setNewProjectName(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') createNewProject(newProjectName);
+                  if (e.key === 'Escape') setShowNewProjectModal(false);
+                }}
+                placeholder="Ej: AOIZ, PAMPLONA..."
+                className="w-full bg-white/5 border border-white/10 rounded-2xl px-5 py-4 text-white font-bold text-sm placeholder:normal-case placeholder:font-normal placeholder:text-slate-600 focus:outline-none focus:border-blue-500/50 transition-all"
+              />
+
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowNewProjectModal(false)}
+                  className="flex-1 py-3 rounded-2xl border border-white/10 text-slate-400 font-bold text-xs uppercase tracking-widest hover:bg-white/5 transition-all"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={() => createNewProject(newProjectName)}
+                  disabled={!newProjectName.trim()}
+                  className="flex-1 py-3 rounded-2xl bg-blue-600 hover:bg-blue-500 disabled:opacity-30 disabled:cursor-not-allowed text-white font-bold text-xs uppercase tracking-widest transition-all flex items-center justify-center gap-2"
+                >
+                  <Plus className="w-4 h-4" /> Crear
+                </button>
               </div>
             </motion.div>
           </motion.div>
