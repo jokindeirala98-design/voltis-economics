@@ -31,11 +31,9 @@ FORMATO ESTRUCTURADO ESTRICTO:
   "fechaInicio": "YYYY-MM-DD",
   "fechaFin": "YYYY-MM-DD",
   "titular": "...",
-  "cups": "Código CUPS completo",
   "tarifa": "ej: 2.0TD o 3.0TD",
   "consumo": [
-    { "periodo": "P1", "kwh": 0, "precioKwh": 0, "total": 0 },
-    { "periodo": "P2", "kwh": 0, "precioKwh": 0, "total": 0 }
+    { "periodo": "P1", "kwh": 0, "precioKwh": 0, "total": 0 }
   ],
   "potencia": [
     { "periodo": "P1", "kw": 0, "precioKwDia": 0, "dias": 0, "total": 0 }
@@ -57,12 +55,23 @@ FORMATO ESTRUCTURADO ESTRICTO:
 Devuelve el JSON plano. No incluyas backticks markdown (\`\`\`json).
 `;
 
+function cleanJson(text: string): string {
+  try {
+    const cleaned = text.replace(/```json\n?|```/g, '').trim();
+    const start = cleaned.indexOf('{');
+    const end = cleaned.lastIndexOf('}');
+    if (start === -1 || end === -1) return cleaned;
+    return cleaned.substring(start, end + 1);
+  } catch (e) {
+    return text;
+  }
+}
+
 export async function extractBillDataWithAI(pdfText: string) {
   if (!process.env.GEMINI_API_KEY) {
-    throw new Error('GEMINI_API_KEY no está configurado en las variables de entorno.');
+    throw new Error('GEMINI_API_KEY no está configurado en las variables de entorno de Vercel.');
   }
 
-  // Use Gemini Flash Latest to support all next-gen API keys
   const model = genAI.getGenerativeModel({ 
     model: 'gemini-flash-latest',
     generationConfig: {
@@ -75,17 +84,20 @@ export async function extractBillDataWithAI(pdfText: string) {
   try {
     const result = await model.generateContent(prompt);
     let output = result.response.text().trim();
-    
-    // Robust JSON extraction: capture everything from the first { to the last }
-    const match = output.match(/\{[\s\S]*\}/);
-    if (match) {
-      output = match[0];
-    }
-
-    const parsedData = JSON.parse(output);
-    return parsedData;
+    const cleaned = cleanJson(output);
+    return JSON.parse(cleaned);
   } catch (error: any) {
     console.error('Error in AI extraction:', error);
-    throw new Error(`Detalle técnico: ${error.message} \n(Si es parsing, el texto era inválido)`);
+    
+    // Si falla el modelo flash, intentamos pro como último recurso
+    try {
+        console.warn('Reintentando con gemini-pro-latest...');
+        const backupModel = genAI.getGenerativeModel({ model: 'gemini-pro-latest' });
+        const res2 = await backupModel.generateContent(prompt);
+        return JSON.parse(cleanJson(res2.response.text()));
+    } catch (e2) {
+        throw new Error(`Error crítico en Gemini: ${error.message}. Verifica tu API Key en Vercel.`);
+    }
   }
 }
+
