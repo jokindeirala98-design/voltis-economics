@@ -617,12 +617,13 @@ export default function ReportView({ bills, customOCs, onBack }: ReportViewProps
         @media print {
           @page {
             size: A4;
-            margin: 15mm;
+            margin: 0; /* No white borders allowed */
           }
           html, body { 
             background: #020617 !important; 
             margin: 0 !important; 
             padding: 0 !important;
+            height: 100%;
             -webkit-print-color-adjust: exact !important; 
             print-color-adjust: exact !important;
           }
@@ -631,23 +632,40 @@ export default function ReportView({ bills, customOCs, onBack }: ReportViewProps
             width: 100% !important; 
             max-width: none !important;
             background: #020617 !important; 
+            min-height: 100vh;
+            padding: 40px !important; /* Internal padding for breathability */
           }
-          .page-break-after { page-break-after: always !important; break-after: page !important; }
+          .page-break-after { 
+            page-break-after: always !important; 
+            break-after: page !important; 
+            margin-top: 40px !important;
+          }
           section { 
             page-break-inside: auto !important;
-            margin-bottom: 20px !important;
+            margin-bottom: 60px !important; /* Space between blocks */
+            padding: 0 20px !important;
           }
           /* Prevent cards and tables from splitting across pages */
           .bg-[#0f172a]/40, .glass, table, tr {
             page-break-inside: avoid !important;
             break-inside: avoid !important;
+            margin-bottom: 30px !important; /* Space after each card/table */
           }
           .glass { 
             background: rgba(15, 23, 42, 0.4) !important; 
             border: 1px solid rgba(255, 255, 255, 0.1) !important; 
             backdrop-filter: none !important; 
           }
-          h3, h4 { page-break-after: avoid !important; }
+          h3, h4 { 
+            page-break-after: avoid !important; 
+            margin-top: 40px !important;
+            margin-bottom: 20px !important;
+          }
+          /* Ensure charts take enough space but fit */
+          .recharts-responsive-container {
+            width: 100% !important;
+            height: 350px !important;
+          }
         }
         .custom-scrollbar::-webkit-scrollbar { width: 4px; }
         .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
