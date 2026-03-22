@@ -35,6 +35,9 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
 
 const MODELS = [
   'gemini-1.5-flash',
+  'gemini-1.5-flash-latest',
+  'gemini-1.5-pro',
+  'gemini-pro',
   'llama-3.3-70b-versatile',
   'llama-3.1-8b-instant'
 ];
@@ -47,17 +50,19 @@ async function callAIWithFallback(messages: any[], modelIndex = 0): Promise<{ co
     // 1. GEMINI PROVIDER
     if (currentModel.startsWith('gemini')) {
       if (!process.env.GEMINI_API_KEY) {
-        console.warn('GEMINI_API_KEY no configurado. Saltando al siguiente modelo...');
+        console.warn('GEMINI_API_KEY no configurado. Saltando...');
         return callAIWithFallback(messages, modelIndex + 1);
       }
+      
+      const modelId = currentModel.includes('/') ? currentModel : currentModel;
       const model = genAI.getGenerativeModel({ 
-        model: currentModel,
-        generationConfig: { responseMimeType: "application/json" }
+        model: modelId,
+        generationConfig: { responseMimeType: currentModel.includes('1.0') || currentModel === 'gemini-pro' ? undefined : "application/json" }
       });
+
       const prompt = messages.map(m => m.content).join('\n\n');
       const res = await model.generateContent(prompt);
       
-      // Safety check for response
       if (!res.response) throw new Error('Sin respuesta del modelo Gemini.');
       const content = res.response.text();
       return { content, usedModel: currentModel };
@@ -65,7 +70,7 @@ async function callAIWithFallback(messages: any[], modelIndex = 0): Promise<{ co
 
     // 2. GROQ PROVIDER
     if (!process.env.GROQ_API_KEY) {
-      console.warn('GROQ_API_KEY no configurado. Saltando al siguiente modelo...');
+      console.warn('GROQ_API_KEY no configurado. Saltando...');
       return callAIWithFallback(messages, modelIndex + 1);
     }
     const res = await groq.chat.completions.create({
@@ -79,18 +84,16 @@ async function callAIWithFallback(messages: any[], modelIndex = 0): Promise<{ co
   } catch (err: any) {
     console.error(`Error en modelo ${currentModel}:`, err.message);
 
-    // Fallback logic for common retryable/skippable errors
     const errorMessage = (err.message || '').toLowerCase();
     const isRateLimit = err.status === 429 || err.status === 503 || errorMessage.includes('rate limit');
-    const isNotFound = err.status === 404 || errorMessage.includes('not found') || errorMessage.includes('404');
+    const isNotFound = err.status === 404 || errorMessage.includes('not found') || errorMessage.includes('404') || errorMessage.includes('not_found');
     const isInvalidKey = errorMessage.includes('api key') || errorMessage.includes('invalid') || err.status === 401;
 
     if ((isRateLimit || isNotFound || isInvalidKey) && modelIndex < MODELS.length - 1) {
-      console.warn(`Modelo ${currentModel} falló (${errorMessage}). Reintentando con ${MODELS[modelIndex+1]}...`);
+      console.warn(`Fallback: ${currentModel} falló (${errorMessage}). Intentando ${MODELS[modelIndex+1]}...`);
       return callAIWithFallback(messages, modelIndex + 1);
     }
     
-    // If it's the last model or a non-retryable error, throw a descriptive error
     throw new Error(`[${currentModel}] ${err.message}`);
   }
 }
