@@ -1,7 +1,4 @@
-import Groq from 'groq-sdk';
-
-// Initialize the Groq client
-const groq = new Groq({ apiKey: process.env.GROQ_API_KEY || '' });
+// Solo usamos Gemini como motor principal, tal como en las versiones originales.
 
 const SYSTEM_PROMPT = `
 Eres un analista experto en facturación eléctrica de España. Tu misión es extraer cada dato de la factura con precisión absoluta.
@@ -34,67 +31,44 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
 
 const MODELS = [
-  'gemini-1.5-flash',
   'gemini-1.5-flash-latest',
-  'gemini-1.5-pro',
-  'gemini-pro',
-  'llama-3.3-70b-versatile',
-  'llama-3.1-8b-instant'
+  'gemini-1.5-pro-latest'
 ];
 
 async function callAIWithFallback(messages: any[], modelIndex = 0): Promise<{ content: string, usedModel: string }> {
   const currentModel = MODELS[modelIndex];
-  if (!currentModel) throw new Error('Se han agotado todos los modelos de IA disponibles o las llaves de API son inválidas.');
+  if (!currentModel) throw new Error('No se pudo conectar con el motor de IA de Gemini. Revisa tu clave de Google en Vercel.');
 
   try {
-    // 1. GEMINI PROVIDER
-    if (currentModel.startsWith('gemini')) {
-      if (!process.env.GEMINI_API_KEY) {
-        console.warn('GEMINI_API_KEY no configurado. Saltando...');
-        return callAIWithFallback(messages, modelIndex + 1);
-      }
-      
-      const modelId = currentModel.includes('/') ? currentModel : currentModel;
-      const model = genAI.getGenerativeModel({ 
-        model: modelId,
-        generationConfig: { responseMimeType: currentModel.includes('1.0') || currentModel === 'gemini-pro' ? undefined : "application/json" }
-      });
-
-      const prompt = messages.map(m => m.content).join('\n\n');
-      const res = await model.generateContent(prompt);
-      
-      if (!res.response) throw new Error('Sin respuesta del modelo Gemini.');
-      const content = res.response.text();
-      return { content, usedModel: currentModel };
+    if (!process.env.GEMINI_API_KEY) {
+      throw new Error('GEMINI_API_KEY no configurado en Vercel.');
     }
-
-    // 2. GROQ PROVIDER
-    if (!process.env.GROQ_API_KEY) {
-      console.warn('GROQ_API_KEY no configurado. Saltando...');
-      return callAIWithFallback(messages, modelIndex + 1);
-    }
-    const res = await groq.chat.completions.create({
-      messages,
+    
+    const model = genAI.getGenerativeModel({ 
       model: currentModel,
-      temperature: 0,
-      response_format: { type: 'json_object' }
+      generationConfig: { responseMimeType: "application/json" }
     });
-    return { content: res.choices[0]?.message?.content || '{}', usedModel: currentModel };
+
+    const prompt = messages.map(m => m.content).join('\n\n');
+    const res = await model.generateContent(prompt);
+    
+    if (!res.response) throw new Error('Sin respuesta del modelo Gemini.');
+    const content = res.response.text();
+    return { content, usedModel: currentModel };
 
   } catch (err: any) {
-    console.error(`Error en modelo ${currentModel}:`, err.message);
+    console.error(`Error en Gemini (${currentModel}):`, err.message);
 
     const errorMessage = (err.message || '').toLowerCase();
-    const isRateLimit = err.status === 429 || err.status === 503 || errorMessage.includes('rate limit');
-    const isNotFound = err.status === 404 || errorMessage.includes('not found') || errorMessage.includes('404') || errorMessage.includes('not_found');
-    const isInvalidKey = errorMessage.includes('api key') || errorMessage.includes('invalid') || err.status === 401;
+    const isRetryable = err.status === 429 || err.status === 503 || errorMessage.includes('rate limit');
+    const isNotFound = err.status === 404 || errorMessage.includes('not found') || errorMessage.includes('404');
 
-    if ((isRateLimit || isNotFound || isInvalidKey) && modelIndex < MODELS.length - 1) {
-      console.warn(`Fallback: ${currentModel} falló (${errorMessage}). Intentando ${MODELS[modelIndex+1]}...`);
+    if ((isRetryable || isNotFound) && modelIndex < MODELS.length - 1) {
+      console.warn(`Reintentando con modelo secundario de Gemini...`);
       return callAIWithFallback(messages, modelIndex + 1);
     }
     
-    throw new Error(`[${currentModel}] ${err.message}`);
+    throw new Error(`[Gemini Error] ${err.message}`);
   }
 }
 
