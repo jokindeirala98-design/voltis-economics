@@ -32,6 +32,8 @@ const CountUp = ({ value, duration = 1, decimals = 0 }: { value: number, duratio
     ScrollTrigger.create({
       trigger: elementRef.current,
       start: 'top 95%',
+      // We don't have access to the scroller here easily, 
+      // so let's use a simpler approach for CountUp if it's inside a scroller
       onEnter: () => {
         let startTime: number | null = null;
         const animate = (currentTime: number) => {
@@ -100,19 +102,47 @@ export default function ReportView({ bills, customOCs, onBack }: ReportViewProps
   // GSAP Orchestration
   useEffect(() => {
     const ctx = gsap.context(() => {
+      // 1. Hero Content Scroller
       gsap.to('.hero-content', {
         scale: 0.85, opacity: 0, y: -50,
-        scrollTrigger: { trigger: '#scene-1', start: 'top top', end: 'bottom 40%', scrub: true }
+        scrollTrigger: { 
+          trigger: '#scene-1', 
+          start: 'top top', 
+          end: 'bottom 40%', 
+          scrub: true,
+          scroller: containerRef.current
+        }
       });
 
+      // 2. Sections Reveal
       const sections = ['#scene-2', '#scene-3', '#scene-4', '#scene-5', '#scene-6'];
       sections.forEach(id => {
-        const tl = gsap.timeline({
-          scrollTrigger: { trigger: id, start: 'top 95%', end: 'top 30%', scrub: 1 }
+        gsap.from(id, {
+          opacity: 0,
+          y: 40,
+          filter: 'blur(10px)',
+          scrollTrigger: {
+            trigger: id,
+            start: 'top 95%',
+            end: 'top 40%',
+            scrub: 1,
+            scroller: containerRef.current
+          }
         });
-        tl.from(id, { opacity: 0, y: 50, filter: 'blur(10px)', duration: 1, ease: 'power2.out' });
+
         if (id === '#scene-2') {
-          tl.from('.kpi-card', { scale: 0.8, opacity: 0, stagger: 0.1, ease: 'back.out(1.4)' }, "-=0.2");
+          gsap.from('.kpi-card', {
+            scale: 0.8,
+            opacity: 0,
+            stagger: 0.1,
+            scrollTrigger: {
+              trigger: id,
+              start: 'top 80%',
+              end: 'top 40%',
+              scrub: 1,
+              scroller: containerRef.current
+            }
+          });
         }
       });
     }, containerRef);
