@@ -243,15 +243,15 @@ export default function ReportView({ bills, customOCs, onBack }: ReportViewProps
                </h4>
                <div className="h-[350px]">
                  <ResponsiveContainer width="100%" height="100%">
-                   <BarChart data={chartData} margin={{ top: 10, right: 40, left: -35, bottom: 0 }}>
+                   <BarChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
                      <XAxis dataKey="name" stroke="#64748b" fontSize={10} tickLine={false} axisLine={false} interval={0} />
-                     <YAxis stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} />
+                     <YAxis stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} width={45} />
                      <RechartsTooltip 
                        cursor={{fill: '#1e293b'}} 
                        contentStyle={{backgroundColor: '#0f172a', border: '1px solid #334155', borderRadius: '12px', fontSize: '10px'}} 
                        formatter={(val: any) => [`${Number(val).toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`, 'Total Factura']}
                      />
-                     <Bar dataKey="totalFactura" fill="url(#barGradient)" radius={[10, 10, 0, 0]} />
+                     <Bar dataKey="totalFactura" fill="url(#barGradient)" radius={[10, 10, 0, 0]} barSize={25} />
                      <defs>
                         <linearGradient id="barGradient" x1="0" y1="0" x2="0" y2="1">
                           <stop offset="0%" stopColor="#3b82f6" stopOpacity={1} />
@@ -298,10 +298,10 @@ export default function ReportView({ bills, customOCs, onBack }: ReportViewProps
                   </h4>
                   <div className="h-[300px]">
                     <ResponsiveContainer width="100%" height="100%">
-                      <ComposedChart data={chartData} margin={{ top: 10, right: 40, left: -35, bottom: 0 }}>
+                      <ComposedChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
                         <XAxis dataKey="name" hide />
                         <YAxis yAxisId="left" hide />
-                        <YAxis yAxisId="right" orientation="right" stroke="#64748b" fontSize={10} tickLine={false} axisLine={false} tickFormatter={(v) => `${v.toFixed(3)}€`} />
+                        <YAxis yAxisId="right" orientation="right" stroke="#64748b" fontSize={10} tickLine={false} axisLine={false} width={55} tickFormatter={(v) => `${v.toFixed(3)}€`} />
                         <RechartsTooltip 
                           cursor={{ stroke: '#3b82f6', strokeWidth: 2, strokeDasharray: '5 5' }}
                           contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #334155', borderRadius: '12px', fontSize: '10px' }}
@@ -311,7 +311,7 @@ export default function ReportView({ bills, customOCs, onBack }: ReportViewProps
                           ]}
                         />
                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#ffffff05" />
-                        <Bar yAxisId="left" dataKey="totalKwh" fill="#3b82f6" radius={[5,5,0,0]} opacity={0.3} />
+                        <Bar yAxisId="left" dataKey="totalKwh" fill="#3b82f6" radius={[5,5,0,0]} opacity={0.3} barSize={25} />
                         <Line yAxisId="right" type="monotone" dataKey="avgPrice" stroke="#10b981" strokeWidth={5} dot={{r: 6, fill: '#10b981', stroke: '#020617', strokeWidth: 2}} activeDot={{ r: 10, fill: '#34d399', stroke: '#fff', strokeWidth: 2 }} />
                       </ComposedChart>
                     </ResponsiveContainer>
