@@ -55,8 +55,8 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
 
 const MODELS = [
-  'gemini-1.5-pro-latest',
-  'gemini-1.5-flash-latest',
+  'gemini-1.5-flash',
+  'gemini-1.5-pro',
   'llama-3.3-70b-versatile',
   'llama-3.1-8b-instant'
 ];
@@ -73,7 +73,7 @@ async function callAIWithFallback(messages: any[], modelIndex = 0): Promise<{ co
         return callAIWithFallback(messages, modelIndex + 1);
       }
       const model = genAI.getGenerativeModel({ 
-        model: currentModel.replace('-latest', ''),
+        model: currentModel,
         generationConfig: { responseMimeType: "application/json" }
       });
       const prompt = messages.map(m => m.content).join('\n\n');
@@ -96,11 +96,12 @@ async function callAIWithFallback(messages: any[], modelIndex = 0): Promise<{ co
     return { content: res.choices[0]?.message?.content || '{}', usedModel: currentModel };
 
   } catch (err: any) {
-    // Handle Rate Limits (429) or Overloads (503) or specific API errors
+    // Handle Rate Limits (429), Overloads (503), or Not Found (404)
     const isRateLimit = err.status === 429 || err.status === 503 || err.message?.includes('Rate limit');
+    const isNotFound = err.status === 404 || err.message?.includes('not found') || err.message?.includes('404');
     
-    if (isRateLimit && modelIndex < MODELS.length - 1) {
-      console.warn(`Modelo ${currentModel} saturado/limitado. Reintentando con ${MODELS[modelIndex+1]}...`);
+    if ((isRateLimit || isNotFound) && modelIndex < MODELS.length - 1) {
+      console.warn(`Modelo ${currentModel} ${isNotFound ? 'no encontrado' : 'saturado'}. Reintentando con ${MODELS[modelIndex+1]}...`);
       return callAIWithFallback(messages, modelIndex + 1);
     }
     throw err;
