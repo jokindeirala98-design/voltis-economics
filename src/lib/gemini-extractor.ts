@@ -1,7 +1,7 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import Groq from 'groq-sdk';
 
-// Initialize the Gemini AI client
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
+// Initialize the Groq client
+const groq = new Groq({ apiKey: process.env.GROQ_API_KEY || '' });
 
 const SYSTEM_PROMPT = `
 Eres un analista experto en facturación eléctrica del sector energético de España. 
@@ -13,16 +13,16 @@ REGLAS DE EXTRACCIÓN (CRÍTICO):
 3. **Agrupación MANDATORIA en otrosConceptos (UNIFICACIÓN AUTOMÁTICA):** 
    - 'Bono Social': Agrupa todo concepto de bono social o financiación del bono.
    - 'Alquiler de equipos': Agrupa alquiler de equipos y contadores.
-   - 'Peajes y Transportes': AGRUPA OBLIGATORIAMENTE aquí peajes y cargos SOLO SI se cobran de forma independiente en el total. REGLA DE ORO: Si los peajes ya vienen incluidos dentro del "Término de Energía" o "Término de Potencia" (frecuente en los desgloses de página 2), NO los extraigas en otrosConceptos, o estarás duplicando el dinero y el sumatorio total fallará.
-   - 'Compensación Excedentes': AGRUPA OBLIGATORIAMENTE aquí todas las variantes de compensacion por excedentes, excedentes autoconsumo, etc. Súmalos en este UNICO concepto.
+   - 'Peajes y Transportes': AGRUPA OBLIGATORIAMENTE aquí peajes y cargos SOLO SI se cobran de forma independiente en el total. REGLA DE ORO: Si los peajes ya vienen incluidos dentro del "Término de Energía" o "Término de Potencia", NO los extraigas en otrosConceptos, o estarás duplicando el dinero y el sumatorio total fallará.
+   - 'Compensación Excedentes': Todas las variantes de compensacion por excedentes, excedentes autoconsumo, etc. Súmalos en este UNICO concepto.
    - 'Impuesto Eléctrico' e 'IVA / IGIC': Extrae los impuestos.
    TODO el dinero restante que no encaje, ponlo con su nombre original. Ningún importe debe quedarse fuera.
 4. **Calculos Totales y CUADRE MATEMÁTICO (CRÍTICO):** 
-   - El sumatorio de (costeTotalConsumo + costeTotalPotencia + TODOS los otrosConceptos) DEBE SER EXACTAMENTE IGUAL a totalFactura. Si no cuadra, estás duplicando desgloses de la página 2.
+   - El sumatorio de (costeTotalConsumo + costeTotalPotencia + TODOS los otrosConceptos) DEBE SER EXACTAMENTE IGUAL a totalFactura.
    - 'consumoTotalKwh': Suma de kWh P1-P6.
    - 'costeTotalConsumo': Suma total en euros de la energía facturada (antes de impuestos).
    - 'costeMedioKwh': Calcula: (costeTotalConsumo / consumoTotalKwh) con 4 decimales.
-   - 'costeTotalPotencia': Suma en euros ÚNICAMENTE de la potencia fija contratada. ¡Bajo NINGÚN CONCEPTO sumes aquí penalizaciones por "Excesos de potencia"! Van a "otrosConceptos".
+   - 'costeTotalPotencia': Suma en euros ÚNICAMENTE de la potencia fija contratada. No sumar penalizaciones.
 5. **Cantidades:** Usa números (floats). Punto decimal.
 
 FORMATO ESTRUCTURADO ESTRICTO:
@@ -54,38 +54,29 @@ FORMATO ESTRUCTURADO ESTRICTO:
   "costeTotalPotencia": 0,
   "totalFactura": 0
 }
-Devuelve el JSON plano. No incluyas backticks markdown (\`\`\`json).
+Devuelve EXCLUSIVAMENTE el JSON.
 `;
 
 export async function extractBillDataWithAI(pdfText: string) {
-  if (!process.env.GEMINI_API_KEY) {
-    throw new Error('GEMINI_API_KEY no está configurado en las variables de entorno.');
+  if (!process.env.GROQ_API_KEY) {
+    throw new Error('GROQ_API_KEY no está configurado en las variables de entorno.');
   }
 
-  // Use Gemini Flash Latest to support all next-gen API keys
-  const model = genAI.getGenerativeModel({ 
-    model: 'gemini-flash-latest',
-    generationConfig: {
-      responseMimeType: "application/json",
-    }
-  });
-
-  const prompt = `${SYSTEM_PROMPT}\n\nTEXTO DE LA FACTURA:\n${pdfText}\n\nEXTRAE EL JSON A CONTINUACIÓN:`;
+  const prompt = `${SYSTEM_PROMPT}\n\nTEXTO DE LA FACTURA:\n${pdfText}`;
 
   try {
-    const result = await model.generateContent(prompt);
-    let output = result.response.text().trim();
+    const chatCompletion = await groq.chat.completions.create({
+      messages: [{ role: 'user', content: prompt }],
+      model: 'llama-3.1-70b-versatile',
+      response_format: { type: 'json_object' }
+    });
     
-    // Robust JSON extraction: capture everything from the first { to the last }
-    const match = output.match(/\{[\s\S]*\}/);
-    if (match) {
-      output = match[0];
-    }
-
+    let output = chatCompletion.choices[0]?.message?.content || '{}';
+    
     const parsedData = JSON.parse(output);
     return parsedData;
   } catch (error: any) {
-    console.error('Error in AI extraction:', error);
+    console.error('Error in Groq AI extraction:', error);
     throw new Error(`Detalle técnico: ${error.message} \n(Si es parsing, el texto era inválido)`);
   }
 }
