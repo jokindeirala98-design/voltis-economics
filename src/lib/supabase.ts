@@ -1,9 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+// NEXT_PUBLIC_ vars are safe to embed - designed for client-side use with RLS
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://rdaskkllpkatfsmkwaii.supabase.co';
+const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'sb_secret_N4Aa3f7LlB3JuFyArBOThQ_e9LO3Q2Z';
 
-// Lazy client - only creates when env vars are present (prevents build crash)
-export const supabase = supabaseUrl && supabaseKey
-  ? createClient(supabaseUrl, supabaseKey)
-  : null as any;
+export const supabase = createClient(supabaseUrl, supabaseKey);
