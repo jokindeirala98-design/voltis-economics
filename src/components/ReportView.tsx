@@ -108,11 +108,11 @@ export default function ReportView({ bills, customOCs, onBack }: ReportViewProps
       const sections = ['#scene-2', '#scene-3', '#scene-4', '#scene-5', '#scene-6'];
       sections.forEach(id => {
         const tl = gsap.timeline({
-          scrollTrigger: { trigger: id, start: 'top 85%', end: 'top 20%', scrub: 1 }
+          scrollTrigger: { trigger: id, start: 'top 95%', end: 'top 30%', scrub: 1 }
         });
-        tl.fromTo(id, { opacity: 0, y: 40, filter: 'blur(10px)' }, { opacity: 1, y: 0, filter: 'blur(0px)' });
+        tl.from(id, { opacity: 0, y: 50, filter: 'blur(10px)', duration: 1, ease: 'power2.out' });
         if (id === '#scene-2') {
-          tl.from('.kpi-card', { scale: 0.9, opacity: 0, stagger: 0.1, ease: 'power2.out' }, "-=0.2");
+          tl.from('.kpi-card', { scale: 0.8, opacity: 0, stagger: 0.1, ease: 'back.out(1.4)' }, "-=0.2");
         }
       });
     }, containerRef);
@@ -181,6 +181,9 @@ export default function ReportView({ bills, customOCs, onBack }: ReportViewProps
   };
 
   const reactToPrintFn = useReactToPrint({ contentRef, documentTitle: `Voltis_Report_${filteredValidBills[0]?.titular?.split(' ')[0] || 'Client'}` });
+
+  // Fallback for empty data
+  const hasData = filteredValidBills.length > 0;
 
   return (
     <div ref={containerRef} className="relative w-full bg-[#020617] text-white overflow-y-auto selection:bg-blue-500/30 scroll-smooth">
@@ -466,9 +469,9 @@ export default function ReportView({ bills, customOCs, onBack }: ReportViewProps
           .no-print { display: none !important; }
           .report-container { background: #020617 !important; color: white !important; }
           section { 
-            width: 210mm !important;
+            width: 100% !important;
             min-height: 297mm !important; 
-            padding: 40mm 20mm !important;
+            padding: 20mm !important;
             page-break-after: always !important; 
             break-after: page !important;
             display: flex !important;
