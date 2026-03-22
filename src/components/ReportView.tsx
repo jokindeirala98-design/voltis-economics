@@ -6,7 +6,7 @@ import {
   ComposedChart, Line, PieChart, Pie, Cell, CartesianGrid
 } from 'recharts';
 import { ArrowLeft, Printer, Zap, Activity, Info, TrendingUp, DollarSign, BarChart3, PieChart as PieIcon, CheckCircle2 } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 
 interface ReportViewProps {
   bills: ExtractedBill[];
@@ -18,6 +18,23 @@ const COLORS = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#6366f1'
 
 export default function ReportView({ bills, customOCs, onBack }: ReportViewProps) {
   const contentRef = useRef<HTMLDivElement>(null);
+  const [selectedBillId, setSelectedBillId] = React.useState<string | null>(null);
+
+  const selectedBill = useMemo(() => {
+    if (!selectedBillId) return null;
+    const b = bills.find(b => b.id === selectedBillId);
+    if (!b) return null;
+    
+    // Calculate full total including custom OCs
+    const energia = b.costeTotalConsumo || 0;
+    const potencia = b.costeTotalPotencia || 0;
+    let impYOtros = 0;
+    b.otrosConceptos?.forEach(oc => impYOtros += oc.total);
+    customOCs[b.id]?.forEach(oc => impYOtros += oc.total);
+    
+    return { ...b, totalCalculado: energia + potencia + impYOtros };
+  }, [selectedBillId, bills, customOCs]);
+
   const reactToPrintFn = useReactToPrint({
     contentRef,
     documentTitle: 'Voltis_Anual_Economics_Report',
@@ -279,9 +296,18 @@ export default function ReportView({ bills, customOCs, onBack }: ReportViewProps
                       <ComposedChart data={chartData}>
                         <XAxis dataKey="name" hide />
                         <YAxis yAxisId="left" hide />
-                        <YAxis yAxisId="right" orientation="right" />
-                        <Bar yAxisId="left" dataKey="totalKwh" fill="#334155" radius={[5,5,0,0]} opacity={0.2} />
-                        <Line yAxisId="right" type="monotone" dataKey="avgPrice" stroke="#10b981" strokeWidth={5} dot={{r: 8, fill: '#10b981', stroke: '#020617', strokeWidth: 2}} />
+                        <YAxis yAxisId="right" orientation="right" stroke="#64748b" fontSize={10} tickLine={false} axisLine={false} tickFormatter={(v) => `${v.toFixed(3)}€`} />
+                        <RechartsTooltip 
+                          cursor={{ stroke: '#3b82f6', strokeWidth: 2, strokeDasharray: '5 5' }}
+                          contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #334155', borderRadius: '12px', fontSize: '10px' }}
+                          formatter={(value: any, name: any) => [
+                            name === 'avgPrice' ? `${value.toFixed(4)} €/kWh` : `${value.toFixed(0)} kWh`,
+                            name === 'avgPrice' ? 'Precio Medio' : 'Consumo Total'
+                          ]}
+                        />
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#ffffff05" />
+                        <Bar yAxisId="left" dataKey="totalKwh" fill="#3b82f6" radius={[5,5,0,0]} opacity={0.3} />
+                        <Line yAxisId="right" type="monotone" dataKey="avgPrice" stroke="#10b981" strokeWidth={5} dot={{r: 6, fill: '#10b981', stroke: '#020617', strokeWidth: 2}} activeDot={{ r: 10, fill: '#34d399', stroke: '#fff', strokeWidth: 2 }} />
                       </ComposedChart>
                     </ResponsiveContainer>
                     <div className="flex justify-between items-center mt-6">
@@ -328,21 +354,24 @@ export default function ReportView({ bills, customOCs, onBack }: ReportViewProps
                       <th className="px-8 py-6 bg-white/5 text-right">TOTAL kWh</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-white/5 font-medium">
+                  <tbody className="divide-y divide-white/5 font-medium text-slate-400">
                     {tableData.map((row, i) => {
-                      const allKwhValues = tableData.flatMap(r => [r.P1, r.P2, r.P3, r.P4, r.P5, r.P6]);
+                      const kwhTotals = tableData.map(d => d.totalKwh);
+                      const isTopKwh = isTop3(row.totalKwh, kwhTotals);
                       return (
-                        <tr key={i} className="hover:bg-white/5 transition-colors">
-                          <td className="px-8 py-5 font-black text-[13px]">{row.name}</td>
+                        <tr key={i} className="hover:bg-white/5 transition-colors group">
+                          <td className="px-8 py-5 font-black text-[13px] text-white group-hover:text-blue-400 transition-colors">{row.name}</td>
                           {[1,2,3,4,5,6].map(p => {
                             const val = (row as any)[`P${p}`];
                             return (
-                               <td key={p} className={`px-6 py-5 text-center text-[12px] ${isTop3(val, allKwhValues) ? 'text-red-500 font-black italic underline' : 'text-white'}`}>
+                               <td key={p} className="px-6 py-5 text-center text-[12px]">
                                  {val > 0 ? val.toFixed(0) : '-'}
                                </td>
                             );
                           })}
-                          <td className="px-8 py-5 bg-white/5 font-black text-white text-[13px] text-right">{row.totalKwh.toFixed(0)}</td>
+                          <td className={`px-8 py-5 bg-white/5 font-black text-right text-[13px] transition-all ${isTopKwh ? 'text-red-500 scale-110' : 'text-white'}`}>
+                            {row.totalKwh.toFixed(0)}
+                          </td>
                         </tr>
                       );
                     })}
@@ -370,21 +399,24 @@ export default function ReportView({ bills, customOCs, onBack }: ReportViewProps
                       <th className="px-8 py-6 bg-white/5 text-right">MEDIO</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-white/5 font-medium">
+                  <tbody className="divide-y divide-white/5 font-medium text-slate-400">
                     {tableData.map((row, i) => {
-                      const allPriceValues = tableData.flatMap(r => Object.values(r.prices));
+                      const avgPrices = tableData.map(d => d.avgPrice);
+                      const isTopPrice = isTop3(row.avgPrice, avgPrices);
                       return (
                         <tr key={i} className="hover:bg-white/5 transition-colors">
-                          <td className="px-8 py-5 font-black text-[13px]">{row.name}</td>
+                          <td className="px-8 py-5 font-black text-[13px] text-white">{row.name}</td>
                           {[1,2,3,4,5,6].map(p => {
                             const val = (row.prices as any)[`P${p}`];
                             return (
-                              <td key={p} className={`px-6 py-5 text-center text-[12px] ${isTop3(val, allPriceValues) ? 'text-red-500 font-black' : 'text-slate-400'}`}>
+                              <td key={p} className="px-6 py-5 text-center text-[12px]">
                                 {val > 0 ? val.toFixed(4) : '-'}
                               </td>
                             );
                           })}
-                          <td className="px-8 py-5 bg-white/5 font-black text-blue-400 text-[13px] text-right">{row.avgPrice.toFixed(4)}</td>
+                          <td className={`px-8 py-5 bg-white/5 font-black text-right text-[13px] transition-all ${isTopPrice ? 'text-red-500 scale-110' : 'text-blue-400'}`}>
+                            {row.avgPrice.toFixed(4)}
+                          </td>
                         </tr>
                       );
                     })}
@@ -409,17 +441,30 @@ export default function ReportView({ bills, customOCs, onBack }: ReportViewProps
                       <th className="px-8 py-6 bg-white/5 text-right">TOTAL</th>
                     </tr>
                   </thead>
-                   <tbody className="divide-y divide-white/5 font-medium">
+                  <tbody className="divide-y divide-white/5 font-medium">
                     {tableData.map((row, i) => {
                       const allTotals = tableData.map(d => d.totalFactura);
                       const isTopTotal = isTop3(row.totalFactura, allTotals);
+                      // Find actual bill for modal
+                      const billId = bills[i]?.id;
                       return (
-                        <tr key={i} className="hover:bg-white/5 transition-colors">
-                          <td className="px-8 py-6 font-black text-[14px] text-white">{row.name}</td>
+                        <tr 
+                          key={i} 
+                          className="hover:bg-white/5 transition-all group cursor-pointer"
+                          onClick={() => setSelectedBillId(billId)}
+                        >
+                          <td className="px-8 py-6">
+                            <div className="flex flex-col gap-1">
+                              <span className="font-black text-[14px] text-white group-hover:text-purple-400 transition-colors">{row.name}</span>
+                              <span className="text-[10px] uppercase text-slate-500 flex items-center gap-1">
+                                <Info className="w-3 h-3" /> Ver detalles
+                              </span>
+                            </div>
+                          </td>
                           <td className="px-8 py-6 text-right text-[13px] text-white">{row.energia.toLocaleString('es-ES', { minimumFractionDigits: 2 })} €</td>
                           <td className="px-8 py-6 text-right text-[13px] text-white">{row.potencia.toLocaleString('es-ES', { minimumFractionDigits: 2 })} €</td>
                           <td className="px-8 py-6 text-right text-[13px] text-slate-300">{row.otros.toLocaleString('es-ES', { minimumFractionDigits: 2 })} €</td>
-                          <td className={`px-8 py-6 bg-white/5 font-black text-2xl tracking-tighter text-right ${isTopTotal ? 'text-red-500' : 'text-white'}`}>
+                          <td className={`px-8 py-6 bg-white/5 font-black text-2xl tracking-tighter text-right transition-all group-hover:bg-white/10 ${isTopTotal ? 'text-red-500 scale-105' : 'text-white'}`}>
                             {row.totalFactura.toLocaleString('es-ES', { minimumFractionDigits: 2 })} €
                           </td>
                         </tr>
@@ -475,14 +520,121 @@ export default function ReportView({ bills, customOCs, onBack }: ReportViewProps
 
       </div>
 
+      {/* Dynamic Detail Modal */}
+      <AnimatePresence>
+        {selectedBillId && selectedBill && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm no-print">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="bg-[#0f172a] border border-white/10 rounded-[32px] w-full max-w-2xl overflow-hidden shadow-2xl"
+            >
+              <div className="p-8 border-b border-white/5 flex items-center justify-between bg-gradient-to-r from-purple-500/10 to-transparent">
+                <div>
+                   <h2 className="text-xl font-black tracking-tight text-white uppercase italic">{selectedBill.fileName}</h2>
+                   <p className="text-xs text-muted-foreground uppercase tracking-widest mt-1">Desglose Técnico Detallado</p>
+                </div>
+                <button 
+                  onClick={() => setSelectedBillId(null)}
+                  className="w-10 h-10 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center transition-colors"
+                >
+                  <ArrowLeft className="w-5 h-5 rotate-90" />
+                </button>
+              </div>
+              
+              <div className="p-8 max-h-[60vh] overflow-y-auto custom-scrollbar">
+                <div className="space-y-8">
+                  {/* Summary */}
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="bg-white/5 p-4 rounded-2xl border border-white/5 text-center">
+                      <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest block mb-1">Total Factura</span>
+                      <span className="text-2xl font-black">{selectedBill.totalCalculado.toLocaleString('es-ES', { minimumFractionDigits: 2 })} €</span>
+                    </div>
+                    <div className="bg-white/5 p-4 rounded-2xl border border-white/5 text-center">
+                      <span className="text-[10px] font-bold text-blue-400 uppercase tracking-widest block mb-1">Fecha</span>
+                      <span className="text-2xl font-black">{selectedBill.fechaInicio?.split('-').reverse().join('/')}</span>
+                    </div>
+                  </div>
+
+                  {/* Consumo Detail */}
+                  <div className="space-y-4">
+                    <h5 className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-400">Desglose de Energía</h5>
+                    <div className="space-y-2">
+                       {selectedBill.consumo?.map((c, idx) => (
+                         <div key={idx} className="flex items-center justify-between p-3 bg-white/5 rounded-xl border border-white/5">
+                            <span className="font-bold text-white tracking-widest">{c.periodo}</span>
+                            <div className="flex items-center gap-6">
+                              <span className="text-slate-400 text-xs font-bold">{c.kwh.toFixed(1)} kWh</span>
+                              <span className="font-black text-blue-400 min-w-[70px] text-right">{c.total.toFixed(2)} €</span>
+                            </div>
+                         </div>
+                       ))}
+                    </div>
+                  </div>
+
+                   {/* Potencia Detail */}
+                   <div className="space-y-4">
+                    <h5 className="text-[10px] font-black uppercase tracking-[0.2em] text-amber-400">Desglose de Potencia</h5>
+                    <div className="space-y-2">
+                       {selectedBill.potencia?.map((p, idx) => (
+                         <div key={idx} className="flex items-center justify-between p-3 bg-white/5 rounded-xl border border-white/5">
+                            <span className="font-bold text-white tracking-widest">{p.periodo}</span>
+                            <div className="flex items-center gap-6">
+                              <span className="text-slate-400 text-xs font-bold">{p.kw} kW · {p.dias} días</span>
+                              <span className="font-black text-amber-400 min-w-[70px] text-right">{p.total.toFixed(2)} €</span>
+                            </div>
+                         </div>
+                       ))}
+                    </div>
+                  </div>
+
+                  {/* Others Detail */}
+                  <div className="space-y-4">
+                    <h5 className="text-[10px] font-black uppercase tracking-[0.2em] text-purple-400">Otros Conceptos</h5>
+                    <div className="space-y-2 pb-4">
+                       {[...(selectedBill.otrosConceptos || []), ...(customOCs[selectedBill.id] || [])].map((oc, idx) => (
+                         <div key={idx} className="flex items-center justify-between p-3 bg-white/5 rounded-xl border border-white/5 border-l-purple-500/50">
+                            <span className="font-bold text-white text-xs">{oc.concepto}</span>
+                            <span className="font-black text-slate-100">{oc.total.toFixed(2)} €</span>
+                         </div>
+                       ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       <style jsx global>{`
         @media print {
-          body { background: #020617 !important; border: none; }
+          html, body { 
+            background: #020617 !important; 
+            margin: 0 !important; 
+            padding: 0 !important;
+            -webkit-print-color-adjust: exact !important; 
+            print-color-adjust: exact !important;
+          }
           .no-print { display: none !important; }
-          .report-container { width: 210mm; min-height: 297mm; background: #020617 !important; }
-          .page-break-after { page-break-after: always; }
-          .glass { background: rgba(15, 23, 42, 0.4) !important; border: 1px solid rgba(255, 255, 255, 0.05) !important; backdrop-filter: none !important; }
+          .report-container { 
+            width: 100% !important; 
+            max-width: none !important;
+            background: #020617 !important; 
+            box-shadow: none !important;
+          }
+          .page-break-after { page-break-after: always !important; break-after: page !important; }
+          section { min-height: 297mm !important; }
+          .glass { 
+            background: rgba(15, 23, 42, 0.4) !important; 
+            border: 1px solid rgba(255, 255, 255, 0.05) !important; 
+            backdrop-filter: none !important; 
+          }
         }
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.1); border-radius: 10px; }
       `}</style>
     </motion.div>
   );
