@@ -98,19 +98,42 @@ export default function ReportView({ bills, customOCs, onBack, projectName = 'PR
 
   useEffect(() => {
     const ctx = gsap.context(() => {
+      // Set 3D perspective on container for all 3D effects
+      gsap.set(containerRef.current, { perspective: 1200, transformStyle: 'preserve-3d' });
+
+      // Hero: subtle parallax on scroll-out
       gsap.to('.hero-content', {
-        scale: 0.9, opacity: 0.3, y: -40,
-        scrollTrigger: { trigger: '#scene-1', start: 'top top', end: 'bottom 40%', scrub: 1 }
+        scale: 0.92, opacity: 0.2, y: -60,
+        scrollTrigger: { trigger: '#scene-1', start: 'top top', end: 'bottom 30%', scrub: 1.5 }
       });
-      ['#scene-2','#scene-3','#scene-4','#scene-5','#scene-6','#scene-7'].forEach(id => {
+
+      // Scene entrances: 3D tilt + rise + fade — immediateRender:false keeps them visible initially
+      ['#scene-2','#scene-3','#scene-4','#scene-5','#scene-6','#scene-7'].forEach((id, i) => {
         gsap.from(id, {
-          y: 40, opacity: 0.8, duration: 1, ease: 'power2.out',
-          scrollTrigger: { trigger: id, start: 'top 90%', once: true }
+          y: 80, opacity: 0, rotateX: 10,
+          transformOrigin: '50% 0%',
+          duration: 1.1, ease: 'power3.out',
+          immediateRender: false,     // ← prevents dark initial state
+          scrollTrigger: { trigger: id, start: 'top 88%', once: true }
         });
+
         if (id === '#scene-2') {
+          // KPI cards: 3D card-flip entrance, staggered
           gsap.from('.kpi-card', {
-            scale: 0.9, opacity: 0.2, stagger: 0.1, duration: 0.7, ease: 'back.out(1.7)',
-            scrollTrigger: { trigger: id, start: 'top 80%', once: true }
+            scale: 0.85, opacity: 0, rotateY: 20, y: 30,
+            stagger: 0.12, duration: 0.95, ease: 'back.out(1.4)',
+            immediateRender: false,   // ← critical: don't set dark state on mount
+            scrollTrigger: { trigger: id, start: 'top 82%', once: true }
+          });
+        }
+
+        // Additional glow-pulse on stat numbers
+        if (id === '#scene-3' || id === '#scene-4') {
+          gsap.from(`${id} .glass`, {
+            scale: 0.96, opacity: 0, duration: 0.8, ease: 'power2.out',
+            stagger: 0.08,
+            immediateRender: false,
+            scrollTrigger: { trigger: id, start: 'top 85%', once: true }
           });
         }
       });
@@ -611,37 +634,50 @@ export default function ReportView({ bills, customOCs, onBack, projectName = 'PR
         .report-container { width: 100%; position: relative; }
         section { opacity: 1; }
         .glass { background: rgba(15,23,42,0.4) !important; backdrop-filter: blur(40px) !important; }
-        .text-glow { text-shadow: 0 0 30px rgba(255,255,255,0.4); }
+        .text-glow { text-shadow: 0 0 30px rgba(255,255,255,0.4), 0 0 80px rgba(59,130,246,0.2); }
         .report-page { min-height: 100vh; width: 100%; display: flex; }
-        @page { size: A4 landscape; margin: 0; }
+        .kpi-card { will-change: transform, opacity; }
+        /* 3D perspective for sections */
+        .report-container section { transform-style: preserve-3d; }
+        @page { size: A4 portrait; margin: 12mm 14mm; }
         @media print {
           html, body { 
             background: #020617 !important; 
             margin: 0 !important; padding: 0 !important;
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
+            font-size: 10px !important;
           }
           .no-print { display: none !important; }
           .report-container { background: #020617 !important; color: white !important; }
+          /* ALL elements: force visible, no transforms */
+          * { opacity: 1 !important; transform: none !important; }
           .report-page {
-            width: 297mm !important;
-            height: 210mm !important;
-            min-height: unset !important;
-            max-height: 210mm !important;
-            padding: 12mm 16mm !important;
+            width: 100% !important;
+            min-height: auto !important;
+            height: auto !important;
+            max-height: none !important;
+            padding: 0 !important;
             page-break-after: always !important;
             break-after: page !important;
-            overflow: hidden !important;
-            display: flex !important;
-            flex-direction: column !important;
-            align-items: center !important;
-            justify-content: center !important;
-            opacity: 1 !important;
-            transform: none !important;
-            box-sizing: border-box !important;
+            overflow: visible !important;
+            display: block !important;
+            background: #020617 !important;
           }
-          table, tr, .kpi-card { break-inside: avoid !important; page-break-inside: avoid !important; }
-          .recharts-responsive-container { height: 220px !important; width: 100% !important; }
+          /* Last page — no forced break */
+          .report-page:last-child { page-break-after: auto !important; break-after: auto !important; }
+          /* Tables — compact fit */
+          table { font-size: 8px !important; width: 100% !important; border-collapse: collapse !important; }
+          th, td { padding: 3px 6px !important; }
+          /* Charts — explicit height so recharts renders */
+          .recharts-responsive-container { height: 260px !important; width: 100% !important; }
+          .recharts-wrapper { height: 260px !important; }
+          /* KPI grid — 4 on one row in portrait */
+          .kpi-card { padding: 12px !important; border-radius: 16px !important; }
+          /* avoid splitting cards or rows */
+          table, tr, .kpi-card, .pdf-avoid-break { break-inside: avoid !important; page-break-inside: avoid !important; }
+          /* Glass containers visible in print */
+          .glass { background: rgba(15,23,42,0.8) !important; border: 1px solid rgba(255,255,255,0.08) !important; }
         }
         .custom-scrollbar::-webkit-scrollbar { width: 4px; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 10px; }
