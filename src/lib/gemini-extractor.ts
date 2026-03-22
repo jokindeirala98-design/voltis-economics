@@ -7,54 +7,47 @@ const SYSTEM_PROMPT = `
 Eres un analista experto en facturación eléctrica del sector energético de España. 
 Tu objetivo es extraer datos detallados de consumos, potencias y precios de la factura proporcionada, devolviendo ÚNICAMENTE un JSON.
 
-REGLAS DE EXTRACCIÓN (CRÍTICO):
-1. **Periodos P1 a P6:** Las facturas pueden tener desde P1 hasta P6. Extrae cada periodo existente (kwh, precioKwh, total). Si no hay consumo en ese periodo, omítelo.
-2. **Cálculos Faltantes:** Si solo aparece Total y kWh de un periodo, calcula el precioKwh (Total / kWh). Si hay precio fijo, ponlo en todos los periodos facturados.
-3. **Agrupación MANDATORIA en otrosConceptos (UNIFICACIÓN AUTOMÁTICA):** 
-   - 'Bono Social': Agrupa todo concepto de bono social o financiación del bono.
-   - 'Alquiler de equipos': Agrupa alquiler de equipos y contadores.
-   - 'Peajes y Transportes': AGRUPA OBLIGATORIAMENTE aquí peajes y cargos SOLO SI se cobran de forma independiente en el total. REGLA DE ORO: Si los peajes ya vienen incluidos dentro del "Término de Energía" o "Término de Potencia", NO los extraigas en otrosConceptos, o estarás duplicando el dinero y el sumatorio total fallará.
-   - 'Compensación Excedentes': Todas las variantes de compensacion por excedentes, excedentes autoconsumo, etc. Súmalos en este UNICO concepto.
-   - 'Impuesto Eléctrico' e 'IVA / IGIC': Extrae los impuestos.
-   TODO el dinero restante que no encaje, ponlo con su nombre original. Ningún importe debe quedarse fuera.
-4. **Calculos Totales y CUADRE MATEMÁTICO (CRÍTICO):** 
-   - El sumatorio de (costeTotalConsumo + costeTotalPotencia + TODOS los otrosConceptos) DEBE SER EXACTAMENTE IGUAL a totalFactura.
-   - 'consumoTotalKwh': Suma de kWh P1-P6.
-   - 'costeTotalConsumo': Suma total en euros de la energía facturada (antes de impuestos).
-   - 'costeMedioKwh': Calcula: (costeTotalConsumo / consumoTotalKwh) con 4 decimales.
-   - 'costeTotalPotencia': Suma en euros ÚNICAMENTE de la potencia fija contratada. No sumar penalizaciones.
-5. **Cantidades:** Usa números (floats). Punto decimal.
+REGLAS DE ORO DE EXTRACCIÓN (LEYES IRREVOCABLES):
+1. **CUADRE MATEMÁTICO PERFECTO**: La suma de (costeTotalConsumo + costeTotalPotencia + SUMA de todos los otrosConceptos) DEBE SER EXACTAMENTE IGUAL a totalFactura. Si no cuadras al céntimo, revisa si has duplicado conceptos de la "página de desglose" que ya estaban en el "resumen".
+2. **Periodos P1 a P6**: Extrae cada periodo existente. Si la factura es 2.0TD tendrá P1-P3 en energía y P1-P2 en potencia. Si es 3.0TD tendrá P1-P6.
+3. **Cálculos de Precios**: Si falta el precio unitario pero tienes el total y los kWh, calcúlalo (Total / kWh).
+4. **Unificación de Otros Conceptos**:
+   - 'Bono Social': Suma cualquier línea de bono social o financiación.
+   - 'Alquiler de equipos': Agrupa alquiler de contador/equipo.
+   - 'Impuesto Eléctrico' e 'IVA / IGIC': Extrae los importes exactos.
+   - 'Peajes y Cargos': SOLO extráelos si NO están ya incluidos en los precios de energía/potencia. Si aparecen desglosados en el resumen general, agrúpalos.
+5. **Penalizaciones**: Los excesos de potencia o reactiva van SIEMPRE a 'otrosConceptos', NUNCA sumados a 'costeTotalPotencia'.
 
-FORMATO ESTRUCTURADO ESTRICTO:
+EJEMPLO DE SALIDA ESPERADA:
 {
-  "comercializadora": "...",
-  "fechaInicio": "YYYY-MM-DD",
-  "fechaFin": "YYYY-MM-DD",
-  "titular": "...",
-  "cups": "Código CUPS completo",
-  "tarifa": "ej: 2.0TD o 3.0TD",
+  "comercializadora": "IBERDROLA",
+  "fechaInicio": "2024-01-01",
+  "fechaFin": "2024-01-31",
+  "titular": "JUAN PEREZ",
+  "cups": "ES0021000000000000XX",
+  "tarifa": "2.0TD",
   "consumo": [
-    { "periodo": "P1", "kwh": 0, "precioKwh": 0, "total": 0 },
-    { "periodo": "P2", "kwh": 0, "precioKwh": 0, "total": 0 }
+    { "periodo": "P1", "kwh": 150.5, "precioKwh": 0.1524, "total": 22.94 },
+    { "periodo": "P2", "kwh": 200.0, "precioKwh": 0.1210, "total": 24.20 }
   ],
   "potencia": [
-    { "periodo": "P1", "kw": 0, "precioKwDia": 0, "dias": 0, "total": 0 }
+    { "periodo": "P1", "kw": 4.6, "precioKwDia": 0.1039, "dias": 31, "total": 14.82 },
+    { "periodo": "P2", "kw": 4.6, "precioKwDia": 0.0321, "dias": 31, "total": 4.58 }
   ],
   "otrosConceptos": [
-    { "concepto": "Bono Social", "total": 0 },
-    { "concepto": "Alquiler de equipos", "total": 0 },
-    { "concepto": "Peajes y Transportes", "total": 0 },
-    { "concepto": "Compensación Excedentes", "total": 0 },
-    { "concepto": "Impuesto Eléctrico", "total": 0 },
-    { "concepto": "IVA / IGIC", "total": 0 }
+    { "concepto": "Bono Social", "total": 1.25 },
+    { "concepto": "Alquiler de equipos", "total": 0.82 },
+    { "concepto": "Impuesto Eléctrico", "total": 2.15 },
+    { "concepto": "IVA / IGIC", "total": 10.20 }
   ],
-  "consumoTotalKwh": 0,
-  "costeTotalConsumo": 0,
-  "costeMedioKwh": 0,
-  "costeTotalPotencia": 0,
-  "totalFactura": 0
+  "consumoTotalKwh": 350.5,
+  "costeTotalConsumo": 47.14,
+  "costeMedioKwh": 0.1345,
+  "costeTotalPotencia": 19.40,
+  "totalFactura": 80.96
 }
-Devuelve EXCLUSIVAMENTE el JSON.
+
+Devuelve EXCLUSIVAMENTE el JSON resultante. Sin preámbulos ni explicaciones.
 `;
 
 export async function extractBillDataWithAI(pdfText: string) {
@@ -68,6 +61,7 @@ export async function extractBillDataWithAI(pdfText: string) {
     const chatCompletion = await groq.chat.completions.create({
       messages: [{ role: 'user', content: prompt }],
       model: 'llama-3.3-70b-versatile',
+      temperature: 0,
       response_format: { type: 'json_object' }
     });
     
