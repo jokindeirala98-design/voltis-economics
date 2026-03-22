@@ -1,7 +1,7 @@
 import * as XLSX from 'xlsx';
 import { ExtractedBill } from './types';
 
-export const importBillsFromExcel = async (file: File): Promise<{ bills: ExtractedBill[], customOCs: {id: string, label: string, sources: string[]}[] }> => {
+export const importBillsFromExcel = async (file: File): Promise<{ bills: ExtractedBill[], customOCs: Record<string, { concepto: string; total: number }[]> }> => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -131,7 +131,7 @@ export const importBillsFromExcel = async (file: File): Promise<{ bills: Extract
           return bill;
         });
 
-        resolve({ bills: rebuiltBills, customOCs: customOCsDetected });
+        resolve({ bills: rebuiltBills, customOCs: {} });
 
       } catch (err: any) {
         reject(new Error("Error leyendo Excel: " + err.message));

@@ -31,6 +31,7 @@ FORMATO ESTRUCTURADO ESTRICTO:
   "fechaInicio": "YYYY-MM-DD",
   "fechaFin": "YYYY-MM-DD",
   "titular": "...",
+  "cups": "Código CUPS completo",
   "tarifa": "ej: 2.0TD o 3.0TD",
   "consumo": [
     { "periodo": "P1", "kwh": 0, "precioKwh": 0, "total": 0 },

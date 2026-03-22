@@ -3,6 +3,7 @@ export interface ConsumoItem {
   kwh: number;
   precioKwh: number;
   total: number;
+  precioEstimado?: boolean;
 }
 
 export interface PotenciaItem {
@@ -26,6 +27,7 @@ export interface ExtractedBill {
   
   comercializadora?: string;
   titular?: string;
+  cups?: string;
   fechaInicio?: string;
   fechaFin?: string;
   tarifa?: string;
@@ -40,4 +42,12 @@ export interface ExtractedBill {
   costeTotalPotencia?: number;
   
   totalFactura?: number;
+}
+
+export interface ProjectWorkspace {
+  id: string;
+  name: string;
+  bills: ExtractedBill[];
+  customOCs: Record<string, any>;
+  updatedAt: number;
 }

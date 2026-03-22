@@ -10,25 +10,28 @@ import { motion } from 'framer-motion';
 
 interface ReportViewProps {
   bills: ExtractedBill[];
+  customOCs: Record<string, { concepto: string; total: number }[]>;
   onBack: () => void;
 }
 
 const COLORS = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#6366f1'];
 
-export default function ReportView({ bills, onBack }: ReportViewProps) {
+export default function ReportView({ bills, customOCs, onBack }: ReportViewProps) {
   const contentRef = useRef<HTMLDivElement>(null);
   const reactToPrintFn = useReactToPrint({
     contentRef,
     documentTitle: 'Voltis_Anual_Economics_Report',
   });
 
-  const validBills = useMemo(() => bills.filter(b => b.status === 'success').sort((a,b) => {
+  const validBills = useMemo(() => bills.filter(b => b.status !== 'error').sort((a,b) => {
     return (a.fechaInicio || '').localeCompare(b.fechaInicio || '');
   }), [bills]);
 
   const { chartData, pieData, summaryStats, tableData } = useMemo(() => {
     const totals = { energetic: 0, power: 0, taxes: 0, others: 0, global: 0, kwh: 0 };
     
+    const shortDate = (d: string) => d ? d.split('-').reverse().slice(0, 2).join('/') : '';
+
     const cData = validBills.map(b => {
       const p1 = b.consumo?.find(c => c.periodo === 'P1')?.kwh || 0;
       const p2 = b.consumo?.find(c => c.periodo === 'P2')?.kwh || 0;
@@ -43,25 +46,36 @@ export default function ReportView({ bills, onBack }: ReportViewProps) {
       let otros = 0;
 
       b.otrosConceptos?.forEach(oc => {
-        if (oc.concepto.includes('Impuesto') || oc.concepto.includes('IVA')) impuestos += oc.total;
+        if (oc.concepto.toLowerCase().includes('impuesto') || oc.concepto.toLowerCase().includes('iva')) impuestos += oc.total;
         else otros += oc.total;
       });
+
+      // Factor in custom concepts
+      if (customOCs[b.id]) {
+        customOCs[b.id].forEach(oc => {
+          if (oc.concepto.toLowerCase().includes('impuesto') || oc.concepto.toLowerCase().includes('iva')) impuestos += oc.total;
+          else otros += oc.total;
+        });
+      }
 
       totals.energetic += energia;
       totals.power += potencia;
       totals.taxes += impuestos;
       totals.others += otros;
-      totals.global += (b.totalFactura || 0);
+      const usedTotalFactura = energia + potencia + impuestos + otros;
+      totals.global += usedTotalFactura;
       totals.kwh += (b.consumoTotalKwh || 0);
 
-      const monthLabel = b.fechaInicio ? new Date(b.fechaInicio).toLocaleString('es-ES', { month: 'short', year: '2-digit' }) : 'Factura';
+      const label = b.fechaInicio && b.fechaFin 
+        ? `${shortDate(b.fechaInicio)}-${shortDate(b.fechaFin)}`
+        : (b.fechaInicio ? new Date(b.fechaInicio).toLocaleString('es-ES', { month: 'short', year: '2-digit' }) : 'Factura');
 
       return {
-        name: monthLabel,
+        name: label,
         P1: p1, P2: p2, P3: p3, P4: p4, P5: p5, P6: p6,
         totalKwh: b.consumoTotalKwh || 0,
         avgPrice: b.costeMedioKwh || 0,
-        totalFactura: b.totalFactura || 0,
+        totalFactura: usedTotalFactura,
         energia,
         potencia,
         otros: impuestos + otros,
@@ -138,7 +152,7 @@ export default function ReportView({ bills, onBack }: ReportViewProps) {
                   VOLTIS ANUAL <br/> ECONOMICS
                 </h1>
               </div>
-              <p className="text-blue-400 font-bold tracking-[0.4em] text-xs ml-32 uppercase opacity-80">Análisis Energético de Precisión</p>
+              <p className="text-blue-400 font-bold tracking-[0.4em] text-[10px] ml-32 uppercase opacity-80">Análisis Energético de Precisión</p>
             </div>
             <div className="text-right flex flex-col items-end">
               <span className="text-xs uppercase tracking-widest text-muted-foreground mb-2">Informe de Análisis</span>
@@ -149,7 +163,7 @@ export default function ReportView({ bills, onBack }: ReportViewProps) {
           <div className="grid grid-cols-3 gap-12 mt-24">
             <div className="flex flex-col gap-1">
               <span className="text-[10px] uppercase tracking-widest text-muted-foreground">CUPS / IDENTIFICADOR</span>
-              <span className="text-lg font-medium tracking-wider">ES00000XXXXXXXXXXXXXX</span>
+               <span className="text-lg font-medium tracking-wider">{validBills[0]?.cups || 'ES00000XXXXXXXXXXXXXX'}</span>
             </div>
             <div className="flex flex-col gap-1">
               <span className="text-[10px] uppercase tracking-widest text-muted-foreground">TARIFA CONTRATADA</span>
@@ -207,12 +221,12 @@ export default function ReportView({ bills, onBack }: ReportViewProps) {
             {/* Monthly Bar Chart */}
             <div className="bg-[#0f172a]/40 border border-white/5 p-10 rounded-[40px] shadow-2xl">
                <h4 className="text-sm font-bold text-muted-foreground uppercase tracking-widest mb-8 flex items-center gap-2">
-                 <BarChart3 className="w-4 h-4 text-blue-500" /> Evolución del Gasto Mensual (€)
+                 <BarChart3 className="w-4 h-4 text-blue-500" /> Evolución del Gasto por Factura (€)
                </h4>
                <div className="h-[350px]">
                  <ResponsiveContainer width="100%" height="100%">
                    <BarChart data={chartData}>
-                     <XAxis dataKey="name" stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} />
+                     <XAxis dataKey="name" stroke="#64748b" fontSize={10} tickLine={false} axisLine={false} interval={0} />
                      <YAxis stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} />
                      <RechartsTooltip cursor={{fill: '#1e293b'}} contentStyle={{backgroundColor: '#0f172a', border: '1px solid #334155', borderRadius: '12px'}} />
                      <Bar dataKey="totalFactura" fill="url(#barGradient)" radius={[10, 10, 0, 0]} />
@@ -265,20 +279,20 @@ export default function ReportView({ bills, onBack }: ReportViewProps) {
                       <ComposedChart data={chartData}>
                         <XAxis dataKey="name" hide />
                         <YAxis yAxisId="left" hide />
-                        <YAxis yAxisId="right" orientation="right" hide />
-                        <Bar yAxisId="left" dataKey="totalKwh" fill="#334155" radius={[5,5,0,0]} opacity={0.5} />
-                        <Line yAxisId="right" type="monotone" dataKey="avgPrice" stroke="#10b981" strokeWidth={4} dot={{r: 6, fill: '#10b981'}} />
+                        <YAxis yAxisId="right" orientation="right" />
+                        <Bar yAxisId="left" dataKey="totalKwh" fill="#334155" radius={[5,5,0,0]} opacity={0.2} />
+                        <Line yAxisId="right" type="monotone" dataKey="avgPrice" stroke="#10b981" strokeWidth={5} dot={{r: 8, fill: '#10b981', stroke: '#020617', strokeWidth: 2}} />
                       </ComposedChart>
                     </ResponsiveContainer>
                     <div className="flex justify-between items-center mt-6">
                        <div className="flex flex-col">
-                         <span className="text-[#10b981] text-xs font-black uppercase">Precio Medio</span>
-                         <span className="text-xl font-bold">{(chartData.reduce((a,b)=>a+b.avgPrice,0)/chartData.length).toFixed(4)} <small>€/kWh</small></span>
+                         <span className="text-[#10b981] text-[10px] font-black uppercase tracking-widest mb-1">Precio Medio</span>
+                         <span className="text-2xl font-black text-white">{(chartData.reduce((a,b)=>a+b.avgPrice,0)/chartData.length).toFixed(4)} <small className="text-xs opacity-50">€/kWh</small></span>
                        </div>
                        <div className="h-10 w-[1px] bg-white/10" />
-                       <div className="flex flex-col">
-                         <span className="text-slate-400 text-xs font-black uppercase">Eficiencia</span>
-                         <span className="text-xl font-bold">A++</span>
+                       <div className="flex flex-col text-right">
+                         <span className="text-slate-400 text-[10px] font-black uppercase tracking-widest mb-1">Carga Max.</span>
+                         <span className="text-2xl font-black text-white">{Math.max(...chartData.map(d => d.totalKwh)).toFixed(0)} <small className="text-xs opacity-50">kWh</small></span>
                        </div>
                     </div>
                </div>
@@ -323,9 +337,9 @@ export default function ReportView({ bills, onBack }: ReportViewProps) {
                           {[1,2,3,4,5,6].map(p => {
                             const val = (row as any)[`P${p}`];
                             return (
-                              <td key={p} className={`px-6 py-5 text-center text-[12px] ${isTop3(val, allKwhValues) ? 'text-red-500 font-black italic underline' : ''} ${getHeatColor(val)}`}>
-                                {val > 0 ? val.toFixed(0) : '-'}
-                              </td>
+                               <td key={p} className={`px-6 py-5 text-center text-[12px] ${isTop3(val, allKwhValues) ? 'text-red-500 font-black italic underline' : 'text-white'}`}>
+                                 {val > 0 ? val.toFixed(0) : '-'}
+                               </td>
                             );
                           })}
                           <td className="px-8 py-5 bg-white/5 font-black text-white text-[13px] text-right">{row.totalKwh.toFixed(0)}</td>
@@ -395,16 +409,22 @@ export default function ReportView({ bills, onBack }: ReportViewProps) {
                       <th className="px-8 py-6 bg-white/5 text-right">TOTAL</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-white/5 font-medium">
-                    {tableData.map((row, i) => (
-                      <tr key={i} className="hover:bg-white/5 transition-colors">
-                        <td className="px-8 py-6 font-black text-[14px]">{row.name}</td>
-                        <td className="px-8 py-6 text-right text-[13px]">{row.energia.toLocaleString('es-ES', { minimumFractionDigits: 2 })} €</td>
-                        <td className="px-8 py-6 text-right text-[13px]">{row.potencia.toLocaleString('es-ES', { minimumFractionDigits: 2 })} €</td>
-                        <td className="px-8 py-6 text-right text-[13px] text-slate-500">{row.otros.toLocaleString('es-ES', { minimumFractionDigits: 2 })} €</td>
-                        <td className="px-8 py-6 bg-white/5 font-black text-2xl tracking-tighter text-right">{row.totalFactura.toLocaleString('es-ES', { minimumFractionDigits: 2 })} €</td>
-                      </tr>
-                    ))}
+                   <tbody className="divide-y divide-white/5 font-medium">
+                    {tableData.map((row, i) => {
+                      const allTotals = tableData.map(d => d.totalFactura);
+                      const isTopTotal = isTop3(row.totalFactura, allTotals);
+                      return (
+                        <tr key={i} className="hover:bg-white/5 transition-colors">
+                          <td className="px-8 py-6 font-black text-[14px] text-white">{row.name}</td>
+                          <td className="px-8 py-6 text-right text-[13px] text-white">{row.energia.toLocaleString('es-ES', { minimumFractionDigits: 2 })} €</td>
+                          <td className="px-8 py-6 text-right text-[13px] text-white">{row.potencia.toLocaleString('es-ES', { minimumFractionDigits: 2 })} €</td>
+                          <td className="px-8 py-6 text-right text-[13px] text-slate-300">{row.otros.toLocaleString('es-ES', { minimumFractionDigits: 2 })} €</td>
+                          <td className={`px-8 py-6 bg-white/5 font-black text-2xl tracking-tighter text-right ${isTopTotal ? 'text-red-500' : 'text-white'}`}>
+                            {row.totalFactura.toLocaleString('es-ES', { minimumFractionDigits: 2 })} €
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -416,8 +436,15 @@ export default function ReportView({ bills, onBack }: ReportViewProps) {
         <section className="min-h-[1100px] p-24 bg-[#0a0f1e] flex flex-col items-center justify-center relative text-center">
             <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-blue-500 via-indigo-600 to-emerald-500" />
             
-            <motion.div initial={{y: 20, opacity: 0}} animate={{y:0, opacity: 1}} transition={{delay: 0.5}} className="mb-24">
-               <img src="/mascot.png" className="w-[500px] object-contain drop-shadow-[0_0_60px_rgba(59,130,246,0.3)]" alt="Voltis Mascot" />
+            <motion.div initial={{y: 20, opacity: 0}} animate={{y:0, opacity: 1}} transition={{delay: 0.5}} className="mb-24 flex flex-col items-center gap-12">
+               <div className="w-48 h-48 rounded-[40px] bg-gradient-to-br from-blue-600/20 to-indigo-600/20 flex items-center justify-center border border-white/10 shadow-[0_0_80px_rgba(59,130,246,0.15)] relative group">
+                  <div className="absolute inset-0 bg-blue-500/10 blur-[40px] rounded-full opacity-50 group-hover:opacity-100 transition-opacity" />
+                  <img src="/logo.png" className="w-24 h-24 object-contain mix-blend-screen relative z-10" alt="Voltis Logo Final" />
+               </div>
+               <div className="flex flex-col gap-2">
+                 <h4 className="text-4xl font-black tracking-[0.2em] uppercase text-white">READY FOR <br/>SAVINGS</h4>
+                 <div className="h-1 w-20 bg-blue-500 mx-auto rounded-full mt-2" />
+               </div>
             </motion.div>
 
             <div className="grid grid-cols-3 gap-10 w-full max-w-5xl text-left">

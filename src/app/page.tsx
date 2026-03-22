@@ -12,7 +12,7 @@ import { toast } from 'sonner';
 import { ExtractedBill, ProjectWorkspace } from '@/lib/types';
 import FileTable from '@/components/FileTable';
 import { exportBillsToExcel } from '@/lib/export';
-import { importFromExcel } from '@/lib/import';
+import { importBillsFromExcel } from '@/lib/import-bills';
 import ReportView from '@/components/ReportView';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -78,7 +78,7 @@ export default function EnergyBillsApp() {
     const excelFiles = acceptedFiles.filter(f => f.name.endsWith('.xlsx'));
     if (excelFiles.length > 0) {
       const file = excelFiles[0];
-      const result = await importFromExcel(file);
+      const result = await importBillsFromExcel(file);
       if (result) {
         setBills(result.bills);
         setCustomOCs(result.customOCs);
@@ -159,7 +159,64 @@ export default function EnergyBillsApp() {
     });
   };
 
-  if (showReport) return <div className="min-h-screen bg-[#020617] p-8 md:p-16"><ReportView bills={bills} onBack={() => setShowReport(false)} /></div>;
+  const handleExport = () => {
+    // 1. Unified concepts
+    const allOCNames = new Set<string>();
+    bills.forEach(b => {
+      b.otrosConceptos?.forEach(oc => allOCNames.add(oc.concepto));
+      customOCs[b.id]?.forEach(oc => allOCNames.add(oc.concepto));
+    });
+
+    const concepts: any[] = [
+      { key: 'comercializadora', label: 'Compañía' },
+      { key: 'titular', label: 'Titular' },
+      { key: 'tarifa', label: 'Tarifa' },
+      { key: 'fechaInicio', label: 'Fecha Inicio' },
+      { key: 'fechaFin', label: 'Fecha Fin' },
+      { key: 'divider1', label: 'Energía', isSeparator: true },
+      { key: 'consumoTotalKwh', label: 'TOTAL CONSUMO (kWh)' },
+      ...['P1', 'P2', 'P3', 'P4', 'P5', 'P6'].map(p => ({ key: `cons_${p}`, label: `Consumo ${p} (kWh)` })),
+      { key: 'costeTotalConsumo', label: 'TOTAL COSTE CONSUMO (€)' },
+      { key: 'costeMedioKwh', label: 'COSTE MEDIO (€/kWh)' },
+      { key: 'divider2', label: 'Potencia', isSeparator: true },
+      { key: 'costeTotalPotencia', label: 'TOTAL COSTE POTENCIA (€)' },
+      ...['P1', 'P2', 'P3', 'P4', 'P5', 'P6'].map(p => ({ key: `pot_${p}`, label: `Potencia ${p} (€)` })),
+      { key: 'divider3', label: 'Otros Conceptos', isSeparator: true },
+      ...Array.from(allOCNames).map(name => ({ key: `oc_${name}`, label: name })),
+      { key: 'divider4', label: 'Totales', isSeparator: true },
+      { key: 'totalFactura', label: 'TOTAL FACTURA (€)' },
+    ];
+
+    const getVal = (bill: ExtractedBill, key: string): string | number => {
+      if (key.startsWith('cons_')) {
+        const p = key.split('_')[1];
+        return bill.consumo?.find(c => c.periodo === p)?.kwh || 0;
+      }
+      if (key.startsWith('pot_')) {
+        const p = key.split('_')[1];
+        return bill.potencia?.find(c => c.periodo === p)?.total || 0;
+      }
+      if (key.startsWith('oc_')) {
+        const name = key.substring(3);
+        const ocVal = bill.otrosConceptos?.find(c => c.concepto === name)?.total || 0;
+        const cVal = customOCs[bill.id]?.find(c => c.concepto === name)?.total || 0;
+        return ocVal + cVal;
+      }
+      if (key === 'totalFactura') {
+        const e = bill.costeTotalConsumo || 0;
+        const p = bill.costeTotalPotencia || 0;
+        let ocs = 0;
+        bill.otrosConceptos?.forEach(oc => ocs += oc.total);
+        customOCs[bill.id]?.forEach(oc => ocs += oc.total);
+        return e + p + ocs;
+      }
+      return (bill as any)[key] || 0;
+    };
+
+    exportBillsToExcel(bills, concepts, getVal);
+  };
+
+  if (showReport) return <div className="min-h-screen bg-[#020617] p-8 md:p-16"><ReportView bills={bills} customOCs={customOCs} onBack={() => setShowReport(false)} /></div>;
 
   if (!isAuthenticated) {
     return (
@@ -310,7 +367,7 @@ export default function EnergyBillsApp() {
                 Informe Visual IA
               </button>
               <button 
-                onClick={() => exportBillsToExcel(bills, customOCs)}
+                onClick={handleExport}
                 disabled={bills.length === 0}
                 className="px-8 py-4 bg-slate-900 border border-white/10 text-white font-black text-xs uppercase tracking-widest rounded-full hover:bg-slate-800 transition-all disabled:opacity-20 flex items-center gap-3"
               >

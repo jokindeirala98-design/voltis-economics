@@ -40,8 +40,13 @@ export async function POST(req: Request) {
       const extractedData = await extractBillDataWithAI(pdfText);
       
       return NextResponse.json({
-        success: true,
-        data: extractedData
+        status: 'success',
+        bill: {
+          ...extractedData,
+          id: Math.random().toString(36).substr(2, 9),
+          fileName: (file as File).name || 'factura.pdf',
+          status: 'success'
+        }
       });
     } catch (llmError) {
       console.error('Error interpreting data with AI:', llmError);
