@@ -98,43 +98,43 @@ export default function ReportView({ bills, customOCs, onBack, projectName = 'PR
 
   useEffect(() => {
     const ctx = gsap.context(() => {
-      // Set 3D perspective on container for all 3D effects
-      gsap.set(containerRef.current, { perspective: 1200, transformStyle: 'preserve-3d' });
-
-      // Hero: subtle parallax on scroll-out
+      // Hero: smooth parallax on scroll-out
       gsap.to('.hero-content', {
-        scale: 0.92, opacity: 0.2, y: -60,
+        scale: 0.92, opacity: 0.15, y: -60,
         scrollTrigger: { trigger: '#scene-1', start: 'top top', end: 'bottom 30%', scrub: 1.5 }
       });
 
-      // Scene entrances: 3D tilt + rise + fade — immediateRender:false keeps them visible initially
-      ['#scene-2','#scene-3','#scene-4','#scene-5','#scene-6','#scene-7'].forEach((id, i) => {
-        gsap.from(id, {
-          y: 80, opacity: 0, rotateX: 10,
-          transformOrigin: '50% 0%',
-          duration: 1.1, ease: 'power3.out',
-          immediateRender: false,     // ← prevents dark initial state
-          scrollTrigger: { trigger: id, start: 'top 88%', once: true }
-        });
+      // Scene entrances — transformPerspective applies perspective per-element
+      // so position:fixed modals still anchor to viewport (no container perspective needed)
+      ['#scene-2','#scene-3','#scene-4','#scene-5','#scene-6','#scene-7'].forEach((id) => {
+        gsap.fromTo(id,
+          { y: 70, opacity: 0, transformPerspective: 900, rotationX: 8, scale: 0.98 },
+          { y: 0, opacity: 1, rotationX: 0, scale: 1, duration: 1.1, ease: 'power3.out',
+            immediateRender: false,
+            scrollTrigger: { trigger: id, start: 'top 88%', once: true }
+          }
+        );
 
         if (id === '#scene-2') {
-          // KPI cards: 3D card-flip entrance, staggered
-          gsap.from('.kpi-card', {
-            scale: 0.85, opacity: 0, rotateY: 20, y: 30,
-            stagger: 0.12, duration: 0.95, ease: 'back.out(1.4)',
-            immediateRender: false,   // ← critical: don't set dark state on mount
-            scrollTrigger: { trigger: id, start: 'top 82%', once: true }
-          });
+          // KPI cards: staggered 3D Y-flip entrance
+          gsap.fromTo('.kpi-card',
+            { transformPerspective: 800, rotationY: 25, scale: 0.88, opacity: 0, y: 20 },
+            { rotationY: 0, scale: 1, opacity: 1, y: 0,
+              stagger: 0.13, duration: 0.9, ease: 'back.out(1.5)',
+              immediateRender: false,
+              scrollTrigger: { trigger: id, start: 'top 82%', once: true }
+            }
+          );
         }
 
-        // Additional glow-pulse on stat numbers
         if (id === '#scene-3' || id === '#scene-4') {
-          gsap.from(`${id} .glass`, {
-            scale: 0.96, opacity: 0, duration: 0.8, ease: 'power2.out',
-            stagger: 0.08,
-            immediateRender: false,
-            scrollTrigger: { trigger: id, start: 'top 85%', once: true }
-          });
+          gsap.fromTo(`${id} .glass`,
+            { scale: 0.94, opacity: 0 },
+            { scale: 1, opacity: 1, duration: 0.8, ease: 'power2.out', stagger: 0.07,
+              immediateRender: false,
+              scrollTrigger: { trigger: id, start: 'top 85%', once: true }
+            }
+          );
         }
       });
     }, containerRef);
@@ -636,48 +636,70 @@ export default function ReportView({ bills, customOCs, onBack, projectName = 'PR
         .glass { background: rgba(15,23,42,0.4) !important; backdrop-filter: blur(40px) !important; }
         .text-glow { text-shadow: 0 0 30px rgba(255,255,255,0.4), 0 0 80px rgba(59,130,246,0.2); }
         .report-page { min-height: 100vh; width: 100%; display: flex; }
-        .kpi-card { will-change: transform, opacity; }
-        /* 3D perspective for sections */
-        .report-container section { transform-style: preserve-3d; }
-        @page { size: A4 portrait; margin: 12mm 14mm; }
+        .kpi-card { will-change: transform, opacity; backface-visibility: visible; }
+        @page { size: A4 landscape; margin: 8mm 10mm; }
         @media print {
           html, body { 
             background: #020617 !important; 
             margin: 0 !important; padding: 0 !important;
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
-            font-size: 10px !important;
           }
           .no-print { display: none !important; }
           .report-container { background: #020617 !important; color: white !important; }
-          /* ALL elements: force visible, no transforms */
-          * { opacity: 1 !important; transform: none !important; }
+          /* Reset any GSAP transforms for print */
+          .report-page, .report-page * { 
+            animation: none !important;
+            transition: none !important;
+          }
           .report-page {
-            width: 100% !important;
-            min-height: auto !important;
-            height: auto !important;
-            max-height: none !important;
-            padding: 0 !important;
+            width: 277mm !important;
+            height: 190mm !important;
+            min-height: unset !important;
+            max-height: 190mm !important;
+            padding: 8mm 12mm !important;
             page-break-after: always !important;
             break-after: page !important;
-            overflow: visible !important;
-            display: block !important;
+            overflow: hidden !important;
+            display: flex !important;
+            flex-direction: column !important;
+            align-items: flex-start !important;
+            justify-content: flex-start !important;
+            opacity: 1 !important;
+            transform: none !important;
+            box-sizing: border-box !important;
             background: #020617 !important;
           }
-          /* Last page — no forced break */
-          .report-page:last-child { page-break-after: auto !important; break-after: auto !important; }
-          /* Tables — compact fit */
-          table { font-size: 8px !important; width: 100% !important; border-collapse: collapse !important; }
-          th, td { padding: 3px 6px !important; }
-          /* Charts — explicit height so recharts renders */
-          .recharts-responsive-container { height: 260px !important; width: 100% !important; }
-          .recharts-wrapper { height: 260px !important; }
-          /* KPI grid — 4 on one row in portrait */
-          .kpi-card { padding: 12px !important; border-radius: 16px !important; }
-          /* avoid splitting cards or rows */
-          table, tr, .kpi-card, .pdf-avoid-break { break-inside: avoid !important; page-break-inside: avoid !important; }
-          /* Glass containers visible in print */
-          .glass { background: rgba(15,23,42,0.8) !important; border: 1px solid rgba(255,255,255,0.08) !important; }
+          .report-page:last-child { page-break-after: auto !important; }
+          /* Force ALL elements visible and remove transforms */
+          .kpi-card, .glass, table, th, td, h1, h2, h3, h4, p, span, div {
+            opacity: 1 !important;
+            transform: none !important;
+          }
+          /* KPI grid compact */
+          .kpi-card { padding: 10px 14px !important; border-radius: 16px !important; margin: 0 !important; }
+          /* Tables compact */
+          table { font-size: 7.5px !important; width: 100% !important; }
+          th, td { padding: 3px 5px !important; }
+          /* Charts — explicit pixel size for recharts to render */
+          [class*='recharts-responsive-container'] { 
+            width: 480px !important; 
+            height: 200px !important; 
+            display: block !important;
+          }
+          .recharts-wrapper { 
+            width: 480px !important; 
+            height: 200px !important; 
+          }
+          /* Glass visible in print */
+          .glass { 
+            background: rgba(15,23,42,0.9) !important; 
+            border: 1px solid rgba(255,255,255,0.1) !important; 
+          }
+          table, tr, .kpi-card, .pdf-avoid-break { 
+            break-inside: avoid !important; 
+            page-break-inside: avoid !important; 
+          }
         }
         .custom-scrollbar::-webkit-scrollbar { width: 4px; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 10px; }
