@@ -15,6 +15,7 @@ import { exportBillsToExcel } from '@/lib/export';
 import { importBillsFromExcel } from '@/lib/import-bills';
 import ReportView from '@/components/ReportView';
 import { motion, AnimatePresence } from 'framer-motion';
+import { fetchAllProjectsFromDB, syncProjectToDB, deleteProjectFromDB } from '@/lib/supabase-sync';
 
 export default function EnergyBillsApp() {
   const [bills, setBills] = useState<ExtractedBill[]>([]);
@@ -45,31 +46,35 @@ export default function EnergyBillsApp() {
     }
   };
 
-  // Persistence logic...
+  // Persistence logic (Supabase Cloud Storage)
   useEffect(() => {
-    const saved = localStorage.getItem('voltis_projects');
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      setSavedProjects(parsed);
-      const last = localStorage.getItem('voltis_last_project') || parsed[0]?.id || 'default';
-      setCurrentProjectId(last);
-      const active = parsed.find((p: any) => p.id === last);
-      if (active) {
-        setBills(active.bills || []);
-        setCustomOCs(active.customOCs || {});
+    const initDB = async () => {
+      const dbProjects = await fetchAllProjectsFromDB();
+      if (dbProjects && dbProjects.length > 0) {
+        setSavedProjects(dbProjects);
+        const last = localStorage.getItem('voltis_last_project') || dbProjects[0].id;
+        setCurrentProjectId(last);
+        const active = dbProjects.find(p => p.id === last) || dbProjects[0];
+        if (active) {
+          setBills(active.bills || []);
+          setCustomOCs(active.customOCs || {});
+        }
+      } else {
+        const init = [{ id: crypto.randomUUID(), name: 'PROYECTO INICIAL', bills: [], customOCs: {}, updatedAt: Date.now() }];
+        setSavedProjects(init);
+        setBills([]);
+        setCustomOCs({});
+        await syncProjectToDB(init[0]);
       }
-    } else {
-      const init = [{ id: 'default', name: 'PROYECTO INICIAL', bills: [], customOCs: {}, updatedAt: Date.now() }];
-      setSavedProjects(init);
-      setBills([]);
-      setCustomOCs({});
-    }
+    };
+    initDB();
   }, []);
 
-  const saveToDisk = useCallback((updatedBills: ExtractedBill[], updatedOCs: Record<string, any>) => {
+  const saveToDisk = useCallback(async (updatedBills: ExtractedBill[], updatedOCs: Record<string, any>) => {
     setSavedProjects(prev => {
       const next = prev.map(p => p.id === currentProjectId ? { ...p, bills: updatedBills, customOCs: updatedOCs, updatedAt: Date.now() } : p);
-      localStorage.setItem('voltis_projects', JSON.stringify(next));
+      const activeProject = next.find(p => p.id === currentProjectId);
+      if (activeProject) syncProjectToDB(activeProject);
       return next;
     });
   }, [currentProjectId]);
@@ -117,15 +122,15 @@ export default function EnergyBillsApp() {
     accept: { 'application/pdf': ['.pdf'], 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'] } 
   });
 
-  const createNewProject = () => {
+  const createNewProject = async () => {
     const name = prompt('Nombre del nuevo proyecto:');
     if (!name) return;
-    const project: ProjectWorkspace = { id: Math.random().toString(36).substr(2, 9), name: name.toUpperCase(), bills: [], customOCs: {}, updatedAt: Date.now() };
+    const project: ProjectWorkspace = { id: crypto.randomUUID(), name: name.toUpperCase(), bills: [], customOCs: {}, updatedAt: Date.now() };
     const next = [...savedProjects, project];
     setSavedProjects(next);
-    localStorage.setItem('voltis_projects', JSON.stringify(next));
+    await syncProjectToDB(project);
     loadWorkspace(project);
-    toast.success('Proyecto creado');
+    toast.success('Proyecto creado en la nube');
   };
 
   const loadWorkspace = (proj: ProjectWorkspace) => {
@@ -136,13 +141,14 @@ export default function EnergyBillsApp() {
     setShowReport(false);
   };
 
-  const deleteProject = (id: string, e: React.MouseEvent) => {
+  const deleteProject = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (confirm('¿Eliminar este proyecto permanentemente?')) {
+    if (confirm('¿Eliminar este proyecto permanentemente de la nube?')) {
       const next = savedProjects.filter(p => p.id !== id);
       setSavedProjects(next);
-      localStorage.setItem('voltis_projects', JSON.stringify(next));
-      if (currentProjectId === id) loadWorkspace(next[0] || { id: 'default', name: 'HUÉRFANO', bills: [] });
+      await deleteProjectFromDB(id);
+      if (currentProjectId === id) loadWorkspace(next[0] || { id: crypto.randomUUID(), name: 'HUÉRFANO', bills: [] });
+      toast.success('Proyecto eliminado');
     }
   };
 
