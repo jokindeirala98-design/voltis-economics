@@ -4,50 +4,22 @@ import Groq from 'groq-sdk';
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY || '' });
 
 const SYSTEM_PROMPT = `
-Eres un analista experto en facturación eléctrica del sector energético de España. 
-Tu objetivo es extraer datos detallados de consumos, potencias y precios de la factura proporcionada, devolviendo ÚNICAMENTE un JSON.
+Eres un analista experto en facturación eléctrica de España. Tu misión es extraer cada dato de la factura con precisión absoluta y fidelidad al texto.
+Devuelve ÚNICAMENTE un JSON plano (sin markdown ni explicaciones) con esta estructura:
 
-REGLAS DE ORO DE EXTRACCIÓN (LEYES IRREVOCABLES):
-1. **CUADRE MATEMÁTICO PERFECTO**: La suma de (costeTotalConsumo + costeTotalPotencia + SUMA de todos los otrosConceptos) DEBE SER EXACTAMENTE IGUAL a totalFactura. Si no cuadras al céntimo, revisa si has duplicado conceptos de la "página de desglose" que ya estaban en el "resumen".
-2. **Periodos P1 a P6**: Extrae cada periodo existente. Si la factura es 2.0TD tendrá P1-P3 en energía y P1-P2 en potencia. Si es 3.0TD tendrá P1-P6.
-3. **Cálculos de Precios**: Si falta el precio unitario pero tienes el total y los kWh, calcúlalo (Total / kWh).
-4. **Unificación de Otros Conceptos**:
-   - 'Bono Social': Suma cualquier línea de bono social o financiación.
-   - 'Alquiler de equipos': Agrupa alquiler de contador/equipo.
-   - 'Impuesto Eléctrico' e 'IVA / IGIC': Extrae los importes exactos.
-   - 'Peajes y Cargos': SOLO extráelos si NO están ya incluidos en los precios de energía/potencia. Si aparecen desglosados en el resumen general, agrúpalos.
-5. **Penalizaciones**: Los excesos de potencia o reactiva van SIEMPRE a 'otrosConceptos', NUNCA sumados a 'costeTotalPotencia'.
+1. **PROPIEDADES BÁSICAS**: comercializadora, titular, cups, fechaInicio, fechaFin, tarifa (2.0TD, 3.0TD, etc).
+2. **CONSUMO (P1-P6)**: Extrae cada periodo existente (kwh, precioKwh, total).
+3. **POTENCIA (P1-P6)**: Extrae cada periodo existente (kw, precioKwDia, dias, total).
+4. **OTROS CONCEPTOS** (Agrupación Obligatoria):
+   - 'Bono Social': Suma cualquier descuento o financiación de bono social.
+   - 'Alquiler de equipos': Alquiler de contador.
+   - 'Impuesto Eléctrico'.
+   - 'IVA / IGIC'.
+   - 'Otros / Ajustes': Cualquier otro concepto (Reactiva, excesos, etc).
 
-EJEMPLO DE SALIDA ESPERADA:
-{
-  "comercializadora": "IBERDROLA",
-  "fechaInicio": "2024-01-01",
-  "fechaFin": "2024-01-31",
-  "titular": "JUAN PEREZ",
-  "cups": "ES0021000000000000XX",
-  "tarifa": "2.0TD",
-  "consumo": [
-    { "periodo": "P1", "kwh": 150.5, "precioKwh": 0.1524, "total": 22.94 },
-    { "periodo": "P2", "kwh": 200.0, "precioKwh": 0.1210, "total": 24.20 }
-  ],
-  "potencia": [
-    { "periodo": "P1", "kw": 4.6, "precioKwDia": 0.1039, "dias": 31, "total": 14.82 },
-    { "periodo": "P2", "kw": 4.6, "precioKwDia": 0.0321, "dias": 31, "total": 4.58 }
-  ],
-  "otrosConceptos": [
-    { "concepto": "Bono Social", "total": 1.25 },
-    { "concepto": "Alquiler de equipos", "total": 0.82 },
-    { "concepto": "Impuesto Eléctrico", "total": 2.15 },
-    { "concepto": "IVA / IGIC", "total": 10.20 }
-  ],
-  "consumoTotalKwh": 350.5,
-  "costeTotalConsumo": 47.14,
-  "costeMedioKwh": 0.1345,
-  "costeTotalPotencia": 19.40,
-  "totalFactura": 80.96
-}
-
-Devuelve EXCLUSIVAMENTE el JSON resultante. Sin preámbulos ni explicaciones.
+REGLA DE ORO (Cuadre Matemático): 
+costeTotalConsumo + costeTotalPotencia + SUMA(otrosConceptos) DEBE SER EXACTAMENTE IGUAL A totalFactura.
+Si no cuadra, busca la diferencia en los conceptos de la factura y asígnala correctamente.
 `;
 
 import { GoogleGenerativeAI } from '@google/generative-ai';
