@@ -30,6 +30,7 @@ export default function EnergyBillsApp() {
   const [renamingProjectId, setRenamingProjectId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [extractionQueue, setExtractionQueue] = useState<{ id: string; fileName: string; status: 'loading' | 'success' | 'error'; error?: string; file?: File }[]>([]);
+  const [cloudSyncStatus, setCloudSyncStatus] = useState<'synced' | 'syncing' | 'error' | 'local'>('local');
 
   useEffect(() => {
     if (typeof window !== 'undefined' && sessionStorage.getItem('voltis_auth') === 'true') {
@@ -49,35 +50,66 @@ export default function EnergyBillsApp() {
     }
   };
 
-  // Persistence logic (Supabase Cloud Storage)
+  // Multi-layer Initialization (LocalStorage -> Cloud)
   useEffect(() => {
-    const initDB = async () => {
+    const initStorage = async () => {
+      // 1. Load from LocalStorage (Immediate feedback)
+      const localData = localStorage.getItem('voltis_saved_projects');
+      if (localData) {
+        try {
+          const parsed = JSON.parse(localData);
+          if (parsed && parsed.length > 0) {
+            setSavedProjects(parsed);
+            const lastId = localStorage.getItem('voltis_last_project') || parsed[0].id;
+            setCurrentProjectId(lastId);
+            const active = parsed.find((p: any) => p.id === lastId) || parsed[0];
+            setBills(active.bills || []);
+            setCustomOCs(active.customOCs || {});
+          }
+        } catch (e) { console.warn('Local storage parse error', e); }
+      }
+
+      // 2. Sync from Cloud (Background)
+      setCloudSyncStatus('syncing');
       const dbProjects = await fetchAllProjectsFromDB();
       if (dbProjects && dbProjects.length > 0) {
         setSavedProjects(dbProjects);
-        const last = localStorage.getItem('voltis_last_project') || dbProjects[0].id;
-        setCurrentProjectId(last);
-        const active = dbProjects.find(p => p.id === last) || dbProjects[0];
+        localStorage.setItem('voltis_saved_projects', JSON.stringify(dbProjects));
+        
+        // Update view if cloud is newer or if we had no local data
+        const lastId = localStorage.getItem('voltis_last_project') || dbProjects[0].id;
+        const active = dbProjects.find(p => p.id === lastId) || dbProjects[0];
         if (active) {
           setBills(active.bills || []);
           setCustomOCs(active.customOCs || {});
         }
+        setCloudSyncStatus('synced');
+      } else if (dbProjects) {
+        setCloudSyncStatus('synced');
       } else {
-        const init = [{ id: crypto.randomUUID(), name: 'PROYECTO INICIAL', bills: [], customOCs: {}, updatedAt: Date.now() }];
-        setSavedProjects(init);
-        setBills([]);
-        setCustomOCs({});
-        await syncProjectToDB(init[0]);
+        setCloudSyncStatus('error');
       }
     };
-    initDB();
+    initStorage();
   }, []);
 
   const saveToDisk = useCallback(async (updatedBills: ExtractedBill[], updatedOCs: Record<string, any>) => {
     setSavedProjects(prev => {
-      const next = prev.map(p => p.id === currentProjectId ? { ...p, bills: updatedBills, customOCs: updatedOCs, updatedAt: Date.now() } : p);
+      const next = prev.map(p => p.id === currentProjectId ? { 
+        ...p, bills: updatedBills, customOCs: updatedOCs, updatedAt: Date.now() 
+      } : p);
+      
+      // Immediate Local Save
+      localStorage.setItem('voltis_saved_projects', JSON.stringify(next));
+
+      // Background Cloud Sync
       const activeProject = next.find(p => p.id === currentProjectId);
-      if (activeProject) syncProjectToDB(activeProject);
+      if (activeProject) {
+        setCloudSyncStatus('syncing');
+        syncProjectToDB(activeProject)
+          .then(() => setCloudSyncStatus('synced'))
+          .catch(() => setCloudSyncStatus('error'));
+      }
       return next;
     });
   }, [currentProjectId]);
@@ -153,11 +185,17 @@ export default function EnergyBillsApp() {
     const name = prompt('Nombre del nuevo proyecto:');
     if (!name) return;
     const project: ProjectWorkspace = { id: crypto.randomUUID(), name: name.toUpperCase(), bills: [], customOCs: {}, updatedAt: Date.now() };
-    const next = [...savedProjects, project];
-    setSavedProjects(next);
-    await syncProjectToDB(project);
+    
+    setSavedProjects(prev => {
+      const next = [...prev, project];
+      localStorage.setItem('voltis_saved_projects', JSON.stringify(next));
+      setCloudSyncStatus('syncing');
+      syncProjectToDB(project).then(() => setCloudSyncStatus('synced')).catch(() => setCloudSyncStatus('error'));
+      return next;
+    });
+    
     loadWorkspace(project);
-    toast.success('Proyecto creado en la nube');
+    toast.success('Proyecto creado localmente y sincronizando...');
   };
 
   const loadWorkspace = (proj: ProjectWorkspace) => {
@@ -170,10 +208,14 @@ export default function EnergyBillsApp() {
 
   const deleteProject = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (confirm('¿Eliminar este proyecto permanentemente de la nube?')) {
+    if (confirm('¿Eliminar este proyecto permanentemente de la nube y del navegador?')) {
       const next = savedProjects.filter(p => p.id !== id);
       setSavedProjects(next);
-      await deleteProjectFromDB(id);
+      localStorage.setItem('voltis_saved_projects', JSON.stringify(next));
+      
+      setCloudSyncStatus('syncing');
+      deleteProjectFromDB(id).then(() => setCloudSyncStatus('synced')).catch(() => setCloudSyncStatus('error'));
+      
       if (currentProjectId === id) loadWorkspace(next[0] || { id: crypto.randomUUID(), name: 'HUÉRFANO', bills: [] });
       toast.success('Proyecto eliminado');
     }
@@ -182,10 +224,17 @@ export default function EnergyBillsApp() {
   const renameProject = async (id: string, newName: string) => {
     if (!newName.trim()) return;
     const upperName = newName.toUpperCase();
-    const next = savedProjects.map(p => p.id === id ? { ...p, name: upperName } : p);
-    setSavedProjects(next);
-    const updated = next.find(p => p.id === id);
-    if (updated) await syncProjectToDB(updated);
+    setSavedProjects(prev => {
+      const next = prev.map(p => p.id === id ? { ...p, name: upperName, updatedAt: Date.now() } : p);
+      localStorage.setItem('voltis_saved_projects', JSON.stringify(next));
+      
+      const updated = next.find(p => p.id === id);
+      if (updated) {
+        setCloudSyncStatus('syncing');
+        syncProjectToDB(updated).then(() => setCloudSyncStatus('synced')).catch(() => setCloudSyncStatus('error'));
+      }
+      return next;
+    });
     toast.success('Nombre actualizado');
     setRenamingProjectId(null);
   };
@@ -412,6 +461,18 @@ export default function EnergyBillsApp() {
           
           <header className="flex flex-col md:flex-row items-end justify-between gap-8">
             <div className="flex flex-col gap-3">
+              <div className="flex items-center gap-3 mb-2">
+                 <div className={`w-2 h-2 rounded-full ${
+                  cloudSyncStatus === 'synced' ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' :
+                  cloudSyncStatus === 'syncing' ? 'bg-blue-500 animate-pulse' :
+                  cloudSyncStatus === 'error' ? 'bg-red-500' : 'bg-slate-500'
+                }`} />
+                <span className="text-[10px] font-black tracking-[0.2em] text-white/40 uppercase">
+                  {cloudSyncStatus === 'synced' ? 'Cloud Synced' :
+                   cloudSyncStatus === 'syncing' ? 'Syncing...' :
+                   cloudSyncStatus === 'error' ? 'Cloud Error' : 'Offline Mode'}
+                </span>
+              </div>
               <h1 className="text-5xl font-black tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-white via-white to-blue-500 leading-none py-2">
                 VOLTIS ANUAL <br/> ECONOMICS
               </h1>
