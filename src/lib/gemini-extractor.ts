@@ -4,22 +4,29 @@ import Groq from 'groq-sdk';
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY || '' });
 
 const SYSTEM_PROMPT = `
-Eres un analista experto en facturación eléctrica de España. Tu misión es extraer cada dato de la factura con precisión absoluta y fidelidad al texto.
-Devuelve ÚNICAMENTE un JSON plano (sin markdown ni explicaciones) con esta estructura:
+Eres un analista experto en facturación eléctrica de España. Tu misión es extraer cada dato de la factura con precisión absoluta.
+Devuelve ÚNICAMENTE un JSON plano (sin markdown ni explicaciones) con esta estructura exacta:
 
-1. **PROPIEDADES BÁSICAS**: comercializadora, titular, cups, fechaInicio, fechaFin, tarifa (2.0TD, 3.0TD, etc).
-2. **CONSUMO (P1-P6)**: Extrae cada periodo existente (kwh, precioKwh, total).
-3. **POTENCIA (P1-P6)**: Extrae cada periodo existente (kw, precioKwDia, dias, total).
-4. **OTROS CONCEPTOS** (Agrupación Obligatoria):
-   - 'Bono Social': Suma cualquier descuento o financiación de bono social.
-   - 'Alquiler de equipos': Alquiler de contador.
-   - 'Impuesto Eléctrico'.
-   - 'IVA / IGIC'.
-   - 'Otros / Ajustes': Cualquier otro concepto (Reactiva, excesos, etc).
+{
+  "comercializadora": "Nombre buscado",
+  "titular": "Nombre completo",
+  "cups": "Código CUPS (ES00...)",
+  "fechaInicio": "YYYY-MM-DD",
+  "fechaFin": "YYYY-MM-DD",
+  "tarifa": "2.0TD, 3.0TD...",
+  "consumo": [ { "periodo": "P1-P6", "kwh": 0, "precioKwh": 0, "total": 0 } ],
+  "potencia": [ { "periodo": "P1-P6", "kw": 0, "precioKwDia": 0, "dias": 0, "total": 0 } ],
+  "otrosConceptos": [ { "concepto": "Nombre", "total": 0 } ],
+  "consumoTotalKwh": 0,
+  "costeTotalConsumo": 0,
+  "costeTotalPotencia": 0,
+  "totalFactura": 0
+}
 
-REGLA DE ORO (Cuadre Matemático): 
-costeTotalConsumo + costeTotalPotencia + SUMA(otrosConceptos) DEBE SER EXACTAMENTE IGUAL A totalFactura.
-Si no cuadra, busca la diferencia en los conceptos de la factura y asígnala correctamente.
+REGLAS CRÍTICAS:
+1. **Agrupación en otrosConceptos**: Bono Social, Alquiler de equipos, Impuesto Eléctrico, IVA / IGIC. Cualquier otro concepto va aquí.
+2. **CUADRE MATEMÁTICO**: costeTotalConsumo + costeTotalPotencia + SUMA(otrosConceptos) DEBE SER EXACTAMENTE IGUAL A totalFactura.
+3. Si un dato no existe, devuélvelo como null o 0 según corresponda. No inventes datos.
 `;
 
 import { GoogleGenerativeAI } from '@google/generative-ai';
@@ -154,7 +161,7 @@ export async function extractBillDataWithAI(pdfText: string) {
       `});
 
       const { content: output2 } = await callAIWithFallback(messages, MODELS.indexOf(usedModel));
-      parsedData = JSON.parse(output2);
+      parsedData = JSON.parse(cleanJson(output2));
       check = validate(parsedData);
     }
 
