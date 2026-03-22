@@ -56,14 +56,13 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
 
 const MODELS = [
   'gemini-1.5-flash',
-  'gemini-1.5-pro',
   'llama-3.3-70b-versatile',
   'llama-3.1-8b-instant'
 ];
 
 async function callAIWithFallback(messages: any[], modelIndex = 0): Promise<{ content: string, usedModel: string }> {
   const currentModel = MODELS[modelIndex];
-  if (!currentModel) throw new Error('Se han agotado todos los modelos de IA disponibles.');
+  if (!currentModel) throw new Error('Se han agotado todos los modelos de IA disponibles o las llaves de API son inválidas.');
 
   try {
     // 1. GEMINI PROVIDER
@@ -78,6 +77,9 @@ async function callAIWithFallback(messages: any[], modelIndex = 0): Promise<{ co
       });
       const prompt = messages.map(m => m.content).join('\n\n');
       const res = await model.generateContent(prompt);
+      
+      // Safety check for response
+      if (!res.response) throw new Error('Sin respuesta del modelo Gemini.');
       const content = res.response.text();
       return { content, usedModel: currentModel };
     }
@@ -96,15 +98,21 @@ async function callAIWithFallback(messages: any[], modelIndex = 0): Promise<{ co
     return { content: res.choices[0]?.message?.content || '{}', usedModel: currentModel };
 
   } catch (err: any) {
-    // Handle Rate Limits (429), Overloads (503), or Not Found (404)
-    const isRateLimit = err.status === 429 || err.status === 503 || err.message?.includes('Rate limit');
-    const isNotFound = err.status === 404 || err.message?.includes('not found') || err.message?.includes('404');
-    
-    if ((isRateLimit || isNotFound) && modelIndex < MODELS.length - 1) {
-      console.warn(`Modelo ${currentModel} ${isNotFound ? 'no encontrado' : 'saturado'}. Reintentando con ${MODELS[modelIndex+1]}...`);
+    console.error(`Error en modelo ${currentModel}:`, err.message);
+
+    // Fallback logic for common retryable/skippable errors
+    const errorMessage = (err.message || '').toLowerCase();
+    const isRateLimit = err.status === 429 || err.status === 503 || errorMessage.includes('rate limit');
+    const isNotFound = err.status === 404 || errorMessage.includes('not found') || errorMessage.includes('404');
+    const isInvalidKey = errorMessage.includes('api key') || errorMessage.includes('invalid') || err.status === 401;
+
+    if ((isRateLimit || isNotFound || isInvalidKey) && modelIndex < MODELS.length - 1) {
+      console.warn(`Modelo ${currentModel} falló (${errorMessage}). Reintentando con ${MODELS[modelIndex+1]}...`);
       return callAIWithFallback(messages, modelIndex + 1);
     }
-    throw err;
+    
+    // If it's the last model or a non-retryable error, throw a descriptive error
+    throw new Error(`[${currentModel}] ${err.message}`);
   }
 }
 
