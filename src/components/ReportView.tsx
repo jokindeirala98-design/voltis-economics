@@ -18,6 +18,7 @@ interface ReportViewProps {
   bills: ExtractedBill[];
   customOCs: Record<string, { concepto: string; total: number }[]>;
   onBack: () => void;
+  projectName?: string;
 }
 
 const CountUp = ({ value, duration = 1, decimals = 0 }: { value: number, duration?: number, decimals?: number }) => {
@@ -57,7 +58,7 @@ const CountUp = ({ value, duration = 1, decimals = 0 }: { value: number, duratio
   );
 };
 
-export default function ReportView({ bills, customOCs, onBack }: ReportViewProps) {
+export default function ReportView({ bills, customOCs, onBack, projectName = 'PROYECTO' }: ReportViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const [selectedBillId, setSelectedBillId] = useState<string | null>(null);
@@ -206,7 +207,7 @@ export default function ReportView({ bills, customOCs, onBack }: ReportViewProps
     return sorted.slice(0, 3).includes(val) && val > 0;
   };
 
-  const reactToPrintFn = useReactToPrint({ contentRef, documentTitle: "Voltis_Report_AOIZ" });
+  const reactToPrintFn = useReactToPrint({ contentRef, documentTitle: `Voltis_Report_${projectName}` });
 
   const hasData = filteredValidBills.length > 0;
 
@@ -276,7 +277,7 @@ export default function ReportView({ bills, customOCs, onBack }: ReportViewProps
                 </div>
                 <div className="pt-20 space-y-4">
                    <div className="h-0.5 w-12 bg-blue-500 mx-auto rounded-full shadow-[0_0_15px_rgba(59,130,246,0.6)]" />
-                   <h3 className="text-5xl font-black tracking-tighter text-blue-500 uppercase">AOIZ</h3>
+                   <h3 className="text-5xl font-black tracking-tighter text-blue-500 uppercase">{projectName}</h3>
                    <div className="pt-2 flex flex-col items-center gap-1">
                       <p className="text-[10px] text-slate-500 font-black tracking-wider uppercase">
                         CUPS: {filteredValidBills[0]?.cups || 'ES00000'}

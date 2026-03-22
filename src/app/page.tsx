@@ -351,7 +351,11 @@ export default function EnergyBillsApp() {
     exportBillsToExcel(bills, concepts, getVal);
   };
 
-  if (showReport) return <div className="min-h-screen bg-[#020617] p-8 md:p-16"><ReportView bills={bills} customOCs={customOCs} onBack={() => setShowReport(false)} /></div>;
+  if (showReport) {
+    const activeProject = savedProjects.find(p => p.id === currentProjectId);
+    const projectName = activeProject?.name || 'PROYECTO';
+    return <div className="min-h-screen bg-[#020617] p-8 md:p-16"><ReportView bills={bills} customOCs={customOCs} onBack={() => setShowReport(false)} projectName={projectName} /></div>;
+  }
 
   if (!isAuthenticated) {
     return (
