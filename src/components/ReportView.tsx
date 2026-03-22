@@ -262,8 +262,21 @@ export default function ReportView({ bills, customOCs, onBack }: ReportViewProps
         ) : (
           <>
             {/* ESCENA 1 — PORTADA */}
-            <section id="scene-1" className="min-h-screen flex items-center justify-center p-8 page-break-after">
-              <div className="hero-content text-center space-y-12">
+            <section id="scene-1" className="min-h-screen flex items-center justify-center p-8 page-break-after relative overflow-hidden">
+              {/* Voltis AI Mascot - Blended Background */}
+              <div className="absolute inset-0 pointer-events-none flex items-center justify-center opacity-20 md:opacity-30 z-0 mix-blend-screen scale-150 md:scale-100 translate-y-20 md:translate-y-0">
+                 <img 
+                   src="/mascot.jpg" 
+                   alt="Voltis AI Mascot" 
+                   className="w-[600px] h-[600px] object-cover" 
+                   style={{ 
+                     maskImage: 'radial-gradient(circle at center, black 30%, transparent 70%)', 
+                     WebkitMaskImage: 'radial-gradient(circle at center, black 30%, transparent 70%)' 
+                   }} 
+                 />
+              </div>
+
+              <div className="hero-content text-center space-y-12 relative z-10">
                 <div className="inline-flex items-center gap-3 px-5 py-2 rounded-full bg-blue-500/10 border border-blue-500/20 text-[9px] font-black uppercase tracking-[0.4em] text-blue-400">
                    <Cpu className="w-4 h-4" /> Voltis AI Analytics Core
                 </div>
@@ -503,7 +516,7 @@ export default function ReportView({ bills, customOCs, onBack }: ReportViewProps
                <div className="grid grid-cols-2 gap-6 mb-12">
                  <div className="p-8 rounded-[40px] bg-blue-600/10 border border-blue-500/20">
                    <span className="text-[10px] uppercase tracking-widest text-blue-500 block mb-2">Total</span>
-                   <span className="text-4xl font-black">{filteredValidBills.find(b => b.id === selectedBillId)?.totalCalculado.toLocaleString('es-ES', { minimumFractionDigits: 2 })}€</span>
+                   <span className="text-4xl font-black">{(tableData.find((d: any) => d.id === selectedBillId)?.totalFactura || 0).toLocaleString('es-ES', { minimumFractionDigits: 2 })}€</span>
                  </div>
                </div>
                <div className="space-y-6 max-h-[40vh] overflow-y-auto pr-4 custom-scrollbar">
