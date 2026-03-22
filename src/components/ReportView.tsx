@@ -615,6 +615,10 @@ export default function ReportView({ bills, customOCs, onBack }: ReportViewProps
 
       <style jsx global>{`
         @media print {
+          @page {
+            size: A4;
+            margin: 15mm;
+          }
           html, body { 
             background: #020617 !important; 
             margin: 0 !important; 
@@ -627,15 +631,23 @@ export default function ReportView({ bills, customOCs, onBack }: ReportViewProps
             width: 100% !important; 
             max-width: none !important;
             background: #020617 !important; 
-            box-shadow: none !important;
           }
           .page-break-after { page-break-after: always !important; break-after: page !important; }
-          section { min-height: 297mm !important; }
+          section { 
+            page-break-inside: auto !important;
+            margin-bottom: 20px !important;
+          }
+          /* Prevent cards and tables from splitting across pages */
+          .bg-[#0f172a]/40, .glass, table, tr {
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
+          }
           .glass { 
             background: rgba(15, 23, 42, 0.4) !important; 
-            border: 1px solid rgba(255, 255, 255, 0.05) !important; 
+            border: 1px solid rgba(255, 255, 255, 0.1) !important; 
             backdrop-filter: none !important; 
           }
+          h3, h4 { page-break-after: avoid !important; }
         }
         .custom-scrollbar::-webkit-scrollbar { width: 4px; }
         .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
