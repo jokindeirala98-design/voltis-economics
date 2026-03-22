@@ -1,0 +1,34 @@
+# PROMPT DEFINITIVO: VOLTIS ANUAL ECONOMICS (ONE-SHOT GENERATION)
+
+Crea una aplicación web "Premium" de análisis de facturas eléctricas usando Next.js 15+, Tailwind CSS v4, TypeScript y la API de Google Gemini para extracción de datos de PDFs. La estética debe ser "Futuristic Dark Glassmorphism" de altísimo nivel.
+
+### 1. ARQUITECTURA TÉCNICA
+- **Stack**: Next.js (App Router), Lucide React (Iconos), Framer Motion (Animaciones), Recharts (Gráficas), react-dropzone (Upload), pdf2json (Extracción PDF), react-to-print (PDF Export).
+- **Backend/IA**: Endpoint `/api/extract` que recibe texto de PDF y usa un modelo Gemini (proporcione el prompt del sistema) para devolver un JSON con: titular, cups, tarifa, comercializadora, fechas, coste total, consumo (P1-P6 en kWh y €/kWh), potencia (P1-P6 en kW, días y €) y otros conceptos detallados.
+- **Estado**: Gestión de "Proyectos" persistidos en localStorage (por ahora). Capacidad de tener múltiples facturas por proyecto.
+
+### 2. COMPONENTES Y LOGÍSTICA
+- **Autenticación Simple**: Pantalla de login inicial con contraseña fija "voltis2026".
+- **Gestión de Proyectos**: Sidebar para crear/borrar proyectos. Vista principal con dropzone de subida.
+- **IA Extraction**: Al subir un PDF, mostrar una cola de procesamiento con estados (Analizando -> Listo/Error).
+
+### 3. REPORTE INTERACTIVO (EL DIAMANTE)
+Crea una vista de "Informe" que incluya:
+- **Resumen Card**: 4 tarjetas superiores (Total Facturado, Nº Facturas, kWh totales, Punto de Carga Máximo).
+- **Gráfica 1**: Evolución del Gasto (Bar Chart) con Tooltips interactivos formateados a 2 decimales (€).
+- **Gráfica 2**: Distribución de Gastos (Donut Chart) con leyenda y colores vibrantes.
+- **Gráfica 3**: kWh vs Precio Medio (Composed Chart) con barras de fondo para consumo y línea gruesa para precio. Interacción completa con tooltips.
+- **Matrices Técnicas**: 3 tablas detalladas (Consumo kWh, Coste €/kWh, Desglose Económico).
+- **Lógica de Resaltado**: Resaltar en rojo y escala 1.10 los **3 valores más altos de la última columna (TOTALES)** de cada tabla.
+- **Modal de Detalle**: Al hacer clic en una fila del desglose económico, abrir una ventana emergente (Modal) con el desglose técnico completo de esa factura (Energía P1-P6, Potencia P1-P6, Otros Conceptos y Cuotas).
+
+### 4. DISEÑO Y PDF
+- **Estética**: Fondo `#020617`, tarjetas `#0f172a/40`, bordes `white/10`, efectos de blur azul/púrpura de fondo. Tipografía "Inter" o "Outfit".
+- **PDF Export**: Botón para generar informe. Usar `react-to-print` con CSS `@media print` optimizado: fondo oscuro preservado, saltos de página inteligentes, `width: 100%`, ocultar botones.
+
+### 5. REGLAS CRÍTICAS DE CALIDAD
+- **Código**: Modular, componentes separados (`ReportView.tsx`, `FileTable.tsx`, `Dashboard.tsx`).
+- **Precisión**: Todos los cálculos deben ser coherentes entre gráficas, tablas y modales usando IDs únicos de archivos.
+- **IA**: System prompt de Gemini optimizado para detectar "Impuestos", "Alquileres" y "Otros" sin solaparse con la energía base.
+
+Entrega este código listo para producción en Vercel.
