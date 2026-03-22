@@ -145,6 +145,13 @@ export async function extractBillDataWithAI(pdfText: string) {
     @apply backdrop-blur-2xl border border-white/5;
   }
 }
+
+@media print {
+  @page { size: A4; margin: 15mm; }
+  html, body { background: #020617 !important; -webkit-print-color-adjust: exact !important; }
+  .bg-[#0f172a]/40, .glass, table, tr { break-inside: avoid !important; }
+  section { page-break-inside: auto !important; margin-bottom: 20px !important; }
+}
 ```
 
 ### NOTA FINAL PARA ANTIGRAVITY:
