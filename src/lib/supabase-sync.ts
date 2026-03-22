@@ -59,13 +59,13 @@ export async function syncProjectToDB(project: ProjectWorkspace) {
 
     // 3. Upsert Custom Concepts
     if (project.customOCs) {
-      for (const [billId, ocs] of Object.entries(project.customOCs)) {
+      const entries = Object.entries(project.customOCs);
+      for (const [billId, ocs] of entries) {
         if (ocs && ocs.length > 0) {
-           await supabase.from('custom_concepts').delete().eq('bill_id', billId);
-           await supabase.from('custom_concepts').insert({
+           await supabase.from('custom_concepts').upsert({
               bill_id: billId,
               data: ocs
-           });
+           }, { onConflict: 'bill_id' });
         }
       }
     }
