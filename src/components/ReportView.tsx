@@ -96,6 +96,7 @@ export default function ReportView({ bills, customOCs, onBack }: ReportViewProps
         energia,
         potencia,
         otros: impuestos + otros,
+        id: b.id,
         // For tables
         prices: {
           P1: b.consumo?.find(c => c.periodo === 'P1')?.precioKwh || 0,
@@ -450,7 +451,7 @@ export default function ReportView({ bills, customOCs, onBack }: ReportViewProps
                       const allTotals = tableData.map(d => d.totalFactura);
                       const isTopTotal = isTop3(row.totalFactura, allTotals);
                       // Find actual bill for modal
-                      const billId = bills[i]?.id;
+                      const billId = row.id;
                       return (
                         <tr 
                           key={i} 
