@@ -44,7 +44,7 @@ body {
   
   .glass-card {
     background-color: rgba(15, 23, 42, 0.4);
-    @apply backdrop-blur-2xl border border-white/10 shadow-3xl;
+    @apply backdrop-blur-2xl border border-white/10 shadow-[0_35px_60px_-15px_rgba(0,0,0,0.8)];
   }
 
   .neon-blue {
