@@ -94,6 +94,22 @@ async function callGroqWithFallback(messages: any[], modelIndex = 0): Promise<{ 
   }
 }
 
+function cleanJson(text: string): string {
+  try {
+    // 1. Remove markdown backticks if present
+    const cleaned = text.replace(/```json\n?|```/g, '').trim();
+    
+    // 2. Find the first '{' and last '}'
+    const start = cleaned.indexOf('{');
+    const end = cleaned.lastIndexOf('}');
+    
+    if (start === -1 || end === -1) return cleaned;
+    return cleaned.substring(start, end + 1);
+  } catch (e) {
+    return text;
+  }
+}
+
 export async function extractBillDataWithAI(pdfText: string) {
   if (!process.env.GROQ_API_KEY && !process.env.GEMINI_API_KEY) {
     throw new Error('No se han configurado llaves de API (GROQ o GEMINI) en Vercel.');
@@ -103,10 +119,16 @@ export async function extractBillDataWithAI(pdfText: string) {
 
   try {
     // ATTEMPT 1: Best available model in the chain
-    // If Groq is missing, start directly with Gemini
     const startIndex = !process.env.GROQ_API_KEY ? MODELS.indexOf('gemini-emergency') : 0;
     const { content: output1, usedModel } = await callGroqWithFallback(messages, startIndex);
-    let parsedData = JSON.parse(output1);
+    
+    let parsedData;
+    try {
+      parsedData = JSON.parse(cleanJson(output1));
+    } catch (e) {
+      console.error('JSON Parse Error after cleaning:', output1);
+      throw new Error(`La IA devolvió un formato inválido. Intentando recuperar...`);
+    }
 
     // VALIDATION
     const validate = (data: any) => {
