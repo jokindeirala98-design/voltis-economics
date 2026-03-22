@@ -44,10 +44,20 @@ export interface ExtractedBill {
   totalFactura?: number;
 }
 
+export interface QueueItem {
+  id: string;
+  fileName: string;
+  fileSize?: number;
+  status: 'loading' | 'success' | 'error';
+  error?: string;
+  addedAt: number;
+}
+
 export interface ProjectWorkspace {
   id: string;
   name: string;
   bills: ExtractedBill[];
   customOCs: Record<string, any>;
+  queueItems?: QueueItem[];
   updatedAt: number;
 }

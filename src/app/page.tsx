@@ -9,7 +9,7 @@ import {
   ChevronRight, Sparkles, Zap, Smartphone, Layers, X
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { ExtractedBill, ProjectWorkspace } from '@/lib/types';
+import { ExtractedBill, ProjectWorkspace, QueueItem } from '@/lib/types';
 import FileTable from '@/components/FileTable';
 import { exportBillsToExcel } from '@/lib/export';
 import { importBillsFromExcel } from '@/lib/import-bills';
@@ -38,7 +38,8 @@ export default function EnergyBillsApp() {
   const [renameValue, setRenameValue] = useState('');
   const [showNewProjectModal, setShowNewProjectModal] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
-  const [extractionQueue, setExtractionQueue] = useState<{ id: string; fileName: string; status: 'loading' | 'success' | 'error'; error?: string; file?: File }[]>([]);
+  const [extractionQueue, setExtractionQueue] = useState<QueueItem[]>([]);
+  const [fileRefs, setFileRefs] = useState<Record<string, File>>({}); // In-memory file refs for retry
   const [cloudSyncStatus, setCloudSyncStatus] = useState<'synced' | 'syncing' | 'error' | 'local'>('local');
   const [showDiag, setShowDiag] = useState(false);
   const [diagInfo, setDiagInfo] = useState<any>(null);
@@ -130,6 +131,16 @@ export default function EnergyBillsApp() {
     initStorage();
   }, []);
 
+  // Auto-sync queue to current project whenever it changes
+  useEffect(() => {
+    if (!currentProjectId || currentProjectId === 'default') return;
+    setSavedProjects(prev => {
+      const next = prev.map(p => p.id === currentProjectId ? { ...p, queueItems: extractionQueue } : p);
+      localStorage.setItem('voltis_saved_projects', JSON.stringify(next));
+      return next;
+    });
+  }, [extractionQueue, currentProjectId]);
+
   const saveToDisk = useCallback(async (updatedBills: ExtractedBill[], updatedOCs: Record<string, any>) => {
     setSavedProjects(prev => {
       const next = prev.map(p => p.id === currentProjectId ? { 
@@ -215,13 +226,20 @@ export default function EnergyBillsApp() {
 
     setIsExtracting(true);
     
-    // Initialize queue with all dropped files
-    const newItems = acceptedFiles.map(file => ({
+    // Initialize queue items with current timestamp, store File objects in fileRefs
+    const newItems: QueueItem[] = acceptedFiles.map(file => ({
       id: Math.random().toString(36).substr(2, 9),
       fileName: file.name,
+      fileSize: file.size,
       status: 'loading' as const,
-      file // Store raw file for retries
+      addedAt: Date.now(),
     }));
+    // Store actual File objects in-memory for retry
+    setFileRefs(prev => {
+      const next = { ...prev };
+      acceptedFiles.forEach((file, i) => { next[newItems[i].id] = file; });
+      return next;
+    });
     setExtractionQueue(prev => [...newItems, ...prev]);
 
     for (let i = 0; i < acceptedFiles.length; i++) {
@@ -257,6 +275,8 @@ export default function EnergyBillsApp() {
     setCurrentProjectId(proj.id);
     setBills(proj.bills || []);
     setCustomOCs(proj.customOCs || {});
+    setExtractionQueue(proj.queueItems || []); // Restore persistent queue for this project
+    setFileRefs({}); // Clear in-memory file refs when switching projects
     localStorage.setItem('voltis_last_project', proj.id);
     setShowReport(false);
   };
@@ -654,11 +674,11 @@ export default function EnergyBillsApp() {
                       </div>
                       
                       <div className="flex items-center gap-2">
-                        {item.status === 'error' && item.file && (
+                        {item.status === 'error' && fileRefs[item.id] && (
                           <button 
                             onClick={() => {
                               setExtractionQueue(prev => prev.map(q => q.id === item.id ? { ...q, status: 'loading' as const, error: undefined } : q));
-                              processFile(item.file!, item.id);
+                              processFile(fileRefs[item.id], item.id);
                             }}
                             className="px-3 py-1 bg-blue-600/20 text-blue-400 text-[10px] font-bold rounded-lg border border-blue-500/30 hover:bg-blue-600/40 transition-all uppercase tracking-tighter"
                           >
@@ -667,7 +687,13 @@ export default function EnergyBillsApp() {
                         )}
                         {item.status !== 'loading' && (
                           <button 
-                            onClick={() => setExtractionQueue(prev => prev.filter(q => q.id !== item.id))}
+                            onClick={() => {
+                              if (item.status === 'success') {
+                                const linked = bills.find(b => b.fileName === item.fileName);
+                                if (linked) { const nb = bills.filter(b => b.id !== linked.id); setBills(nb); saveToDisk(nb, customOCs); }
+                              }
+                              setExtractionQueue(prev => prev.filter(q => q.id !== item.id));
+                            }}
                             className="p-1 hover:bg-white/10 rounded-md text-slate-500 transition-colors"
                           >
                             <X className="w-3 h-3" />

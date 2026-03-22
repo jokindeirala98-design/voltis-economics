@@ -35,32 +35,28 @@ const CustomBarTooltip = ({ active, payload, label }: any) => {
   return null;
 };
 
-const CountUp = ({ value, duration = 1, decimals = 0 }: { value: number, duration?: number, decimals?: number }) => {
+const CountUp = ({ value, duration = 1.2, decimals = 0 }: { value: number, duration?: number, decimals?: number }) => {
   const [count, setCount] = useState(0);
-  const elementRef = useRef<HTMLSpanElement>(null);
 
   useEffect(() => {
+    setCount(0);
     const end = value;
-    ScrollTrigger.create({
-      trigger: elementRef.current,
-      start: 'top 95%',
-      onEnter: () => {
-        let startTime: number | null = null;
-        const animate = (currentTime: number) => {
-          if (!startTime) startTime = currentTime;
-          const progress = Math.min((currentTime - startTime) / (duration * 1000), 1);
-          const easeProgress = 1 - Math.pow(1 - progress, 3);
-          setCount(easeProgress * end);
-          if (progress < 1) requestAnimationFrame(animate);
-        };
-        requestAnimationFrame(animate);
-      },
-      once: true
-    });
+    if (!end) return;
+    let startTime: number | null = null;
+    let frameId: number;
+    const animate = (currentTime: number) => {
+      if (!startTime) startTime = currentTime;
+      const progress = Math.min((currentTime - startTime) / (duration * 1000), 1);
+      const easeProgress = 1 - Math.pow(1 - progress, 3);
+      setCount(easeProgress * end);
+      if (progress < 1) frameId = requestAnimationFrame(animate);
+    };
+    frameId = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(frameId);
   }, [value, duration]);
 
   return (
-    <span ref={elementRef}>
+    <span>
       {count.toLocaleString('es-ES', { minimumFractionDigits: decimals, maximumFractionDigits: decimals })}
     </span>
   );
@@ -256,7 +252,7 @@ export default function ReportView({ bills, customOCs, onBack, projectName = 'PR
               <div className="absolute inset-0 pointer-events-none flex items-center justify-center opacity-20 z-0 mix-blend-screen">
                 <img src="/mascot.jpg" alt="Voltis Mascot" className="w-[600px] h-[600px] object-cover" style={{ maskImage: 'radial-gradient(circle at center, black 30%, transparent 70%)', WebkitMaskImage: 'radial-gradient(circle at center, black 30%, transparent 70%)' }} />
               </div>
-              <div className="hero-content text-center space-y-12 relative z-10">
+              <div className="hero-content text-center space-y-12 relative z-10" style={{ opacity: 1 }}>
                 <div className="inline-flex items-center gap-3 px-5 py-2 rounded-full bg-blue-500/10 border border-blue-500/20 text-[9px] font-black uppercase tracking-[0.4em] text-blue-400">
                   <Cpu className="w-4 h-4" /> Voltis AI Analytics Core
                 </div>
@@ -438,7 +434,8 @@ export default function ReportView({ bills, customOCs, onBack, projectName = 'PR
                   <img
                     src="/voltis-economics-logo.png"
                     alt="Voltis Economics Logo"
-                    className="w-32 h-32 object-contain drop-shadow-[0_0_40px_rgba(59,130,246,0.6)]"
+                    className="w-36 h-36 object-contain"
+                    style={{ mixBlendMode: 'screen', filter: 'drop-shadow(0 0 40px rgba(59,130,246,0.5))' }}
                   />
                   <h3 className="text-7xl md:text-[100px] font-black uppercase tracking-tighter leading-[0.7] text-glow">LISTO PARA OPTIMIZAR</h3>
                   <p className="text-xl text-slate-400 font-medium italic opacity-50">Auditoría de Precisión Finalizada</p>
@@ -658,6 +655,15 @@ function MatrixTable({ title, color, tableData, dataKey, unit, decimals, isTop3,
   title: string; color: string; tableData: any[]; dataKey: string; unit: string;
   decimals: number; isTop3: (v: number, arr: number[]) => boolean; onRowClick: (id: string) => void; isPriceMatrix?: boolean;
 }) {
+  // Top 3 by actual row position (not unique value) — fixes ties
+  const top3Indices = new Set(
+    [...tableData]
+      .map((d: any, i: number) => ({ val: d[dataKey], i }))
+      .sort((a: any, b: any) => b.val - a.val)
+      .slice(0, 3)
+      .map((x: any) => x.i)
+  );
+
   return (
     <div className="space-y-4 pdf-avoid-break">
       <h4 className={`text-[11px] font-black uppercase tracking-[0.6em] ${color} flex items-center gap-3 px-4`}>
@@ -675,7 +681,7 @@ function MatrixTable({ title, color, tableData, dataKey, unit, decimals, isTop3,
           <tbody className="divide-y divide-white/[0.03]">
             {tableData.map((row, idx) => {
               const val = row[dataKey];
-              const top = isTop3(val, tableData.map((d: any) => d[dataKey]));
+              const isTopRow = top3Indices.has(idx) && val > 0;
               return (
                 <tr key={idx} className="hover:bg-white/[0.01] transition-all group cursor-pointer" onClick={() => onRowClick(row.id)}>
                   <td className="px-8 py-4 font-black text-white italic uppercase text-[12px]">{row.name}</td>
@@ -684,7 +690,7 @@ function MatrixTable({ title, color, tableData, dataKey, unit, decimals, isTop3,
                       {isPriceMatrix ? row.prices[`P${p}`].toFixed(4) : Number(row[`P${p}`]).toLocaleString('es-ES', { maximumFractionDigits: 2 })}
                     </td>
                   ))}
-                  <td className={`px-8 py-4 text-right font-black text-[14px] transition-all ${top ? 'text-red-500' : color}`}>
+                  <td className={`px-8 py-4 text-right font-black text-[14px] transition-all ${isTopRow ? 'text-red-500' : color}`}>
                     {val.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {unit}
                   </td>
                 </tr>
