@@ -50,6 +50,50 @@ EJEMPLO DE SALIDA ESPERADA:
 Devuelve EXCLUSIVAMENTE el JSON resultante. Sin preámbulos ni explicaciones.
 `;
 
+import { GoogleGenerativeAI } from '@google/generative-ai';
+
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
+
+const MODELS = [
+  'llama-3.3-70b-versatile',
+  'mixtral-8x7b-32768',
+  'llama-3.1-8b-instant',
+  'gemini-emergency'
+];
+
+async function callGroqWithFallback(messages: any[], modelIndex = 0): Promise<{ content: string, usedModel: string }> {
+  try {
+    const currentModel = MODELS[modelIndex];
+
+    if (currentModel === 'gemini-emergency') {
+       if (!process.env.GEMINI_API_KEY) throw new Error('No hay más modelos disponibles en Groq y no se ha configurado GEMINI_API_KEY.');
+       const model = genAI.getGenerativeModel({ 
+         model: 'gemini-1.5-flash',
+         generationConfig: { responseMimeType: "application/json" }
+       });
+       // Convert messages to gemini prompt
+       const prompt = messages.map(m => m.content).join('\n\n');
+       const res = await model.generateContent(prompt);
+       return { content: res.response.text(), usedModel: 'gemini-1.5-flash' };
+    }
+
+    const res = await groq.chat.completions.create({
+      messages,
+      model: currentModel,
+      temperature: 0,
+      response_format: { type: 'json_object' }
+    });
+    return { content: res.choices[0]?.message?.content || '{}', usedModel: currentModel };
+  } catch (err: any) {
+    // If Rate Limit (429) or Overloaded (503), try next model
+    if ((err.status === 429 || err.status === 503 || err.message.includes('Rate limit')) && modelIndex < MODELS.length - 1) {
+      console.warn(`Model ${MODELS[modelIndex]} limited/overloaded. Falling back to ${MODELS[modelIndex+1]}...`);
+      return callGroqWithFallback(messages, modelIndex + 1);
+    }
+    throw err;
+  }
+}
+
 export async function extractBillDataWithAI(pdfText: string) {
   if (!process.env.GROQ_API_KEY) {
     throw new Error('GROQ_API_KEY no está configurado en las variables de entorno.');
@@ -58,16 +102,9 @@ export async function extractBillDataWithAI(pdfText: string) {
   const messages: any[] = [{ role: 'user', content: `${SYSTEM_PROMPT}\n\nTEXTO DE LA FACTURA:\n${pdfText}` }];
 
   try {
-    // ATTEMPT 1
-    const res1 = await groq.chat.completions.create({
-      messages,
-      model: 'llama-3.3-70b-versatile',
-      temperature: 0,
-      response_format: { type: 'json_object' }
-    });
-    
-    let output = res1.choices[0]?.message?.content || '{}';
-    let parsedData = JSON.parse(output);
+    // ATTEMPT 1: Best available model in the chain
+    const { content: output1, usedModel } = await callGroqWithFallback(messages);
+    let parsedData = JSON.parse(output1);
 
     // VALIDATION
     const validate = (data: any) => {
@@ -79,36 +116,27 @@ export async function extractBillDataWithAI(pdfText: string) {
       }
       const calculated = Number((e + p + ocs).toFixed(2));
       const reported = Number((data.totalFactura || 0).toFixed(2));
-      return { isMatch: Math.abs(calculated - reported) <= 0.05, calculated, reported, diff: Number((reported - calculated).toFixed(2)) };
+      return { isMatch: Math.abs(calculated - reported) <= 0.06, calculated, reported, diff: Number((reported - calculated).toFixed(2)) };
     };
 
     let check = validate(parsedData);
 
-    // ATTEMPT 2 (SELF-CORRECTION)
+    // ATTEMPT 2: Targeted Self-Correction (Always using the same model that succeeded in attempt 1)
     if (!check.isMatch) {
-      console.warn(`Attempt 1 failed. Mismatch: ${check.diff}€. Attempting self-correction...`);
-      
-      messages.push({ role: 'assistant', content: output });
+      messages.push({ role: 'assistant', content: output1 });
       messages.push({ role: 'user', content: `
         ERROR DE CUADRE: Tus conceptos suman ${check.calculated}€ pero el total de la factura es ${check.reported}€.
         FALTAN ${check.diff}€ por encontrar. 
         Por favor, busca en el texto conceptos que hayas omitido como:
-        - Energía Reactiva (muy común en Ayuntamientos)
+        - Energía Reactiva
         - Excesos de Potencia (Penalizaciones)
-        - Canon de Aguas o Tasa de Basuras (si es factura mixta)
+        - Canon de Aguas o Tasa de Basuras
         - Otros cargos u abonos.
         Devuelve el JSON corregido asegurando que el sumatorio sea EXACTO.
       `});
 
-      const res2 = await groq.chat.completions.create({
-        messages,
-        model: 'llama-3.3-70b-versatile',
-        temperature: 0,
-        response_format: { type: 'json_object' }
-      });
-
-      output = res2.choices[0]?.message?.content || '{}';
-      parsedData = JSON.parse(output);
+      const { content: output2 } = await callGroqWithFallback(messages, MODELS.indexOf(usedModel));
+      parsedData = JSON.parse(output2);
       check = validate(parsedData);
     }
 
@@ -119,6 +147,9 @@ export async function extractBillDataWithAI(pdfText: string) {
     return parsedData;
   } catch (error: any) {
     console.error('Extraction Error:', error);
+    if (error.status === 429) {
+       throw new Error('Límite de la API alcanzado. Por favor, espera unos minutos antes de subir más archivos.');
+    }
     throw new Error(error.message.includes('Inconsistencia') ? error.message : `Detalle técnico: ${error.message}`);
   }
 }

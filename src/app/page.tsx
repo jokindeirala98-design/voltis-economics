@@ -29,7 +29,7 @@ export default function EnergyBillsApp() {
   const [authError, setAuthError] = useState(false);
   const [renamingProjectId, setRenamingProjectId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
-  const [extractionQueue, setExtractionQueue] = useState<{ id: string; fileName: string; status: 'loading' | 'success' | 'error'; error?: string }[]>([]);
+  const [extractionQueue, setExtractionQueue] = useState<{ id: string; fileName: string; status: 'loading' | 'success' | 'error'; error?: string; file?: File }[]>([]);
 
   useEffect(() => {
     if (typeof window !== 'undefined' && sessionStorage.getItem('voltis_auth') === 'true') {
@@ -82,6 +82,37 @@ export default function EnergyBillsApp() {
     });
   }, [currentProjectId]);
 
+  const processFile = useCallback(async (file: File, queueId: string) => {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+      const res = await fetch('/api/extract', { method: 'POST', body: formData });
+      const data = await res.json();
+      
+      if (data.status === 'success') {
+        setBills(prev => {
+          const next = [...prev, data.bill];
+          saveToDisk(next, customOCs);
+          return next;
+        });
+        setExtractionQueue(prev => prev.map(item => 
+          item.id === queueId ? { ...item, status: 'success' } : item
+        ));
+      } else {
+        setExtractionQueue(prev => prev.map(item => 
+          item.id === queueId ? { ...item, status: 'error', error: data.error } : item
+        ));
+        toast.error(`Error en ${file.name}: ${data.error}`);
+      }
+    } catch (err) {
+      setExtractionQueue(prev => prev.map(item => 
+        item.id === queueId ? { ...item, status: 'error', error: 'Error de red' } : item
+      ));
+      toast.error(`Error de red en ${file.name}`);
+    }
+  }, [customOCs, saveToDisk]);
+
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
     const excelFiles = acceptedFiles.filter(f => f.name.endsWith('.xlsx'));
     if (excelFiles.length > 0) {
@@ -102,44 +133,16 @@ export default function EnergyBillsApp() {
     const newItems = acceptedFiles.map(file => ({
       id: Math.random().toString(36).substr(2, 9),
       fileName: file.name,
-      status: 'loading' as const
+      status: 'loading' as const,
+      file // Store raw file for retries
     }));
     setExtractionQueue(prev => [...newItems, ...prev]);
 
     for (let i = 0; i < acceptedFiles.length; i++) {
-      const file = acceptedFiles[i];
-      const queueId = newItems[i].id;
-      const formData = new FormData();
-      formData.append('file', file);
-
-      try {
-        const res = await fetch('/api/extract', { method: 'POST', body: formData });
-        const data = await res.json();
-        
-        if (data.status === 'success') {
-          setBills(prev => {
-            const next = [...prev, data.bill];
-            saveToDisk(next, customOCs);
-            return next;
-          });
-          setExtractionQueue(prev => prev.map(item => 
-            item.id === queueId ? { ...item, status: 'success' } : item
-          ));
-        } else {
-          setExtractionQueue(prev => prev.map(item => 
-            item.id === queueId ? { ...item, status: 'error', error: data.error } : item
-          ));
-          toast.error(`Error en ${file.name}: ${data.error}`);
-        }
-      } catch (err) {
-        setExtractionQueue(prev => prev.map(item => 
-          item.id === queueId ? { ...item, status: 'error', error: 'Error de red' } : item
-        ));
-        toast.error(`Error de red en ${file.name}`);
-      }
+       await processFile(acceptedFiles[i], newItems[i].id);
     }
     setIsExtracting(false);
-  }, [customOCs, saveToDisk]);
+  }, [customOCs, saveToDisk, processFile]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({ 
     onDrop, 
@@ -520,14 +523,27 @@ export default function EnergyBillsApp() {
                         </div>
                       </div>
                       
-                      {item.status !== 'loading' && (
-                        <button 
-                          onClick={() => setExtractionQueue(prev => prev.filter(q => q.id !== item.id))}
-                          className="p-1 hover:bg-white/10 rounded-md text-slate-500 transition-colors"
-                        >
-                          <X className="w-3 h-3" />
-                        </button>
-                      )}
+                      <div className="flex items-center gap-2">
+                        {item.status === 'error' && item.file && (
+                          <button 
+                            onClick={() => {
+                              setExtractionQueue(prev => prev.map(q => q.id === item.id ? { ...q, status: 'loading' as const, error: undefined } : q));
+                              processFile(item.file!, item.id);
+                            }}
+                            className="px-3 py-1 bg-blue-600/20 text-blue-400 text-[10px] font-bold rounded-lg border border-blue-500/30 hover:bg-blue-600/40 transition-all uppercase tracking-tighter"
+                          >
+                            Reintentar
+                          </button>
+                        )}
+                        {item.status !== 'loading' && (
+                          <button 
+                            onClick={() => setExtractionQueue(prev => prev.filter(q => q.id !== item.id))}
+                            className="p-1 hover:bg-white/10 rounded-md text-slate-500 transition-colors"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        )}
+                      </div>
                     </motion.div>
                   ))}
                 </div>
