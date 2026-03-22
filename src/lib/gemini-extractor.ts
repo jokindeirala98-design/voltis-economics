@@ -68,9 +68,28 @@ export async function extractBillDataWithAI(pdfText: string) {
     let output = chatCompletion.choices[0]?.message?.content || '{}';
     
     const parsedData = JSON.parse(output);
+
+    // --- SECONDARY VALIDATION: Mathematical Integrity ---
+    const e = parsedData.costeTotalConsumo || 0;
+    const p = parsedData.costeTotalPotencia || 0;
+    let ocs = 0;
+    if (Array.isArray(parsedData.otrosConceptos)) {
+      parsedData.otrosConceptos.forEach((oc: any) => ocs += (oc.total || 0));
+    }
+    
+    const calculatedTotal = Number((e + p + ocs).toFixed(2));
+    const reportedTotal = Number((parsedData.totalFactura || 0).toFixed(2));
+
+    if (Math.abs(calculatedTotal - reportedTotal) > 0.05) { // Allow 5 cents rounding diff
+      console.warn(`Math mismatch: Calculated ${calculatedTotal} vs Reported ${reportedTotal}`);
+      // If the mismatch is significant, we trust the sum of components more for auditing, 
+      // but we should warn the AI/User.
+      throw new Error(`Inconsistencia matemática detectada: La suma de conceptos (${calculatedTotal}€) no coincide con el total (${reportedTotal}€).`);
+    }
+
     return parsedData;
   } catch (error: any) {
     console.error('Error in Groq AI extraction:', error);
-    throw new Error(`Detalle técnico: ${error.message} \n(Si es parsing, el texto era inválido)`);
+    throw new Error(error.message.includes('Inconsistencia') ? error.message : `Detalle técnico: ${error.message}`);
   }
 }
