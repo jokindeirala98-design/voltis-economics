@@ -1,86 +1,65 @@
-// Solo usamos Gemini como motor principal, tal como en las versiones originales.
+import { GoogleGenerativeAI } from '@google/generative-ai';
+
+// Initialize the Gemini AI client
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
 
 const SYSTEM_PROMPT = `
-Eres un analista experto en facturación eléctrica de España. Tu misión es extraer cada dato de la factura con precisión absoluta.
-Devuelve ÚNICAMENTE un JSON plano (sin markdown ni explicaciones) con esta estructura exacta:
+Eres un analista experto en facturación eléctrica del sector energético de España. 
+Tu objetivo es extraer datos detallados de consumos, potencias y precios de la factura proporcionada, devolviendo ÚNICAMENTE un JSON.
 
+REGLAS DE EXTRACCIÓN (CRÍTICO):
+1. **Periodos P1 a P6:** Las facturas pueden tener desde P1 hasta P6. Extrae cada periodo existente (kwh, precioKwh, total). Si no hay consumo en ese periodo, omítelo.
+2. **Cálculos Faltantes:** Si solo aparece Total y kWh de un periodo, calcula el precioKwh (Total / kWh). Si hay precio fijo, ponlo en todos los periodos facturados.
+3. **Agrupación MANDATORIA en otrosConceptos (UNIFICACIÓN AUTOMÁTICA):** 
+   - 'Bono Social': Agrupa todo concepto de bono social o financiación del bono.
+   - 'Alquiler de equipos': Agrupa alquiler de equipos y contadores.
+   - 'Peajes y Transportes': AGRUPA OBLIGATORIAMENTE aquí peajes y cargos SOLO SI se cobran de forma independiente en el total. REGLA DE ORO: Si los peajes ya vienen incluidos dentro del "Término de Energía" o "Término de Potencia" (frecuente en los desgloses de página 2), NO los extraigas en otrosConceptos, o estarás duplicando el dinero y el sumatorio total fallará.
+   - 'Compensación Excedentes': AGRUPA OBLIGATORIAMENTE aquí todas las variantes de compensacion por excedentes, excedentes autoconsumo, etc. Súmalos en este UNICO concepto.
+   - 'Impuesto Eléctrico' e 'IVA / IGIC': Extrae los impuestos.
+   TODO el dinero restante que no encaje, ponlo con su nombre original. Ningún importe debe quedarse fuera.
+4. **Calculos Totales y CUADRE MATEMÁTICO (CRÍTICO):** 
+   - El sumatorio de (costeTotalConsumo + costeTotalPotencia + TODOS los otrosConceptos) DEBE SER EXACTAMENTE IGUAL a totalFactura. Si no cuadra, estás duplicando desgloses de la página 2.
+   - 'consumoTotalKwh': Suma de kWh P1-P6.
+   - 'costeTotalConsumo': Suma total en euros de la energía facturada (antes de impuestos).
+   - 'costeMedioKwh': Calcula: (costeTotalConsumo / consumoTotalKwh) con 4 decimales.
+   - 'costeTotalPotencia': Suma en euros ÚNICAMENTE de la potencia fija contratada. ¡Bajo NINGÚN CONCEPTO sumes aquí penalizaciones por "Excesos de potencia"! Van a "otrosConceptos".
+5. **Cantidades:** Usa números (floats). Punto decimal.
+
+FORMATO ESTRUCTURADO ESTRICTO:
 {
-  "comercializadora": "Nombre buscado",
-  "titular": "Nombre completo",
-  "cups": "Código CUPS (ES00...)",
+  "comercializadora": "...",
   "fechaInicio": "YYYY-MM-DD",
   "fechaFin": "YYYY-MM-DD",
-  "tarifa": "2.0TD, 3.0TD...",
-  "consumo": [ { "periodo": "P1-P6", "kwh": 0, "precioKwh": 0, "total": 0 } ],
-  "potencia": [ { "periodo": "P1-P6", "kw": 0, "precioKwDia": 0, "dias": 0, "total": 0 } ],
-  "otrosConceptos": [ { "concepto": "Nombre", "total": 0 } ],
+  "titular": "...",
+  "tarifa": "ej: 2.0TD o 3.0TD",
+  "consumo": [
+    { "periodo": "P1", "kwh": 0, "precioKwh": 0, "total": 0 }
+  ],
+  "potencia": [
+    { "periodo": "P1", "kw": 0, "precioKwDia": 0, "dias": 0, "total": 0 }
+  ],
+  "otrosConceptos": [
+    { "concepto": "Bono Social", "total": 0 },
+    { "concepto": "Alquiler de equipos", "total": 0 },
+    { "concepto": "Peajes y Transportes", "total": 0 },
+    { "concepto": "Compensación Excedentes", "total": 0 },
+    { "concepto": "Impuesto Eléctrico", "total": 0 },
+    { "concepto": "IVA / IGIC", "total": 0 }
+  ],
   "consumoTotalKwh": 0,
   "costeTotalConsumo": 0,
+  "costeMedioKwh": 0,
   "costeTotalPotencia": 0,
   "totalFactura": 0
 }
-
-REGLAS CRÍTICAS:
-1. **Agrupación en otrosConceptos**: Bono Social, Alquiler de equipos, Impuesto Eléctrico, IVA / IGIC. Cualquier otro concepto va aquí.
-2. **CUADRE MATEMÁTICO**: costeTotalConsumo + costeTotalPotencia + SUMA(otrosConceptos) DEBE SER EXACTAMENTE IGUAL A totalFactura.
-3. Si un dato no existe, devuélvelo como null o 0 según corresponda. No inventes datos.
+Devuelve el JSON plano. No incluyas backticks markdown (\`\`\`json).
 `;
-
-import { GoogleGenerativeAI } from '@google/generative-ai';
-
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
-
-const MODELS = [
-  'gemini-1.5-flash-latest',
-  'gemini-1.5-pro-latest'
-];
-
-async function callAIWithFallback(messages: any[], modelIndex = 0): Promise<{ content: string, usedModel: string }> {
-  const currentModel = MODELS[modelIndex];
-  if (!currentModel) throw new Error('No se pudo conectar con el motor de IA de Gemini. Revisa tu clave de Google en Vercel.');
-
-  try {
-    if (!process.env.GEMINI_API_KEY) {
-      throw new Error('GEMINI_API_KEY no configurado en Vercel.');
-    }
-    
-    const model = genAI.getGenerativeModel({ 
-      model: currentModel,
-      generationConfig: { responseMimeType: "application/json" }
-    });
-
-    const prompt = messages.map(m => m.content).join('\n\n');
-    const res = await model.generateContent(prompt);
-    
-    if (!res.response) throw new Error('Sin respuesta del modelo Gemini.');
-    const content = res.response.text();
-    return { content, usedModel: currentModel };
-
-  } catch (err: any) {
-    console.error(`Error en Gemini (${currentModel}):`, err.message);
-
-    const errorMessage = (err.message || '').toLowerCase();
-    const isRetryable = err.status === 429 || err.status === 503 || errorMessage.includes('rate limit');
-    const isNotFound = err.status === 404 || errorMessage.includes('not found') || errorMessage.includes('404');
-
-    if ((isRetryable || isNotFound) && modelIndex < MODELS.length - 1) {
-      console.warn(`Reintentando con modelo secundario de Gemini...`);
-      return callAIWithFallback(messages, modelIndex + 1);
-    }
-    
-    throw new Error(`[Gemini Error] ${err.message}`);
-  }
-}
 
 function cleanJson(text: string): string {
   try {
-    // 1. Remove markdown backticks if present
     const cleaned = text.replace(/```json\n?|```/g, '').trim();
-    
-    // 2. Find the first '{' and last '}'
     const start = cleaned.indexOf('{');
     const end = cleaned.lastIndexOf('}');
-    
     if (start === -1 || end === -1) return cleaned;
     return cleaned.substring(start, end + 1);
   } catch (e) {
@@ -89,69 +68,36 @@ function cleanJson(text: string): string {
 }
 
 export async function extractBillDataWithAI(pdfText: string) {
-  if (!process.env.GROQ_API_KEY && !process.env.GEMINI_API_KEY) {
-    throw new Error('No se han configurado llaves de API (GROQ o GEMINI) en Vercel.');
+  if (!process.env.GEMINI_API_KEY) {
+    throw new Error('GEMINI_API_KEY no está configurado en las variables de entorno de Vercel.');
   }
 
-  const messages: any[] = [{ role: 'user', content: `${SYSTEM_PROMPT}\n\nTEXTO DE LA FACTURA:\n${pdfText}` }];
+  const model = genAI.getGenerativeModel({ 
+    model: 'gemini-flash-latest',
+    generationConfig: {
+      responseMimeType: "application/json",
+    }
+  });
+
+  const prompt = `${SYSTEM_PROMPT}\n\nTEXTO DE LA FACTURA:\n${pdfText}\n\nEXTRAE EL JSON A CONTINUACIÓN:`;
 
   try {
-    // ATTEMPT 1: Best available model in the chain
-    const startIndex = !process.env.GEMINI_API_KEY ? MODELS.indexOf('llama-3.3-70b-versatile') : 0;
-    const { content: output1, usedModel } = await callAIWithFallback(messages, startIndex);
-    
-    let parsedData;
-    try {
-      parsedData = JSON.parse(cleanJson(output1));
-    } catch (e) {
-      console.error('JSON Parse Error after cleaning:', output1);
-      throw new Error(`La IA devolvió un formato inválido. Intentando recuperar...`);
-    }
-
-    // VALIDATION
-    const validate = (data: any) => {
-      const e = data.costeTotalConsumo || 0;
-      const p = data.costeTotalPotencia || 0;
-      let ocs = 0;
-      if (Array.isArray(data.otrosConceptos)) {
-        data.otrosConceptos.forEach((oc: any) => ocs += (oc.total || 0));
-      }
-      const calculated = Number((e + p + ocs).toFixed(2));
-      const reported = Number((data.totalFactura || 0).toFixed(2));
-      return { isMatch: Math.abs(calculated - reported) <= 0.06, calculated, reported, diff: Number((reported - calculated).toFixed(2)) };
-    };
-
-    let check = validate(parsedData);
-
-    // ATTEMPT 2: Targeted Self-Correction (Always using the same model that succeeded in attempt 1)
-    if (!check.isMatch) {
-      messages.push({ role: 'assistant', content: output1 });
-      messages.push({ role: 'user', content: `
-        ERROR DE CUADRE: Tus conceptos suman ${check.calculated}€ pero el total de la factura es ${check.reported}€.
-        FALTAN ${check.diff}€ por encontrar. 
-        Por favor, busca en el texto conceptos que hayas omitido como:
-        - Energía Reactiva
-        - Excesos de Potencia (Penalizaciones)
-        - Canon de Aguas o Tasa de Basuras
-        - Otros cargos u abonos.
-        Devuelve el JSON corregido asegurando que el sumatorio sea EXACTO.
-      `});
-
-      const { content: output2 } = await callAIWithFallback(messages, MODELS.indexOf(usedModel));
-      parsedData = JSON.parse(cleanJson(output2));
-      check = validate(parsedData);
-    }
-
-    if (!check.isMatch) {
-      throw new Error(`Inconsistencia matemática detectada: La suma de conceptos (${check.calculated}€) no coincide con el total (${check.reported}€). Faltan ${check.diff}€.`);
-    }
-
-    return parsedData;
+    const result = await model.generateContent(prompt);
+    let output = result.response.text().trim();
+    const cleaned = cleanJson(output);
+    return JSON.parse(cleaned);
   } catch (error: any) {
-    console.error('Extraction Error:', error);
-    if (error.status === 429) {
-       throw new Error('Límite de la API alcanzado. Por favor, espera unos minutos antes de subir más archivos.');
+    console.error('Error in AI extraction:', error);
+    
+    // Si falla el modelo flash, intentamos pro como último recurso
+    try {
+        console.warn('Reintentando con gemini-pro-latest...');
+        const backupModel = genAI.getGenerativeModel({ model: 'gemini-pro-latest' });
+        const res2 = await backupModel.generateContent(prompt);
+        return JSON.parse(cleanJson(res2.response.text()));
+    } catch (e2) {
+        throw new Error(`Error crítico en Gemini: ${error.message}. Verifica tu API Key en Vercel.`);
     }
-    throw new Error(error.message.includes('Inconsistencia') ? error.message : `Detalle técnico: ${error.message}`);
   }
 }
+
