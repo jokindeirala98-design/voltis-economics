@@ -97,12 +97,25 @@ export default function EnergyBillsApp() {
       setCloudSyncStatus('syncing');
       const dbProjects = await fetchAllProjectsFromDB();
       if (dbProjects && dbProjects.length > 0) {
-        setSavedProjects(dbProjects);
-        localStorage.setItem('voltis_saved_projects', JSON.stringify(dbProjects));
+        // Smart merge: prefer whichever source has more bills for each project
+        const localRaw = localStorage.getItem('voltis_saved_projects');
+        const localProjects: ProjectWorkspace[] = localRaw ? JSON.parse(localRaw) : [];
+
+        const merged = dbProjects.map(dbP => {
+          const localP = localProjects.find((lp: any) => lp.id === dbP.id);
+          // Prefer local if it has more bills (Supabase sync may have missed some)
+          if (localP && (localP.bills?.length || 0) > (dbP.bills?.length || 0)) return localP;
+          return dbP;
+        });
+        // Keep any projects that only exist locally
+        const localOnlyProjects = localProjects.filter((lp: any) => !dbProjects.find(dbP => dbP.id === lp.id));
+        const finalProjects = [...merged, ...localOnlyProjects];
+
+        setSavedProjects(finalProjects);
+        localStorage.setItem('voltis_saved_projects', JSON.stringify(finalProjects));
         
-        // Update view if cloud is newer or if we had no local data
-        const lastId = localStorage.getItem('voltis_last_project') || dbProjects[0].id;
-        const active = dbProjects.find(p => p.id === lastId) || dbProjects[0];
+        const lastId = localStorage.getItem('voltis_last_project') || finalProjects[0].id;
+        const active = finalProjects.find(p => p.id === lastId) || finalProjects[0];
         if (active) {
           setBills(active.bills || []);
           setCustomOCs(active.customOCs || {});
