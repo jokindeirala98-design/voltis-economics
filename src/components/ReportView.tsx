@@ -528,12 +528,16 @@ export default function ReportView({ bills, customOCs, onBack }: ReportViewProps
       {/* Dynamic Detail Modal */}
       <AnimatePresence>
         {selectedBillId && selectedBill && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm no-print">
+          <div 
+            className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm no-print cursor-pointer"
+            onClick={() => setSelectedBillId(null)}
+          >
             <motion.div 
               initial={{ opacity: 0, scale: 0.9, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.9, y: 20 }}
-              className="bg-[#0f172a] border border-white/10 rounded-[32px] w-full max-w-2xl overflow-hidden shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+              className="bg-[#0f172a] border border-white/10 rounded-[32px] w-full max-w-2xl overflow-hidden shadow-2xl cursor-default"
             >
               <div className="p-8 border-b border-white/5 flex items-center justify-between bg-gradient-to-r from-purple-500/10 to-transparent">
                 <div>
