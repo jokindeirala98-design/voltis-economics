@@ -55,27 +55,38 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
 
 const MODELS = [
+  'gemini-1.5-pro-latest',
+  'gemini-1.5-flash-latest',
   'llama-3.3-70b-versatile',
-  'llama-3.1-8b-instant',
-  'gemini-emergency'
+  'llama-3.1-8b-instant'
 ];
 
-async function callGroqWithFallback(messages: any[], modelIndex = 0): Promise<{ content: string, usedModel: string }> {
-  try {
-    const currentModel = MODELS[modelIndex];
+async function callAIWithFallback(messages: any[], modelIndex = 0): Promise<{ content: string, usedModel: string }> {
+  const currentModel = MODELS[modelIndex];
+  if (!currentModel) throw new Error('Se han agotado todos los modelos de IA disponibles.');
 
-    if (currentModel === 'gemini-emergency') {
-       if (!process.env.GEMINI_API_KEY) throw new Error('No hay más modelos disponibles en Groq y no se ha configurado GEMINI_API_KEY.');
-       const model = genAI.getGenerativeModel({ 
-         model: 'gemini-1.5-flash',
-         generationConfig: { responseMimeType: "application/json" }
-       });
-       // Convert messages to gemini prompt
-       const prompt = messages.map(m => m.content).join('\n\n');
-       const res = await model.generateContent(prompt);
-       return { content: res.response.text(), usedModel: 'gemini-1.5-flash' };
+  try {
+    // 1. GEMINI PROVIDER
+    if (currentModel.startsWith('gemini')) {
+      if (!process.env.GEMINI_API_KEY) {
+        console.warn('GEMINI_API_KEY no configurado. Saltando al siguiente modelo...');
+        return callAIWithFallback(messages, modelIndex + 1);
+      }
+      const model = genAI.getGenerativeModel({ 
+        model: currentModel.replace('-latest', ''),
+        generationConfig: { responseMimeType: "application/json" }
+      });
+      const prompt = messages.map(m => m.content).join('\n\n');
+      const res = await model.generateContent(prompt);
+      const content = res.response.text();
+      return { content, usedModel: currentModel };
     }
 
+    // 2. GROQ PROVIDER
+    if (!process.env.GROQ_API_KEY) {
+      console.warn('GROQ_API_KEY no configurado. Saltando al siguiente modelo...');
+      return callAIWithFallback(messages, modelIndex + 1);
+    }
     const res = await groq.chat.completions.create({
       messages,
       model: currentModel,
@@ -83,11 +94,14 @@ async function callGroqWithFallback(messages: any[], modelIndex = 0): Promise<{ 
       response_format: { type: 'json_object' }
     });
     return { content: res.choices[0]?.message?.content || '{}', usedModel: currentModel };
+
   } catch (err: any) {
-    // If Rate Limit (429) or Overloaded (503), try next model
-    if ((err.status === 429 || err.status === 503 || err.message.includes('Rate limit')) && modelIndex < MODELS.length - 1) {
-      console.warn(`Model ${MODELS[modelIndex]} limited/overloaded. Falling back to ${MODELS[modelIndex+1]}...`);
-      return callGroqWithFallback(messages, modelIndex + 1);
+    // Handle Rate Limits (429) or Overloads (503) or specific API errors
+    const isRateLimit = err.status === 429 || err.status === 503 || err.message?.includes('Rate limit');
+    
+    if (isRateLimit && modelIndex < MODELS.length - 1) {
+      console.warn(`Modelo ${currentModel} saturado/limitado. Reintentando con ${MODELS[modelIndex+1]}...`);
+      return callAIWithFallback(messages, modelIndex + 1);
     }
     throw err;
   }
@@ -118,8 +132,8 @@ export async function extractBillDataWithAI(pdfText: string) {
 
   try {
     // ATTEMPT 1: Best available model in the chain
-    const startIndex = !process.env.GROQ_API_KEY ? MODELS.indexOf('gemini-emergency') : 0;
-    const { content: output1, usedModel } = await callGroqWithFallback(messages, startIndex);
+    const startIndex = !process.env.GEMINI_API_KEY ? MODELS.indexOf('llama-3.3-70b-versatile') : 0;
+    const { content: output1, usedModel } = await callAIWithFallback(messages, startIndex);
     
     let parsedData;
     try {
@@ -158,7 +172,7 @@ export async function extractBillDataWithAI(pdfText: string) {
         Devuelve el JSON corregido asegurando que el sumatorio sea EXACTO.
       `});
 
-      const { content: output2 } = await callGroqWithFallback(messages, MODELS.indexOf(usedModel));
+      const { content: output2 } = await callAIWithFallback(messages, MODELS.indexOf(usedModel));
       parsedData = JSON.parse(output2);
       check = validate(parsedData);
     }
