@@ -97,45 +97,46 @@ export default function ReportView({ bills, customOCs, onBack }: ReportViewProps
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  // GSAP Orchestration
+  // GSAP Orchestration - Subtle entrance animations only (sections always visible)
   useEffect(() => {
     const ctx = gsap.context(() => {
-      // 1. Hero Content Scroller
+      // 1. Hero parallax EXIT animation (scale down on scroll)
       gsap.to('.hero-content', {
-        scale: 0.85, opacity: 0, y: -50,
+        scale: 0.9, opacity: 0.3, y: -40,
         scrollTrigger: { 
           trigger: '#scene-1', 
           start: 'top top', 
           end: 'bottom 40%', 
-          scrub: true,
-          scroller: containerRef.current
+          scrub: 1,
         }
       });
 
-      // 2. Sections Reveal - ENHANCED RELIABILITY
+      // 2. Subtle section entrance - starts from slightly below, always ends fully visible
       const sections = ['#scene-2', '#scene-3', '#scene-4', '#scene-5', '#scene-6'];
       sections.forEach(id => {
-        // Force visibility reset then animate
-        gsap.set(id, { opacity: 0, y: 30 });
-        
-        ScrollTrigger.create({
-          trigger: id,
-          start: 'top bottom',
-          scroller: containerRef.current,
-          onEnter: () => gsap.to(id, { opacity: 1, y: 0, filter: 'blur(0px)', duration: 0.8, ease: 'power2.out' }),
-          once: true
+        gsap.from(id, {
+          y: 40,
+          opacity: 0.4,
+          duration: 1,
+          ease: 'power2.out',
+          scrollTrigger: {
+            trigger: id,
+            start: 'top 90%',
+            once: true,
+          }
         });
 
         if (id === '#scene-2') {
           gsap.from('.kpi-card', {
-            scale: 0.85,
-            opacity: 0,
+            scale: 0.9,
+            opacity: 0.2,
             stagger: 0.1,
+            duration: 0.7,
+            ease: 'back.out(1.7)',
             scrollTrigger: {
               trigger: id,
               start: 'top 80%',
-              scroller: containerRef.current,
-              toggleActions: 'play none none none'
+              once: true,
             }
           });
         }
@@ -535,7 +536,8 @@ export default function ReportView({ bills, customOCs, onBack }: ReportViewProps
       <style jsx global>{`
         html { scroll-behavior: smooth !important; }
         .report-container { width: 100%; position: relative; }
-        section { opacity: 0; transform: translateY(20px); }
+        /* CRITICAL: sections are ALWAYS visible. GSAP only adds subtle animations FROM a slightly lower initial state. */
+        section { opacity: 1; }
         .glass { background: rgba(15,23,42,0.4) !important; backdrop-filter: blur(40px) !important; }
         .text-glow { text-shadow: 0 0 30px rgba(255,255,255,0.4); }
         .pdf-avoid-break { break-inside: avoid !important; }
