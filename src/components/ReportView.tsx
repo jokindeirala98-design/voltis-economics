@@ -245,7 +245,11 @@ export default function ReportView({ bills, customOCs, onBack }: ReportViewProps
                    <BarChart data={chartData}>
                      <XAxis dataKey="name" stroke="#64748b" fontSize={10} tickLine={false} axisLine={false} interval={0} />
                      <YAxis stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} />
-                     <RechartsTooltip cursor={{fill: '#1e293b'}} contentStyle={{backgroundColor: '#0f172a', border: '1px solid #334155', borderRadius: '12px'}} />
+                     <RechartsTooltip 
+                       cursor={{fill: '#1e293b'}} 
+                       contentStyle={{backgroundColor: '#0f172a', border: '1px solid #334155', borderRadius: '12px', fontSize: '10px'}} 
+                       formatter={(val: any) => [`${Number(val).toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`, 'Total Factura']}
+                     />
                      <Bar dataKey="totalFactura" fill="url(#barGradient)" radius={[10, 10, 0, 0]} />
                      <defs>
                         <linearGradient id="barGradient" x1="0" y1="0" x2="0" y2="1">
