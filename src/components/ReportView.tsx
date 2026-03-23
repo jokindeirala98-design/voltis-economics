@@ -435,9 +435,9 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
                     <h3 className="text-4xl font-black tracking-tighter uppercase leading-[0.9]">Evolución Mensual</h3>
                     <p className="text-slate-400 text-sm font-medium mt-2">Esta es tu curva de consumo anual.</p>
                   </div>
-                  <div className="flex-1 h-[300px] glass p-6 rounded-[40px] border border-white/5">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                  <div className="flex-1 h-[300px] glass p-6 rounded-[40px] border border-white/5 overflow-hidden">
+                    <ResponsiveContainer width="100%" height={300}>
+                      <BarChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }} layout="horizontal">
                         <CartesianGrid strokeDasharray="5 5" stroke="rgba(255,255,255,0.03)" vertical={false} />
                         <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: 'rgba(255,255,255,0.2)', fontSize: 9, fontWeight: 900 }} dy={10} interval={0} />
                         <YAxis axisLine={false} tickLine={false} tick={{ fill: 'rgba(255,255,255,0.2)', fontSize: 9, fontWeight: 900 }} />
@@ -464,8 +464,8 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
                     <span className="text-[10px] font-black uppercase tracking-[0.8em] text-blue-500">Visual 04</span>
                     <h3 className="text-4xl font-black tracking-tighter uppercase leading-[0.9]">Bio-Estructura Económica</h3>
                   </div>
-                  <div className="h-[180px] relative flex items-center justify-center">
-                    <ResponsiveContainer width="100%" height="100%">
+                  <div className="h-[180px] relative flex items-center justify-center overflow-hidden">
+                    <ResponsiveContainer width="100%" height={180}>
                       <PieChart>
                         <Pie data={pieData} cx="50%" cy="50%" innerRadius={60} outerRadius={85} paddingAngle={6} dataKey="value" stroke="none" isAnimationActive={false}>
                           {pieData.map((e: any, i: number) => <Cell key={i} fill={e.color} />)}
