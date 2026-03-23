@@ -31,7 +31,7 @@ export default function EnergyBillsApp() {
   const [savedProjects, setSavedProjects] = useState<ProjectWorkspace[]>([]);
   const [customOCs, setCustomOCs] = useState<Record<string, { concepto: string; total: number }[]>>({});
   const [showReport, setShowReport] = useState(false);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(true);
   const [password, setPassword] = useState('');
   const [authError, setAuthError] = useState(false);
   const [renamingProjectId, setRenamingProjectId] = useState<string | null>(null);
@@ -401,49 +401,6 @@ export default function EnergyBillsApp() {
     );
   }
 
-  if (!isAuthenticated) {
-    return (
-      <div className="min-h-screen bg-[#020617] flex items-center justify-center p-4 font-inter text-slate-100 relative overflow-hidden">
-        <div className="absolute top-[-20%] left-[-10%] w-[60%] h-[60%] bg-blue-600/5 rounded-full blur-[140px] pointer-events-none" />
-        <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-purple-600/5 rounded-full blur-[120px] pointer-events-none" />
-        
-        <motion.div 
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="glass-card p-10 rounded-[32px] border border-white/10 w-full max-w-md flex flex-col items-center gap-8 relative z-10"
-        >
-          <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-blue-500/20">
-            <Zap className="w-8 h-8 text-white" />
-          </div>
-          
-          <div className="text-center flex flex-col gap-2">
-            <h1 className="text-3xl font-black tracking-tighter text-white">ACCESO VOLTIS</h1>
-            <p className="text-sm text-slate-400 font-medium">Introduce la clave maestra de acceso</p>
-          </div>
-
-          <form onSubmit={handleLogin} className="w-full flex flex-col gap-4">
-            <div className="flex flex-col gap-2">
-              <input 
-                type="password" 
-                value={password}
-                onChange={(e) => { setPassword(e.target.value); setAuthError(false); }}
-                placeholder="Contraseña..."
-                className={`w-full bg-black/50 border ${authError ? 'border-red-500/50' : 'border-white/10'} rounded-xl px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 transition-colors`}
-              />
-              {authError && <span className="text-xs text-red-400 font-medium px-1">Contraseña incorrecta</span>}
-            </div>
-            
-            <button 
-              type="submit"
-              className="w-full py-3.5 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-500 transition-colors flex items-center justify-center gap-2"
-            >
-              Entrar al Sistema <ChevronRight className="w-4 h-4" />
-            </button>
-          </form>
-        </motion.div>
-      </div>
-    );
-  }
 
   return (
     <div className="flex h-screen bg-[#020617] overflow-hidden font-inter text-slate-100 selection:bg-blue-500/30">
