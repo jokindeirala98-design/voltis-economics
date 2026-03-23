@@ -17,6 +17,8 @@ import ReportView from '@/components/ReportView';
 import { motion, AnimatePresence } from 'framer-motion';
 import { fetchAllProjectsFromDB, syncProjectToDB, deleteProjectFromDB } from '@/lib/supabase-sync';
 import { getAssignedMonth } from '@/lib/date-utils';
+import { useSession, signOut } from 'next-auth/react';
+import LoginScreen from '@/components/LoginScreen';
 
 const StatusItem = ({ label, status }: { label: string; status: boolean }) => (
   <div className="flex items-center justify-between p-3 rounded-xl bg-white/5 border border-white/5">
@@ -26,6 +28,7 @@ const StatusItem = ({ label, status }: { label: string; status: boolean }) => (
 );
 
 export default function EnergyBillsApp() {
+  const { data: session, status } = useSession();
   const [allBills, setAllBills] = useState<Record<string, ExtractedBill[]>>({});
   const [allCustomOCs, setAllCustomOCs] = useState<Record<string, Record<string, { concepto: string; total: number }[]>>>({});
   const [allExtractionQueues, setAllExtractionQueues] = useState<Record<string, QueueItem[]>>({});
@@ -33,14 +36,11 @@ export default function EnergyBillsApp() {
   const [currentProjectId, setCurrentProjectId] = useState<string>('default');
   const [savedProjects, setSavedProjects] = useState<ProjectWorkspace[]>([]);
   const [showReport, setShowReport] = useState(false);
-  const [isAuthenticated, setIsAuthenticated] = useState(true);
-  const [password, setPassword] = useState('');
-  const [authError, setAuthError] = useState(false);
   const [renamingProjectId, setRenamingProjectId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [showNewProjectModal, setShowNewProjectModal] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
-  const [fileRefs, setFileRefs] = useState<Record<string, File>>({}); // In-memory file refs for retry
+  const [fileRefs, setFileRefs] = useState<Record<string, File>>({}); 
   const [cloudSyncStatus, setCloudSyncStatus] = useState<'synced' | 'syncing' | 'error' | 'local'>('local');
   const [showDiag, setShowDiag] = useState(false);
   const [diagInfo, setDiagInfo] = useState<any>(null);
@@ -69,131 +69,70 @@ export default function EnergyBillsApp() {
     setIsCheckingDiag(false);
   };
 
-  useEffect(() => {
-    if (typeof window !== 'undefined' && sessionStorage.getItem('voltis_auth') === 'true') {
-      setIsAuthenticated(true);
-    }
-  }, []);
-
-  const handleLogin = (e: React.FormEvent) => {
-    e.preventDefault();
-    const masterPassword = process.env.NEXT_PUBLIC_APP_PASSWORD || 'voltis2026';
-    if (password === masterPassword) {
-      setIsAuthenticated(true);
-      sessionStorage.setItem('voltis_auth', 'true');
-      setAuthError(false);
-    } else {
-      setAuthError(true);
-    }
-  };
-
   const bills = useMemo(() => {
     const b = allBills[currentProjectId] || [];
     return [...b].sort((a, b) => {
       const am = getAssignedMonth(a.fechaInicio, a.fechaFin);
       const bm = getAssignedMonth(b.fechaInicio, b.fechaFin);
-      
       if (am.year !== bm.year) return am.year - bm.year;
       if (am.month !== bm.month) return am.month - bm.month;
-      
-      // Secondary sort by file name if months are identical
       return (a.fileName || '').localeCompare(b.fileName || '');
     });
   }, [allBills, currentProjectId]);
+
   const extractionQueue = allExtractionQueues[currentProjectId] || [];
   const customOCs = allCustomOCs[currentProjectId] || {};
 
-  // Multi-layer Initialization (LocalStorage -> Cloud)
+  // Initialization: Sync Cloud -> Local
   useEffect(() => {
     const initStorage = async () => {
-      // 1. Load from LocalStorage (Immediate feedback)
-      const localData = localStorage.getItem('voltis_saved_projects');
-      if (localData) {
-        try {
-          const parsed: ProjectWorkspace[] = JSON.parse(localData);
-          if (parsed && parsed.length > 0) {
-            setSavedProjects(parsed);
-            const lastId = localStorage.getItem('voltis_last_project') || parsed[0].id;
-            setCurrentProjectId(lastId);
-            
-            // Populate all projects into keyed state
-            const billsAcc: Record<string, ExtractedBill[]> = {};
-            const ocsAcc: Record<string, any> = {};
-            const queueAcc: Record<string, QueueItem[]> = {};
-            
-            parsed.forEach(p => {
-              billsAcc[p.id] = (p.bills || []).sort((a, b) => {
-                const am = getAssignedMonth(a.fechaInicio, a.fechaFin);
-                const bm = getAssignedMonth(b.fechaInicio, b.fechaFin);
-                if (am.year !== bm.year) return am.year - bm.year;
-                return am.month - bm.month;
-              });
-              ocsAcc[p.id] = p.customOCs || {};
-              queueAcc[p.id] = p.queueItems || [];
-            });
-            
-            setAllBills(billsAcc);
-            setAllCustomOCs(ocsAcc);
-            setAllExtractionQueues(queueAcc);
-          }
-        } catch (e) { console.warn('Local storage parse error', e); }
-      }
+      if (status !== 'authenticated' || !session?.user) return;
+      
+      const userId = (session.user as any).id || session.user.email;
+      if (!userId) return;
 
-      // 2. Sync from Cloud (Background)
       setCloudSyncStatus('syncing');
-      const dbProjects = await fetchAllProjectsFromDB();
-      if (dbProjects && dbProjects.length > 0) {
-        // Smart merge
-        const localRaw = localStorage.getItem('voltis_saved_projects');
-        const localProjects: ProjectWorkspace[] = localRaw ? JSON.parse(localRaw) : [];
-
-        const merged = dbProjects.map(dbP => {
-          const localP = localProjects.find((lp: any) => lp.id === dbP.id);
-          // If local is newer, keep local. Otherwise, keep DB (cloud)
-          if (localP && (localP.updatedAt || 0) > (dbP.updatedAt || 0)) return localP;
-          return dbP;
-        });
-        const localOnlyProjects = localProjects.filter((lp: any) => !dbProjects.find(dbP => dbP.id === lp.id));
-        const finalProjects = [...merged, ...localOnlyProjects];
-
-        setSavedProjects(finalProjects);
-        localStorage.setItem('voltis_saved_projects', JSON.stringify(finalProjects));
+      try {
+        const dbProjects = await fetchAllProjectsFromDB(userId);
         
-        const billsAcc: Record<string, ExtractedBill[]> = {};
-        const ocsAcc: Record<string, any> = {};
-        const queueAcc: Record<string, QueueItem[]> = {};
+        // Merge with local storage if necessary, but primarily trust cloud now for multi-device login
+        if (dbProjects && dbProjects.length > 0) {
+          setSavedProjects(dbProjects);
+          
+          const billsAcc: Record<string, ExtractedBill[]> = {};
+          const ocsAcc: Record<string, any> = {};
+          const queueAcc: Record<string, QueueItem[]> = {};
 
-        finalProjects.forEach(p => {
-          const sorted = (p.bills || []).sort((a, b) => {
-            const am = getAssignedMonth(a.fechaInicio, a.fechaFin);
-            const bm = getAssignedMonth(b.fechaInicio, b.fechaFin);
-            if (am.year !== bm.year) return am.year - bm.year;
-            return am.month - bm.month;
+          dbProjects.forEach(p => {
+            billsAcc[p.id] = (p.bills || []).sort((a, b) => {
+              const am = getAssignedMonth(a.fechaInicio, a.fechaFin);
+              const bm = getAssignedMonth(b.fechaInicio, b.fechaFin);
+              if (am.year !== bm.year) return am.year - bm.year;
+              return am.month - bm.month;
+            });
+            ocsAcc[p.id] = p.customOCs || {};
           });
-          billsAcc[p.id] = sorted;
-          ocsAcc[p.id] = p.customOCs || {};
-          queueAcc[p.id] = p.queueItems || [];
-        });
-        
-        setAllBills(billsAcc);
-        setAllCustomOCs(ocsAcc);
-        setAllExtractionQueues(queueAcc);
-        
-        const lastId = localStorage.getItem('voltis_last_project') || finalProjects[0].id;
-        setCurrentProjectId(lastId);
-        setCloudSyncStatus('synced');
-      } else if (dbProjects) {
-        setCloudSyncStatus('synced');
-      } else {
+          
+          setAllBills(billsAcc);
+          setAllCustomOCs(ocsAcc);
+          
+          const lastId = localStorage.getItem(`voltis_last_project_${userId}`) || dbProjects[0].id;
+          setCurrentProjectId(lastId);
+          setCloudSyncStatus('synced');
+        } else {
+          setCloudSyncStatus('synced');
+        }
+      } catch (e) {
+        console.error('Initial sync error', e);
         setCloudSyncStatus('error');
       }
     };
     initStorage();
-  }, []);
-
-  // Update persistent queue state (REMOVED - Consolidated into saveToDisk and direct updates to avoid race conditions)
+  }, [status, session]);
 
   const saveToDisk = useCallback(async (updatedBills: ExtractedBill[], updatedOCs: Record<string, { concepto: string; total: number }[]>, targetProjectId?: string) => {
+    if (status !== 'authenticated' || !session?.user) return;
+    const userId = (session.user as any).id || session.user.email;
     const projectId = targetProjectId || currentProjectId;
     
     setSavedProjects(prev => {
@@ -201,18 +140,16 @@ export default function EnergyBillsApp() {
         ...p, bills: updatedBills, customOCs: updatedOCs, updatedAt: Date.now() 
       } : p);
       
-      localStorage.setItem('voltis_saved_projects', JSON.stringify(next));
-
       const activeProject = next.find(p => p.id === projectId);
       if (activeProject) {
         setCloudSyncStatus('syncing');
-        syncProjectToDB(activeProject)
+        syncProjectToDB(activeProject, userId)
           .then(() => setCloudSyncStatus('synced'))
           .catch(() => setCloudSyncStatus('error'));
       }
       return next;
     });
-  }, [currentProjectId]);
+  }, [currentProjectId, status, session]);
 
   const processFile = useCallback(async (file: File, queueId: string, targetProjectId: string) => {
     const formData = new FormData();
@@ -361,7 +298,8 @@ export default function EnergyBillsApp() {
   });
 
   const createNewProject = async (name: string) => {
-    if (!name.trim()) return;
+    if (!name.trim() || !session?.user) return;
+    const userId = (session.user as any).id || session.user.email;
     const project: ProjectWorkspace = { 
       id: crypto.randomUUID(), 
       name: name.toUpperCase(), 
@@ -372,9 +310,8 @@ export default function EnergyBillsApp() {
     
     setSavedProjects(prev => {
       const next = [...prev, project];
-      localStorage.setItem('voltis_saved_projects', JSON.stringify(next));
       setCloudSyncStatus('syncing');
-      syncProjectToDB(project).then(() => setCloudSyncStatus('synced')).catch(() => setCloudSyncStatus('error'));
+      syncProjectToDB(project, userId).then(() => setCloudSyncStatus('synced')).catch(() => setCloudSyncStatus('error'));
       return next;
     });
 
@@ -397,19 +334,21 @@ export default function EnergyBillsApp() {
 
   const deleteProject = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (confirm('¿Eliminar este proyecto permanentemente de la nube y del navegador?')) {
+    if (!session?.user) return;
+    const userId = (session.user as any).id || session.user.email;
+
+    if (confirm('¿Eliminar este proyecto permanentemente de la nube?')) {
       const next = savedProjects.filter(p => p.id !== id);
       setSavedProjects(next);
-      localStorage.setItem('voltis_saved_projects', JSON.stringify(next));
       
       setCloudSyncStatus('syncing');
-      deleteProjectFromDB(id).then(() => setCloudSyncStatus('synced')).catch(() => setCloudSyncStatus('error'));
+      deleteProjectFromDB(id, userId).then(() => setCloudSyncStatus('synced')).catch(() => setCloudSyncStatus('error'));
       
       setAllBills(prev => { const n = { ...prev }; delete n[id]; return n; });
       setAllCustomOCs(prev => { const n = { ...prev }; delete n[id]; return n; });
       setAllExtractionQueues(prev => { const n = { ...prev }; delete n[id]; return n; });
 
-      if (currentProjectId === id) loadWorkspace(next[0] || { id: crypto.randomUUID(), name: 'HUÉRFANO', bills: [] });
+      if (currentProjectId === id && next.length > 0) loadWorkspace(next[0]);
       toast.success('Proyecto eliminado');
     }
   };
@@ -425,16 +364,15 @@ export default function EnergyBillsApp() {
   };
 
   const renameProject = async (id: string, newName: string) => {
-    if (!newName.trim()) return;
+    if (!newName.trim() || !session?.user) return;
+    const userId = (session.user as any).id || session.user.email;
     const upperName = newName.toUpperCase();
     setSavedProjects(prev => {
       const next = prev.map(p => p.id === id ? { ...p, name: upperName, updatedAt: Date.now() } : p);
-      localStorage.setItem('voltis_saved_projects', JSON.stringify(next));
-      
       const updated = next.find(p => p.id === id);
       if (updated) {
         setCloudSyncStatus('syncing');
-        syncProjectToDB(updated).then(() => setCloudSyncStatus('synced')).catch(() => setCloudSyncStatus('error'));
+        syncProjectToDB(updated, userId).then(() => setCloudSyncStatus('synced')).catch(() => setCloudSyncStatus('error'));
       }
       return next;
     });
@@ -695,12 +633,25 @@ export default function EnergyBillsApp() {
               </div>
               <div className={`w-1.5 h-1.5 rounded-full ${cloudSyncStatus === 'synced' ? 'bg-emerald-500' : 'bg-red-500 animate-pulse'}`} />
             </button>
-            <div className="glass p-4 rounded-2xl border border-white/5 flex items-center gap-4">
-               <div className="w-8 h-8 rounded-full bg-slate-800 border border-white/10" />
-               <div className="flex flex-col">
-                 <span className="text-xs font-bold text-white uppercase tracking-tight">Admin Voltis</span>
-                 <span className="text-[10px] text-slate-500 tracking-wider">Plan Expert</span>
+            <div className="glass p-4 rounded-2xl border border-white/5 flex items-center justify-between group relative">
+               <div className="flex items-center gap-4">
+                 {session?.user?.image ? (
+                   <img src={session.user.image} className="w-8 h-8 rounded-full border border-white/10" alt="Avatar" />
+                 ) : (
+                   <div className="w-8 h-8 rounded-full bg-slate-800 border border-white/10" />
+                 )}
+                 <div className="flex flex-col overflow-hidden max-w-[120px]">
+                   <span className="text-xs font-bold text-white uppercase tracking-tight truncate">{session?.user?.name || 'Comercial'}</span>
+                   <span className="text-[10px] text-slate-500 tracking-wider truncate">Plan Expert</span>
+                 </div>
                </div>
+               <button 
+                 onClick={() => signOut()}
+                 className="p-2 hover:bg-red-500/10 text-slate-600 hover:text-red-400 rounded-lg transition-all"
+                 title="Cerrar sesión"
+               >
+                 <LogOut className="w-4 h-4" />
+               </button>
             </div>
           </div>
       </aside>

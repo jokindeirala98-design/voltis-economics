@@ -1,9 +1,14 @@
 import { supabase } from './supabase';
 import { ProjectWorkspace, ExtractedBill } from './types';
 
-export async function fetchAllProjectsFromDB(): Promise<ProjectWorkspace[]> {
+export async function fetchAllProjectsFromDB(userId: string): Promise<ProjectWorkspace[]> {
   try {
-    const { data: projects, error: pErr } = await supabase.from('projects').select('*').order('updated_at', { ascending: false });
+    const { data: projects, error: pErr } = await supabase
+      .from('projects')
+      .select('*')
+      .eq('user_id', userId)
+      .order('updated_at', { ascending: false });
+    
     if (pErr) { console.error('Error fetching projects:', pErr); return []; }
     if (!projects || projects.length === 0) return [];
 
@@ -38,12 +43,13 @@ export async function fetchAllProjectsFromDB(): Promise<ProjectWorkspace[]> {
   }
 }
 
-export async function syncProjectToDB(project: ProjectWorkspace) {
+export async function syncProjectToDB(project: ProjectWorkspace, userId: string) {
   try {
     // 1. Upsert project
     await supabase.from('projects').upsert({
       id: project.id,
       name: project.name,
+      user_id: userId,
       updated_at: new Date(project.updatedAt || Date.now()).toISOString()
     });
 
@@ -69,14 +75,8 @@ export async function syncProjectToDB(project: ProjectWorkspace) {
     if (project.customOCs) {
        const entries = Object.entries(project.customOCs);
        
-       // Clean up orphans in DB for custom_concepts that are no longer associated with current bill IDs
        if (currentBillIds.length > 0) {
          await supabase.from('custom_concepts').delete().in('bill_id', (await supabase.from('bills').select('id').eq('project_id', project.id)).data?.map(b => b.id).filter(id => !currentBillIds.includes(id)) || []);
-       } else {
-         // This project has no bills, but we should handle it via project_id if possible, 
-         // but custom_concepts only has bill_id. We'd have to find bills first. 
-         // Since we already delete all bills for this project above, IF there's a cascade delete on the DB, 
-         // then custom_concepts are gone. If not, we might need more logic.
        }
 
        for (const [billId, ocs] of entries) {
@@ -94,9 +94,9 @@ export async function syncProjectToDB(project: ProjectWorkspace) {
   }
 }
 
-export async function deleteProjectFromDB(id: string) {
+export async function deleteProjectFromDB(id: string, userId: string) {
   try {
-    await supabase.from('projects').delete().eq('id', id);
+    await supabase.from('projects').delete().eq('id', id).eq('user_id', userId);
   } catch (error) {
     console.error('Fatal DB delete error:', error);
   }

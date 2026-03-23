@@ -18,6 +18,8 @@ export const metadata: Metadata = {
   description: "Sistema experto de análisis energético y optimización de facturas.",
 };
 
+import { AuthProvider } from "@/components/AuthProvider";
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -26,8 +28,10 @@ export default function RootLayout({
   return (
     <html lang="es" className={`${geistSans.variable} ${geistMono.variable}`}>
       <body className="min-h-screen flex flex-col antialiased">
-        {children}
-        <Toaster richColors position="top-center" />
+        <AuthProvider>
+          {children}
+          <Toaster richColors position="top-center" />
+        </AuthProvider>
       </body>
     </html>
   );
