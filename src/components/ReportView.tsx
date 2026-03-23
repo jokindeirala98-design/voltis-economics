@@ -442,7 +442,7 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
                         <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: 'rgba(255,255,255,0.2)', fontSize: 9, fontWeight: 900 }} dy={10} interval={0} />
                         <YAxis axisLine={false} tickLine={false} tick={{ fill: 'rgba(255,255,255,0.2)', fontSize: 9, fontWeight: 900 }} />
                         <RechartsTooltip content={<CustomBarTooltip />} cursor={{ fill: 'rgba(59, 130, 246, 0.05)' }} />
-                        <Bar dataKey="totalFactura" fill="url(#blueGrad)" radius={[10, 10, 0, 0]} barSize={30} minPointSize={4}>
+                        <Bar dataKey="totalFactura" fill="url(#blueGrad)" radius={[10, 10, 0, 0]} barSize={30} minPointSize={4} isAnimationActive={false}>
                           {chartData.map((entry: any, index: number) => (
                             <Cell key={`cell-${index}`} fillOpacity={Math.abs(entry.totalFactura) < 0.01 ? 0.1 : 1} />
                           ))}
@@ -467,7 +467,7 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
                   <div className="h-[180px] relative flex items-center justify-center">
                     <ResponsiveContainer width="100%" height="100%">
                       <PieChart>
-                        <Pie data={pieData} cx="50%" cy="50%" innerRadius={60} outerRadius={85} paddingAngle={6} dataKey="value" stroke="none">
+                        <Pie data={pieData} cx="50%" cy="50%" innerRadius={60} outerRadius={85} paddingAngle={6} dataKey="value" stroke="none" isAnimationActive={false}>
                           {pieData.map((e: any, i: number) => <Cell key={i} fill={e.color} />)}
                         </Pie>
                       </PieChart>
@@ -655,12 +655,43 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
           /* Charts — explicit pixel size for recharts to render */
           [class*='recharts-responsive-container'] { 
             width: 100% !important; 
-            height: 280px !important; 
+            height: 300px !important; 
+            min-height: 300px !important;
             display: block !important;
           }
-          .recharts-wrapper { 
+          .recharts-wrapper, .recharts-surface { 
             width: 100% !important; 
-            height: 280px !important; 
+            height: 300px !important; 
+            min-height: 300px !important;
+          }
+          /* Force SVG to be visible and have correct size */
+          svg {
+            width: 100% !important;
+            height: 300px !important;
+            overflow: visible !important;
+          }
+          /* Fallback for gradients in print */
+          .recharts-rectangle {
+            fill: #3b82f6 !important;
+            stroke: none !important;
+          }
+          .recharts-pie-sector {
+            stroke: none !important;
+          }
+          /* Detail fixes for print layout */
+          .report-page {
+            box-shadow: none !important;
+          }
+          /* Mascot fix: masks often fail in print */
+          #scene-1 img {
+            mask-image: none !important;
+            -webkit-mask-image: none !important;
+            opacity: 0.05 !important;
+          }
+          /* Ensure text is always on top and visible */
+          h1, h2, h3, h4, .text-glow {
+            text-shadow: none !important;
+            color: white !important;
           }
           /* Glass visible in print */
           .glass { 
