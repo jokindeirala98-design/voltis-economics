@@ -3,7 +3,8 @@ export interface ConsumoItem {
   kwh: number;
   precioKwh: number;
   total: number;
-  precioEstimado?: boolean;
+  precioEstimated?: boolean;
+  isAggregate?: boolean;
 }
 
 export interface PotenciaItem {
@@ -21,6 +22,7 @@ export interface OtroConcepto {
 
 export interface ExtractedBill {
   id: string;
+  projectId?: string;
   fileName: string;
   status: 'pending' | 'success' | 'error';
   error?: string;
@@ -46,6 +48,7 @@ export interface ExtractedBill {
 
 export interface QueueItem {
   id: string;
+  projectId?: string;
   fileName: string;
   fileSize?: number;
   status: 'loading' | 'success' | 'error';

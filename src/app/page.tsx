@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { 
   FileText, Upload, Trash2, Download, AlertTriangle, 
@@ -16,6 +16,7 @@ import { importBillsFromExcel } from '@/lib/import-bills';
 import ReportView from '@/components/ReportView';
 import { motion, AnimatePresence } from 'framer-motion';
 import { fetchAllProjectsFromDB, syncProjectToDB, deleteProjectFromDB } from '@/lib/supabase-sync';
+import { getAssignedMonth } from '@/lib/date-utils';
 
 const StatusItem = ({ label, status }: { label: string; status: boolean }) => (
   <div className="flex items-center justify-between p-3 rounded-xl bg-white/5 border border-white/5">
@@ -25,11 +26,12 @@ const StatusItem = ({ label, status }: { label: string; status: boolean }) => (
 );
 
 export default function EnergyBillsApp() {
-  const [bills, setBills] = useState<ExtractedBill[]>([]);
+  const [allBills, setAllBills] = useState<Record<string, ExtractedBill[]>>({});
+  const [allCustomOCs, setAllCustomOCs] = useState<Record<string, Record<string, { concepto: string; total: number }[]>>>({});
+  const [allExtractionQueues, setAllExtractionQueues] = useState<Record<string, QueueItem[]>>({});
   const [isExtracting, setIsExtracting] = useState(false);
   const [currentProjectId, setCurrentProjectId] = useState<string>('default');
   const [savedProjects, setSavedProjects] = useState<ProjectWorkspace[]>([]);
-  const [customOCs, setCustomOCs] = useState<Record<string, { concepto: string; total: number }[]>>({});
   const [showReport, setShowReport] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(true);
   const [password, setPassword] = useState('');
@@ -38,13 +40,22 @@ export default function EnergyBillsApp() {
   const [renameValue, setRenameValue] = useState('');
   const [showNewProjectModal, setShowNewProjectModal] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
-  const [extractionQueue, setExtractionQueue] = useState<QueueItem[]>([]);
   const [fileRefs, setFileRefs] = useState<Record<string, File>>({}); // In-memory file refs for retry
   const [cloudSyncStatus, setCloudSyncStatus] = useState<'synced' | 'syncing' | 'error' | 'local'>('local');
   const [showDiag, setShowDiag] = useState(false);
   const [diagInfo, setDiagInfo] = useState<any>(null);
   const [isCheckingDiag, setIsCheckingDiag] = useState(false);
   const [previewBillId, setPreviewBillId] = useState<string | null>(null);
+
+  const parseDate = (d?: string) => {
+    if (!d) return 0;
+    if (d.includes('-')) return new Date(d).getTime() || 0;
+    if (d.includes('/')) {
+      const [day, month, year] = d.split('/').map(Number);
+      return new Date(year, month - 1, day).getTime() || 0;
+    }
+    return new Date(d).getTime() || 0;
+  };
 
   const runDiagnostic = async () => {
     setIsCheckingDiag(true);
@@ -76,6 +87,22 @@ export default function EnergyBillsApp() {
     }
   };
 
+  const bills = useMemo(() => {
+    const b = allBills[currentProjectId] || [];
+    return [...b].sort((a, b) => {
+      const am = getAssignedMonth(a.fechaInicio, a.fechaFin);
+      const bm = getAssignedMonth(b.fechaInicio, b.fechaFin);
+      
+      if (am.year !== bm.year) return am.year - bm.year;
+      if (am.month !== bm.month) return am.month - bm.month;
+      
+      // Secondary sort by file name if months are identical
+      return (a.fileName || '').localeCompare(b.fileName || '');
+    });
+  }, [allBills, currentProjectId]);
+  const extractionQueue = allExtractionQueues[currentProjectId] || [];
+  const customOCs = allCustomOCs[currentProjectId] || {};
+
   // Multi-layer Initialization (LocalStorage -> Cloud)
   useEffect(() => {
     const initStorage = async () => {
@@ -83,14 +110,31 @@ export default function EnergyBillsApp() {
       const localData = localStorage.getItem('voltis_saved_projects');
       if (localData) {
         try {
-          const parsed = JSON.parse(localData);
+          const parsed: ProjectWorkspace[] = JSON.parse(localData);
           if (parsed && parsed.length > 0) {
             setSavedProjects(parsed);
             const lastId = localStorage.getItem('voltis_last_project') || parsed[0].id;
             setCurrentProjectId(lastId);
-            const active = parsed.find((p: any) => p.id === lastId) || parsed[0];
-            setBills(active.bills || []);
-            setCustomOCs(active.customOCs || {});
+            
+            // Populate all projects into keyed state
+            const billsAcc: Record<string, ExtractedBill[]> = {};
+            const ocsAcc: Record<string, any> = {};
+            const queueAcc: Record<string, QueueItem[]> = {};
+            
+            parsed.forEach(p => {
+              billsAcc[p.id] = (p.bills || []).sort((a, b) => {
+                const am = getAssignedMonth(a.fechaInicio, a.fechaFin);
+                const bm = getAssignedMonth(b.fechaInicio, b.fechaFin);
+                if (am.year !== bm.year) return am.year - bm.year;
+                return am.month - bm.month;
+              });
+              ocsAcc[p.id] = p.customOCs || {};
+              queueAcc[p.id] = p.queueItems || [];
+            });
+            
+            setAllBills(billsAcc);
+            setAllCustomOCs(ocsAcc);
+            setAllExtractionQueues(queueAcc);
           }
         } catch (e) { console.warn('Local storage parse error', e); }
       }
@@ -99,29 +143,44 @@ export default function EnergyBillsApp() {
       setCloudSyncStatus('syncing');
       const dbProjects = await fetchAllProjectsFromDB();
       if (dbProjects && dbProjects.length > 0) {
-        // Smart merge: prefer whichever source has more bills for each project
+        // Smart merge
         const localRaw = localStorage.getItem('voltis_saved_projects');
         const localProjects: ProjectWorkspace[] = localRaw ? JSON.parse(localRaw) : [];
 
         const merged = dbProjects.map(dbP => {
           const localP = localProjects.find((lp: any) => lp.id === dbP.id);
-          // Prefer local if it has more bills (Supabase sync may have missed some)
-          if (localP && (localP.bills?.length || 0) > (dbP.bills?.length || 0)) return localP;
+          // If local is newer, keep local. Otherwise, keep DB (cloud)
+          if (localP && (localP.updatedAt || 0) > (dbP.updatedAt || 0)) return localP;
           return dbP;
         });
-        // Keep any projects that only exist locally
         const localOnlyProjects = localProjects.filter((lp: any) => !dbProjects.find(dbP => dbP.id === lp.id));
         const finalProjects = [...merged, ...localOnlyProjects];
 
         setSavedProjects(finalProjects);
         localStorage.setItem('voltis_saved_projects', JSON.stringify(finalProjects));
         
+        const billsAcc: Record<string, ExtractedBill[]> = {};
+        const ocsAcc: Record<string, any> = {};
+        const queueAcc: Record<string, QueueItem[]> = {};
+
+        finalProjects.forEach(p => {
+          const sorted = (p.bills || []).sort((a, b) => {
+            const am = getAssignedMonth(a.fechaInicio, a.fechaFin);
+            const bm = getAssignedMonth(b.fechaInicio, b.fechaFin);
+            if (am.year !== bm.year) return am.year - bm.year;
+            return am.month - bm.month;
+          });
+          billsAcc[p.id] = sorted;
+          ocsAcc[p.id] = p.customOCs || {};
+          queueAcc[p.id] = p.queueItems || [];
+        });
+        
+        setAllBills(billsAcc);
+        setAllCustomOCs(ocsAcc);
+        setAllExtractionQueues(queueAcc);
+        
         const lastId = localStorage.getItem('voltis_last_project') || finalProjects[0].id;
-        const active = finalProjects.find(p => p.id === lastId) || finalProjects[0];
-        if (active) {
-          setBills(active.bills || []);
-          setCustomOCs(active.customOCs || {});
-        }
+        setCurrentProjectId(lastId);
         setCloudSyncStatus('synced');
       } else if (dbProjects) {
         setCloudSyncStatus('synced');
@@ -132,27 +191,19 @@ export default function EnergyBillsApp() {
     initStorage();
   }, []);
 
-  // Auto-sync queue to current project whenever it changes
-  useEffect(() => {
-    if (!currentProjectId || currentProjectId === 'default') return;
-    setSavedProjects(prev => {
-      const next = prev.map(p => p.id === currentProjectId ? { ...p, queueItems: extractionQueue } : p);
-      localStorage.setItem('voltis_saved_projects', JSON.stringify(next));
-      return next;
-    });
-  }, [extractionQueue, currentProjectId]);
+  // Update persistent queue state (REMOVED - Consolidated into saveToDisk and direct updates to avoid race conditions)
 
-  const saveToDisk = useCallback(async (updatedBills: ExtractedBill[], updatedOCs: Record<string, any>) => {
+  const saveToDisk = useCallback(async (updatedBills: ExtractedBill[], updatedOCs: Record<string, { concepto: string; total: number }[]>, targetProjectId?: string) => {
+    const projectId = targetProjectId || currentProjectId;
+    
     setSavedProjects(prev => {
-      const next = prev.map(p => p.id === currentProjectId ? { 
+      const next = prev.map(p => p.id === projectId ? { 
         ...p, bills: updatedBills, customOCs: updatedOCs, updatedAt: Date.now() 
       } : p);
       
-      // Immediate Local Save
       localStorage.setItem('voltis_saved_projects', JSON.stringify(next));
 
-      // Background Cloud Sync
-      const activeProject = next.find(p => p.id === currentProjectId);
+      const activeProject = next.find(p => p.id === projectId);
       if (activeProject) {
         setCloudSyncStatus('syncing');
         syncProjectToDB(activeProject)
@@ -163,7 +214,7 @@ export default function EnergyBillsApp() {
     });
   }, [currentProjectId]);
 
-  const processFile = useCallback(async (file: File, queueId: string) => {
+  const processFile = useCallback(async (file: File, queueId: string, targetProjectId: string) => {
     const formData = new FormData();
     formData.append('file', file);
 
@@ -172,10 +223,12 @@ export default function EnergyBillsApp() {
       const data = await res.json();
       
       if (data.status === 'success') {
-        setBills(prev => {
-          // Duplicate detection: same CUPS + same date range
-          const newBill = data.bill;
-          const isDuplicate = prev.some(b => 
+        const newBill = data.bill;
+
+        // 1. Update project-keyed bills
+        setAllBills(prev => {
+          const projectBills = prev[targetProjectId] || [];
+          const isDuplicate = projectBills.some(b => 
             b.cups && newBill.cups && 
             b.cups === newBill.cups && 
             b.fechaInicio === newBill.fechaInicio && 
@@ -183,71 +236,124 @@ export default function EnergyBillsApp() {
           );
 
           if (isDuplicate) {
-            setExtractionQueue(q => q.map(item => 
-              item.id === queueId ? { ...item, status: 'error', error: 'Factura duplicada (mismo CUPS y período)' } : item
-            ));
-            toast.error(`Factura duplicada: ${file.name} ya está en el proyecto`);
+            setAllExtractionQueues(q => ({
+              ...q,
+              [targetProjectId]: (q[targetProjectId] || []).map(item => 
+                item.id === queueId ? { ...item, status: 'error' as const, error: 'Factura duplicada en este proyecto' } : item
+              )
+            }));
             return prev;
           }
 
-          const next = [...prev, newBill];
-          saveToDisk(next, customOCs);
+          const billWithProject = { ...newBill, projectId: targetProjectId };
+          const nextBills = [...projectBills, billWithProject].sort((a, b) => {
+            const am = getAssignedMonth(a.fechaInicio, a.fechaFin);
+            const bm = getAssignedMonth(b.fechaInicio, b.fechaFin);
+            if (am.year !== bm.year) return am.year - bm.year;
+            return am.month - bm.month;
+          });
+          const next = { ...prev, [targetProjectId]: nextBills };
+          
+          // Sync to storage
+          const projectCustomOCs = allCustomOCs[targetProjectId] || {};
+          saveToDisk(nextBills, projectCustomOCs, targetProjectId);
+          
           return next;
         });
-        setExtractionQueue(prev => prev.map(item => 
-          item.id === queueId ? { ...item, status: 'success' } : item
-        ));
+
+        setAllExtractionQueues(prev => ({
+          ...prev,
+          [targetProjectId]: (prev[targetProjectId] || []).map(item => 
+            item.id === queueId ? { ...item, status: 'success' as const } : item
+          )
+        }));
       } else {
-        setExtractionQueue(prev => prev.map(item => 
-          item.id === queueId ? { ...item, status: 'error', error: data.error } : item
-        ));
+        setAllExtractionQueues(prev => ({
+          ...prev,
+          [targetProjectId]: (prev[targetProjectId] || []).map(item => 
+            item.id === queueId ? { ...item, status: 'error' as const, error: data.error } : item
+          )
+        }));
         toast.error(`Error en ${file.name}: ${data.error}`);
       }
     } catch (err) {
-      setExtractionQueue(prev => prev.map(item => 
-        item.id === queueId ? { ...item, status: 'error', error: 'Error de red' } : item
-      ));
+      setAllExtractionQueues(prev => ({
+        ...prev,
+        [targetProjectId]: (prev[targetProjectId] || []).map(item => 
+          item.id === queueId ? { ...item, status: 'error' as const, error: 'Error de red' } : item
+        )
+      }));
       toast.error(`Error de red en ${file.name}`);
     }
-  }, [customOCs, saveToDisk]);
+  }, [allCustomOCs, saveToDisk]);
 
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
+    const targetProjectId = currentProjectId;
     const excelFiles = acceptedFiles.filter(f => f.name.endsWith('.xlsx'));
     if (excelFiles.length > 0) {
       const file = excelFiles[0];
       const result = await importBillsFromExcel(file);
       if (result) {
-        setBills(result.bills);
-        setCustomOCs(result.customOCs);
-        saveToDisk(result.bills, result.customOCs);
+        setAllBills(prev => ({ ...prev, [targetProjectId]: result.bills }));
+        setAllCustomOCs(prev => ({ ...prev, [targetProjectId]: result.customOCs }));
+        saveToDisk(result.bills, result.customOCs, targetProjectId);
         toast.success('Proyecto sincronizado desde Excel');
       }
       return;
     }
 
-    setIsExtracting(true);
-    
-    // Initialize queue items with current timestamp, store File objects in fileRefs
-    const newItems: QueueItem[] = acceptedFiles.map(file => ({
+    const currentBills = allBills[targetProjectId] || [];
+    const validFiles = acceptedFiles.filter(file => {
+      const isDupp = currentBills.some(b => b.fileName === file.name);
+      if (isDupp) {
+        toast.warning(`La factura "${file.name}" ya ha sido escaneada en este proyecto.`);
+        return false;
+      }
+      return true;
+    });
+
+    if (validFiles.length === 0) {
+      setIsExtracting(false);
+      return;
+    }
+
+    const newItems: QueueItem[] = validFiles.map(file => ({
       id: Math.random().toString(36).substr(2, 9),
+      projectId: targetProjectId,
       fileName: file.name,
       fileSize: file.size,
       status: 'loading' as const,
       addedAt: Date.now(),
     }));
-    // Store actual File objects in-memory for retry
+    
     setFileRefs(prev => {
       const next = { ...prev };
-      acceptedFiles.forEach((file, i) => { next[newItems[i].id] = file; });
+      validFiles.forEach((file, i) => { next[newItems[i].id] = file; });
       return next;
     });
-    setExtractionQueue(prev => [...newItems, ...prev]);
 
-    for (let i = 0; i < acceptedFiles.length; i++) {
-       await processFile(acceptedFiles[i], newItems[i].id);
+    setAllExtractionQueues(prev => {
+      const next = {
+        ...prev,
+        [targetProjectId]: [...newItems, ...(prev[targetProjectId] || [])]
+      };
+      
+      // Persist queue immediately
+      setSavedProjects(projects => {
+        const updated = projects.map(p => p.id === targetProjectId ? { ...p, queueItems: next[targetProjectId] } : p);
+        localStorage.setItem('voltis_saved_projects', JSON.stringify(updated));
+        return updated;
+      });
+      
+      return next;
+    });
+
+    for (let i = 0; i < validFiles.length; i++) {
+       await processFile(validFiles[i], newItems[i].id, targetProjectId);
     }
     setIsExtracting(false);
-  }, [customOCs, saveToDisk, processFile]);
+    toast.success('Extracción completada. Todos los datos han sido guardados en el histórico.');
+  }, [currentProjectId, saveToDisk, processFile]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({ 
     onDrop, 
@@ -256,7 +362,13 @@ export default function EnergyBillsApp() {
 
   const createNewProject = async (name: string) => {
     if (!name.trim()) return;
-    const project: ProjectWorkspace = { id: crypto.randomUUID(), name: name.toUpperCase(), bills: [], customOCs: {}, updatedAt: Date.now() };
+    const project: ProjectWorkspace = { 
+      id: crypto.randomUUID(), 
+      name: name.toUpperCase(), 
+      bills: [], 
+      customOCs: {}, 
+      updatedAt: Date.now() 
+    };
     
     setSavedProjects(prev => {
       const next = [...prev, project];
@@ -265,6 +377,10 @@ export default function EnergyBillsApp() {
       syncProjectToDB(project).then(() => setCloudSyncStatus('synced')).catch(() => setCloudSyncStatus('error'));
       return next;
     });
+
+    setAllBills(prev => ({ ...prev, [project.id]: [] }));
+    setAllCustomOCs(prev => ({ ...prev, [project.id]: {} }));
+    setAllExtractionQueues(prev => ({ ...prev, [project.id]: [] }));
     
     loadWorkspace(project);
     setShowNewProjectModal(false);
@@ -274,9 +390,6 @@ export default function EnergyBillsApp() {
 
   const loadWorkspace = (proj: ProjectWorkspace) => {
     setCurrentProjectId(proj.id);
-    setBills(proj.bills || []);
-    setCustomOCs(proj.customOCs || {});
-    setExtractionQueue(proj.queueItems || []); // Restore persistent queue for this project
     setFileRefs({}); // Clear in-memory file refs when switching projects
     localStorage.setItem('voltis_last_project', proj.id);
     setShowReport(false);
@@ -292,8 +405,22 @@ export default function EnergyBillsApp() {
       setCloudSyncStatus('syncing');
       deleteProjectFromDB(id).then(() => setCloudSyncStatus('synced')).catch(() => setCloudSyncStatus('error'));
       
+      setAllBills(prev => { const n = { ...prev }; delete n[id]; return n; });
+      setAllCustomOCs(prev => { const n = { ...prev }; delete n[id]; return n; });
+      setAllExtractionQueues(prev => { const n = { ...prev }; delete n[id]; return n; });
+
       if (currentProjectId === id) loadWorkspace(next[0] || { id: crypto.randomUUID(), name: 'HUÉRFANO', bills: [] });
       toast.success('Proyecto eliminado');
+    }
+  };
+
+  const clearProjectBills = () => {
+    if (confirm('¿Estás seguro de que quieres eliminar TODAS las facturas de este proyecto? Esta acción no se puede deshacer.')) {
+      setAllBills(prev => ({ ...prev, [currentProjectId]: [] }));
+      setAllCustomOCs(prev => ({ ...prev, [currentProjectId]: {} }));
+      setAllExtractionQueues(prev => ({ ...prev, [currentProjectId]: [] }));
+      saveToDisk([], {}, currentProjectId);
+      toast.success('Proyecto vaciado correctamente');
     }
   };
 
@@ -316,14 +443,83 @@ export default function EnergyBillsApp() {
   };
 
   const handleUpdateBills = (newBills: ExtractedBill[]) => {
-    setBills(newBills);
-    saveToDisk(newBills, customOCs);
+    const sorted = [...newBills].sort((a, b) => {
+      const am = getAssignedMonth(a.fechaInicio, a.fechaFin);
+      const bm = getAssignedMonth(b.fechaInicio, b.fechaFin);
+      if (am.year !== bm.year) return am.year - bm.year;
+      return am.month - bm.month;
+    });
+    setAllBills(prev => ({ ...prev, [currentProjectId]: sorted }));
+    saveToDisk(sorted, customOCs, currentProjectId);
   };
 
   const handleUpdateOCs = (billId: string, ocs: { concepto: string; total: number }[]) => {
-    setCustomOCs(prev => {
-      const next = { ...prev, [billId]: ocs };
-      saveToDisk(bills, next);
+    setAllCustomOCs(prev => {
+      const projectOCs = prev[currentProjectId] || {};
+      const nextOCs = { ...projectOCs, [billId]: ocs };
+      const next = { ...prev, [currentProjectId]: nextOCs };
+      saveToDisk(bills, nextOCs, currentProjectId);
+      return next;
+    });
+  };
+
+  const repairProjects = () => {
+    if (!confirm('Esta acción intentará mover facturas mal ubicadas a su proyecto correspondiente basándose en su CUPS. ¿Continuar?')) return;
+    
+    setAllBills(prev => {
+      const allBillsFlat: ExtractedBill[] = Object.values(prev).flat();
+      const next: Record<string, ExtractedBill[]> = {};
+      
+      // Initialize next with existing project IDs
+      Object.keys(prev).forEach(id => next[id] = []);
+      
+      // Map CUPS to the project ID where it's most common
+      const cupsToProjectMap: Record<string, string> = {};
+      const cupsCounts: Record<string, Record<string, number>> = {};
+      
+      allBillsFlat.forEach(bill => {
+        if (!bill.cups) return;
+        if (!cupsCounts[bill.cups]) cupsCounts[bill.cups] = {};
+        // Find which project this bill *currently* is in to count it
+        const currentPid = Object.entries(prev).find(([pid, bills]) => bills.some(b => b.id === bill.id))?.[0];
+        if (currentPid) {
+          cupsCounts[bill.cups][currentPid] = (cupsCounts[bill.cups][currentPid] || 0) + 1;
+        }
+      });
+      
+      Object.entries(cupsCounts).forEach(([cups, counts]) => {
+        const winner = Object.entries(counts).sort((a,b) => b[1] - a[1])[0][0];
+        cupsToProjectMap[cups] = winner;
+      });
+      
+      // Redistribute
+      allBillsFlat.forEach(bill => {
+        let targetId = bill.projectId;
+        if (bill.cups && cupsToProjectMap[bill.cups]) {
+          targetId = cupsToProjectMap[bill.cups];
+        } else {
+          // If no CUPS or no map, keep in current project
+          targetId = Object.entries(prev).find(([pid, bills]) => bills.some(b => b.id === bill.id))?.[0] || 'default';
+        }
+        
+        if (!next[targetId]) next[targetId] = [];
+        if (!next[targetId].some(b => b.id === bill.id)) {
+          next[targetId].push({ ...bill, projectId: targetId });
+        }
+      });
+      
+      // Sort each project results
+      Object.keys(next).forEach(pid => {
+        next[pid].sort((a, b) => {
+          const am = getAssignedMonth(a.fechaInicio, a.fechaFin);
+          const bm = getAssignedMonth(b.fechaInicio, b.fechaFin);
+          if (am.year !== bm.year) return am.year - bm.year;
+          return am.month - bm.month;
+        });
+        saveToDisk(next[pid], allCustomOCs[pid] || {}, pid);
+      });
+      
+      toast.success('Reparación completada. Facturas redistribuidas por CUPS.');
       return next;
     });
   };
@@ -337,8 +533,10 @@ export default function EnergyBillsApp() {
     });
 
     const concepts: any[] = [
+      { key: 'fileName', label: 'Nombre Archivo' },
       { key: 'comercializadora', label: 'Compañía' },
       { key: 'titular', label: 'Titular' },
+      { key: 'cups', label: 'CUPS' },
       { key: 'tarifa', label: 'Tarifa' },
       { key: 'fechaInicio', label: 'Fecha Inicio' },
       { key: 'fechaFin', label: 'Fecha Fin' },
@@ -535,8 +733,15 @@ export default function EnergyBillsApp() {
               </h1>
               <div className="flex items-center gap-3">
                  <div className="h-1 w-12 bg-blue-500 rounded-full" />
-                 <span className="text-sm font-bold text-blue-400 tracking-[0.3em] uppercase opacity-80">
+                 <span className="text-sm font-bold text-blue-400 tracking-[0.3em] uppercase opacity-80 flex items-center gap-3">
                    {savedProjects.find(p => p.id === currentProjectId)?.name}
+                   <button 
+                     onClick={clearProjectBills}
+                     className="p-1 hover:bg-white/10 rounded-md transition-colors text-slate-500 hover:text-red-400"
+                     title="Vaciar todas las facturas de este proyecto"
+                   >
+                     <Trash2 className="w-4 h-4" />
+                   </button>
                  </span>
               </div>
             </div>
@@ -603,7 +808,9 @@ export default function EnergyBillsApp() {
                      <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" /> Cola de Procesamiento
                    </h3>
                    <button 
-                    onClick={() => setExtractionQueue([])}
+                    onClick={() => {
+                      setAllExtractionQueues(prev => ({ ...prev, [currentProjectId]: [] }));
+                    }}
                     className="text-[10px] font-bold text-slate-500 hover:text-white transition-colors uppercase tracking-widest"
                    >
                      Limpiar Cola
@@ -645,8 +852,13 @@ export default function EnergyBillsApp() {
                         {item.status === 'error' && fileRefs[item.id] && (
                           <button 
                             onClick={() => {
-                              setExtractionQueue(prev => prev.map(q => q.id === item.id ? { ...q, status: 'loading' as const, error: undefined } : q));
-                              processFile(fileRefs[item.id], item.id);
+                              setAllExtractionQueues(prev => ({
+                                ...prev,
+                                [currentProjectId]: (prev[currentProjectId] || []).map(q => 
+                                  q.id === item.id ? { ...q, status: 'loading' as const, error: undefined } : q
+                                )
+                              }));
+                              processFile(fileRefs[item.id], item.id, currentProjectId);
                             }}
                             className="px-3 py-1 bg-blue-600/20 text-blue-400 text-[10px] font-bold rounded-lg border border-blue-500/30 hover:bg-blue-600/40 transition-all uppercase tracking-tighter"
                           >
@@ -658,9 +870,16 @@ export default function EnergyBillsApp() {
                             onClick={() => {
                               if (item.status === 'success') {
                                 const linked = bills.find(b => b.fileName === item.fileName);
-                                if (linked) { const nb = bills.filter(b => b.id !== linked.id); setBills(nb); saveToDisk(nb, customOCs); }
+                                if (linked) { 
+                                  const nb = bills.filter(b => b.id !== linked.id); 
+                                  setAllBills(prev => ({ ...prev, [currentProjectId]: nb }));
+                                  saveToDisk(nb, customOCs, currentProjectId); 
+                                }
                               }
-                              setExtractionQueue(prev => prev.filter(q => q.id !== item.id));
+                              setAllExtractionQueues(prev => ({
+                                ...prev,
+                                [currentProjectId]: (prev[currentProjectId] || []).filter(q => q.id !== item.id)
+                              }));
                             }}
                             className="p-1 hover:bg-white/10 rounded-md text-slate-500 transition-colors"
                           >
@@ -751,11 +970,19 @@ export default function EnergyBillsApp() {
                           <StatusItem label="Supabase URL" status={diagInfo?.env?.has_supabase_url} />
                           <StatusItem label="Supabase Key" status={diagInfo?.env?.has_supabase_key} />
                           <StatusItem label="Gemini AI" status={diagInfo?.env?.has_gemini_key} />
+                          <StatusItem label="DATABASE" status={diagInfo?.db_connected || false} />
                        </div>
                     </div>
 
+                    <button
+                      onClick={repairProjects}
+                      className="w-full mt-2 p-4 rounded-2xl bg-blue-500/10 border border-blue-500/20 text-blue-400 font-black text-[10px] uppercase tracking-[0.2em] hover:bg-blue-500/20 transition-all flex items-center justify-center gap-2"
+                    >
+                      <Zap className="w-4 h-4" /> Reparar Integridad de Proyectos
+                    </button>
+
                     {/* BASE DE DATOS */}
-                    <div className="flex flex-col gap-3">
+                    <div className="flex flex-col gap-3 mt-4">
                        <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Base de Datos (Supabase)</h3>
                        <div className={`p-4 rounded-2xl border ${diagInfo?.database?.status === 'connected' ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-red-500/5 border-red-500/20'}`}>
                           <div className="flex items-center justify-between mb-2">
@@ -770,7 +997,7 @@ export default function EnergyBillsApp() {
                             </p>
                           )}
                           <p className="text-[10px] opacity-40 mt-2">
-                             Este indicador verifica si la app puede leer/escribir proyectos en la nube. Si está en rojo, tus datos solo se guardarán localmente en este navegador.
+                             Este indicador verifica si la app puede leer/escribir proyectos en la nube.
                           </p>
                        </div>
                     </div>

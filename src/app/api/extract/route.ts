@@ -35,9 +35,18 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'El PDF parece estar vacío o ser una imagen sin texto reconocible.' }, { status: 400 });
     }
 
+    // DEBUG: Log first 1000 chars of extracted text to see if it's readable
+    console.log(`[EXTRACTION DEBUG] PDF Text Sample (${file instanceof Blob ? 'Blob' : 'Unknown'}):`, pdfText.substring(0, 1000));
+
     // 2. Data Extraction via LLM (Gemini)
     try {
-      const extractedData = await extractBillDataWithAI(pdfText);
+      // VISION FALLBACK: If text is suspiciously short, it's likely a scanned PDF
+      const isScanned = pdfText.trim().length < 100;
+      if (isScanned) {
+        console.log('[EXTRACTION] Text is sparse. Falling back to Vision (PDF Buffer)...');
+      }
+
+      const extractedData = await extractBillDataWithAI(pdfText, isScanned ? buffer : undefined);
       
       return NextResponse.json({
         status: 'success',

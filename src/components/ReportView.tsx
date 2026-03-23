@@ -12,6 +12,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import gsap from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
 import { toast } from 'sonner';
+import { getAssignedMonth } from '@/lib/date-utils';
 
 gsap.registerPlugin(ScrollTrigger);
 
@@ -99,8 +100,8 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
 
   useEffect(() => {
     const ctx = gsap.context(() => {
-      // Set 3D perspective on container for all 3D effects
-      gsap.set(containerRef.current, { perspective: 1200 });
+      // Set 3D perspective on sections instead of the whole container to avoid breaking fixed modals
+      gsap.set('.report-page', { transformPerspective: 1200 });
 
       // Ensure hero content is visible immediately
       gsap.set('.hero-content', { opacity: 1, scale: 1, y: 0 });
@@ -137,20 +138,65 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
   }, [selectedQuarter]);
 
   const filteredValidBills = useMemo(() => {
-    const validOnes = (bills || []).filter(b => b.status !== 'error').sort((a, b) => (a.fechaInicio || '').localeCompare(b.fechaInicio || ''));
-    if (selectedQuarter === 0) return validOnes;
-    return validOnes.filter(b => {
-      const month = new Date(b.fechaFin || '').getMonth() + 1;
+    const parseDate = (d?: string) => {
+      if (!d) return 0;
+      if (d.includes('-')) return new Date(d).getTime() || 0;
+      if (d.includes('/')) {
+        const [day, month, year] = d.split('/').map(Number);
+        return new Date(year, month - 1, day).getTime() || 0;
+      }
+      return new Date(d).getTime() || 0;
+    };
+
+    const validOnes = (bills || []).filter(b => b.status !== 'error').sort((a, b) => {
+      const am = getAssignedMonth(a.fechaInicio, a.fechaFin);
+      const bm = getAssignedMonth(b.fechaInicio, b.fechaFin);
+      if (am.year !== bm.year) return am.year - bm.year;
+      return am.month - bm.month;
+    });
+    return validOnes;
+  }, [bills]);
+
+  const projectCups = useMemo(() => {
+    const validCups = filteredValidBills
+      .map(b => b.cups?.replace(/\s+/g, '').toUpperCase())
+      .filter(c => c && c.startsWith('ES') && c.length >= 10); // Relaxed length to be safer
+    return validCups[0] || filteredValidBills[0]?.cups || 'CUPS NO DETECTADO';
+  }, [filteredValidBills]);
+
+  const { chartData, pieData, summaryStats, tableData } = useMemo(() => {
+    const parseDate = (d?: string) => {
+      if (!d) return 0;
+      if (d.includes('-')) return new Date(d).getTime() || 0;
+      if (d.includes('/')) {
+        const [day, month, year] = d.split('/').map(Number);
+        return new Date(year, month - 1, day).getTime() || 0;
+      }
+      return new Date(d).getTime() || 0;
+    };
+
+    const billsForQuarter = filteredValidBills.filter(b => {
+      const d = parseDate(b.fechaFin);
+      if (!d) return false;
+      const month = new Date(d).getMonth() + 1;
       return selectedQuarter === 1 ? (month >= 1 && month <= 3) :
              selectedQuarter === 2 ? (month >= 4 && month <= 6) :
              selectedQuarter === 3 ? (month >= 7 && month <= 9) :
              selectedQuarter === 4 ? (month >= 10 && month <= 12) : true;
     });
-  }, [bills, selectedQuarter]);
 
-  const { chartData, pieData, summaryStats } = useMemo(() => {
     const totals = { energetic: 0, power: 0, taxes: 0, others: 0, global: 0, kwh: 0 };
-    const cData = filteredValidBills.map(b => {
+    const monthMap: Record<string, any> = {};
+
+    billsForQuarter.forEach(b => {
+      const { month: monthIdx, year } = getAssignedMonth(b.fechaInicio, b.fechaFin);
+      
+      const monthNames = [
+        'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 
+        'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'
+      ];
+      const name = monthNames[monthIdx] || 'S/D';
+      
       const energia = b.costeTotalConsumo || 0;
       const potencia = b.costeTotalPotencia || 0;
       let imp = 0, others = 0;
@@ -158,9 +204,54 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
         if (oc.concepto.toLowerCase().includes('impuesto') || oc.concepto.toLowerCase().includes('iva')) imp += oc.total;
         else others += oc.total;
       });
-      totals.energetic += energia; totals.power += potencia; totals.taxes += imp; totals.others += others;
+
+      totals.energetic += energia; 
+      totals.power += potencia; 
+      totals.taxes += imp; 
+      totals.others += others;
       const totalF = energia + potencia + imp + others;
-      totals.global += totalF; totals.kwh += (b.consumoTotalKwh || 0);
+      totals.global += totalF; 
+      totals.kwh += (b.consumoTotalKwh || 0);
+
+      const mKey = `${year}-${monthIdx}`;
+      if (!monthMap[mKey]) {
+        monthMap[mKey] = {
+          name,
+          monthIdx,
+          year,
+          totalFactura: 0,
+          energia: 0,
+          potencia: 0,
+          otros: 0,
+          totalKwh: 0,
+          billsCount: 0
+        };
+      }
+
+      monthMap[mKey].totalFactura += totalF;
+      monthMap[mKey].energia += energia;
+      monthMap[mKey].potencia += potencia;
+      monthMap[mKey].otros += (imp + others);
+      monthMap[mKey].totalKwh += (b.consumoTotalKwh || 0);
+      monthMap[mKey].billsCount++;
+    });
+
+    const cData = Object.values(monthMap)
+      .sort((a: any, b: any) => {
+        if (a.year !== b.year) return a.year - b.year;
+        return a.monthIdx - b.monthIdx;
+      });
+
+    // Keep the tableData as individual bills for the detailed matrix
+    const tData = billsForQuarter.map(b => {
+      const energia = b.costeTotalConsumo || 0;
+      const potencia = b.costeTotalPotencia || 0;
+      let imp = 0, others = 0;
+      [...(b.otrosConceptos || []), ...(customOCs[b.id] || [])].forEach(oc => {
+        if (oc.concepto.toLowerCase().includes('impuesto') || oc.concepto.toLowerCase().includes('iva')) imp += oc.total;
+        else others += oc.total;
+      });
+      const totalF = energia + potencia + imp + others;
       return {
         name: new Date(b.fechaFin || '').toLocaleString('es-ES', { month: 'long' }),
         period: `${b.fechaInicio?.split('-').reverse().slice(0,2).join('/')}-${b.fechaFin?.split('-').reverse().slice(0,2).join('/')}`,
@@ -181,6 +272,12 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
           P4: b.consumo?.find(c => c.periodo === 'P4')?.precioKwh || 0,
           P5: b.consumo?.find(c => c.periodo === 'P5')?.precioKwh || 0,
           P6: b.consumo?.find(c => c.periodo === 'P6')?.precioKwh || 0,
+          P1_agg: b.consumo?.find(c => c.periodo === 'P1')?.isAggregate,
+          P2_agg: b.consumo?.find(c => c.periodo === 'P2')?.isAggregate,
+          P3_agg: b.consumo?.find(c => c.periodo === 'P3')?.isAggregate,
+          P4_agg: b.consumo?.find(c => c.periodo === 'P4')?.isAggregate,
+          P5_agg: b.consumo?.find(c => c.periodo === 'P5')?.isAggregate,
+          P6_agg: b.consumo?.find(c => c.periodo === 'P6')?.isAggregate,
         }
       };
     });
@@ -190,10 +287,10 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
       { name: 'Impuestos y Tasas', value: totals.taxes, color: '#10b981' },
       { name: 'Otros Conceptos', value: totals.others, color: '#f59e0b' }
     ].filter(i => i.value > 0);
-    return { chartData: cData, pieData: pData, summaryStats: totals, tableData: cData };
-  }, [filteredValidBills, customOCs]);
+    return { chartData: cData, pieData: pData, summaryStats: totals, tableData: tData };
+  }, [filteredValidBills, customOCs, selectedQuarter]);
 
-  const tableData = chartData;
+
 
   const isTop3 = (val: number, array: number[]) => {
     const sorted = [...new Set(array)].sort((a, b) => b - a);
@@ -230,7 +327,8 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
   }, [email, projectName]);
 
   return (
-    <div ref={containerRef} className="relative w-full bg-[#020617] text-white overflow-y-auto selection:bg-blue-500/30 scroll-smooth h-screen">
+    <>
+      <div ref={containerRef} className="relative w-full bg-[#020617] text-white overflow-y-auto selection:bg-blue-500/30 scroll-smooth h-screen">
       <div className="fixed inset-0 pointer-events-none z-0">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(15,23,42,1)_0%,rgba(2,6,23,1)_80%)]" />
         <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'radial-gradient(rgba(255,255,255,0.05) 1px, transparent 1px)', backgroundSize: '40px 40px' }} />
@@ -284,8 +382,8 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
                   <div className="h-0.5 w-12 bg-blue-500 mx-auto rounded-full shadow-[0_0_15px_rgba(59,130,246,0.6)]" />
                   <h3 className="text-5xl font-black tracking-tighter text-blue-500 uppercase">{projectName}</h3>
                   <div className="pt-2 flex flex-col items-center gap-2">
-                    <p className="text-sm text-white font-black tracking-widest uppercase bg-blue-500/10 px-6 py-2 rounded-full border border-blue-500/20">
-                      CUPS: {filteredValidBills[0]?.cups || 'ES00000'}
+                    <p className="inline-block text-sm text-white font-black tracking-[0.1em] uppercase bg-blue-500/10 px-10 py-3 rounded-full border border-blue-500/20 shadow-[0_0_30px_rgba(59,130,246,0.2)] min-w-[320px]">
+                      CUPS: {projectCups}
                     </p>
                     <p className="text-[10px] text-blue-400/60 font-black tracking-[0.4em] uppercase">
                       TARIFA {filteredValidBills[0]?.tarifa || '3.0TD'}
@@ -344,7 +442,11 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
                         <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: 'rgba(255,255,255,0.2)', fontSize: 9, fontWeight: 900 }} dy={10} interval={0} />
                         <YAxis axisLine={false} tickLine={false} tick={{ fill: 'rgba(255,255,255,0.2)', fontSize: 9, fontWeight: 900 }} />
                         <RechartsTooltip content={<CustomBarTooltip />} cursor={{ fill: 'rgba(59, 130, 246, 0.05)' }} />
-                        <Bar dataKey="totalFactura" fill="url(#blueGrad)" radius={[10, 10, 0, 0]} barSize={30} />
+                        <Bar dataKey="totalFactura" fill="url(#blueGrad)" radius={[10, 10, 0, 0]} barSize={30} minPointSize={4}>
+                          {chartData.map((entry: any, index: number) => (
+                            <Cell key={`cell-${index}`} fillOpacity={Math.abs(entry.totalFactura) < 0.01 ? 0.1 : 1} />
+                          ))}
+                        </Bar>
                         <defs>
                           <linearGradient id="blueGrad" x1="0" y1="0" x2="0" y2="1">
                             <stop offset="0%" stopColor="#3b82f6" stopOpacity={1} />
@@ -498,135 +600,6 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
         )}
       </div>
 
-      {/* MODAL MATRIX 3: Desglose factura */}
-      <AnimatePresence>
-        {selectedBillId && filteredValidBills.find(b => b.id === selectedBillId) && (
-          <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/95 backdrop-blur-2xl no-print" onClick={() => setSelectedBillId(null)}>
-            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
-              className="glass-card border border-white/10 rounded-[64px] w-full max-w-2xl p-14" onClick={e => e.stopPropagation()}>
-              <div className="flex justify-between items-start mb-10">
-                <div>
-                  <p className="text-[10px] font-black uppercase tracking-widest text-blue-500 mb-1">Desglose · Matriz Económica Integral</p>
-                  <h4 className="text-3xl font-black uppercase italic">{filteredValidBills.find(b => b.id === selectedBillId)?.fileName.split('.')[0]}</h4>
-                </div>
-                <button onClick={() => setSelectedBillId(null)} className="w-10 h-10 rounded-full glass border border-white/10 flex items-center justify-center hover:bg-white/10">
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-              <div className="grid grid-cols-2 gap-4 mb-8">
-                <div className="p-6 rounded-[32px] bg-blue-600/10 border border-blue-500/20 col-span-2">
-                  <span className="text-[10px] uppercase tracking-widest text-blue-500 block mb-1">Total Factura</span>
-                  <span className="text-4xl font-black">
-                    {(tableData.find((d: any) => d.id === selectedBillId)?.totalFactura || 0).toFixed(2)} €
-                  </span>
-                </div>
-              </div>
-              <div className="space-y-4 max-h-[50vh] overflow-y-auto pr-2 custom-scrollbar">
-                <div>
-                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-3">Energía por Periodo</p>
-                  <div className="grid grid-cols-3 gap-2">
-                    {filteredValidBills.find(b => b.id === selectedBillId)?.consumo?.filter(c => c.total > 0).map((c, i) => (
-                      <div key={i} className="flex justify-between p-3 rounded-xl bg-white/5 border border-white/5">
-                        <span className="font-black text-[10px] text-slate-400">{c.periodo}</span>
-                        <span className="font-black text-blue-400 text-[11px]">{c.total.toFixed(2)} €</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                <div className="flex justify-between p-5 rounded-[24px] bg-purple-600/10 border border-purple-500/20">
-                  <span className="text-[10px] font-black uppercase tracking-widest text-purple-400">Total Potencia</span>
-                  <span className="text-xl font-black">{(filteredValidBills.find(b => b.id === selectedBillId)?.costeTotalPotencia || 0).toFixed(2)} €</span>
-                </div>
-                <div className="flex justify-between p-5 rounded-[24px] bg-white/5 border border-white/5">
-                  <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Otros Conceptos</span>
-                  <span className="text-xl font-black">
-                    {(() => {
-                      const b = filteredValidBills.find(b => b.id === selectedBillId);
-                      let sum = 0;
-                      [...(b?.otrosConceptos || []), ...(customOCs[selectedBillId!] || [])].forEach(oc => {
-                        if (!oc.concepto.toLowerCase().includes('impuesto') && !oc.concepto.toLowerCase().includes('iva')) sum += oc.total;
-                      });
-                      return sum.toFixed(2);
-                    })()} €
-                  </span>
-                </div>
-                <div className="flex justify-between p-5 rounded-[24px] bg-emerald-500/10 border border-emerald-500/20">
-                  <span className="text-[10px] font-black uppercase tracking-widest text-emerald-400">Impuestos y Tasas</span>
-                  <span className="text-xl font-black">
-                    {(() => {
-                      const b = filteredValidBills.find(b => b.id === selectedBillId);
-                      let sum = 0;
-                      [...(b?.otrosConceptos || []), ...(customOCs[selectedBillId!] || [])].forEach(oc => {
-                        if (oc.concepto.toLowerCase().includes('impuesto') || oc.concepto.toLowerCase().includes('iva')) sum += oc.total;
-                      });
-                      return sum.toFixed(2);
-                    })()} €
-                  </span>
-                </div>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* MODAL MATRIX 2: Cálculo precio medio */}
-      <AnimatePresence>
-        {selectedPriceBillId && (() => {
-          const row = tableData.find((d: any) => d.id === selectedPriceBillId);
-          const bill = filteredValidBills.find(b => b.id === selectedPriceBillId);
-          if (!row || !bill) return null;
-          const periods = ['P1','P2','P3','P4','P5','P6'];
-          const validPeriods = periods.filter(p => {
-            const c = bill.consumo?.find(c => c.periodo === p);
-            return c && c.kwh > 0;
-          });
-          const totalKwh = bill.consumoTotalKwh || 1;
-          return (
-            <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/95 backdrop-blur-2xl no-print" onClick={() => setSelectedPriceBillId(null)}>
-              <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
-                className="glass-card border border-white/10 rounded-[64px] w-full max-w-xl p-14" onClick={e => e.stopPropagation()}>
-                <div className="flex justify-between items-start mb-10">
-                  <div>
-                    <p className="text-[10px] font-black uppercase tracking-widest text-cyan-500 mb-1">Cálculo · Precio Medio por Periodo</p>
-                    <h4 className="text-2xl font-black uppercase italic">{(row as any).name}</h4>
-                  </div>
-                  <button onClick={() => setSelectedPriceBillId(null)} className="w-10 h-10 rounded-full glass border border-white/10 flex items-center justify-center hover:bg-white/10">
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-
-                <div className="space-y-3 mb-8">
-                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-4">Precio x kWh consumido</p>
-                  {validPeriods.map(p => {
-                    const c = bill.consumo?.find(c => c.periodo === p)!;
-                    return (
-                      <div key={p} className="p-4 rounded-2xl bg-white/5 border border-white/5 flex items-center justify-between gap-4">
-                        <span className="text-[11px] font-black text-slate-400 w-6">{p}</span>
-                        <span className="text-[11px] text-slate-300 flex-1">{c.kwh.toLocaleString('es-ES', { maximumFractionDigits: 0 })} kWh</span>
-                        <span className="text-[11px] text-slate-500">×</span>
-                        <span className="text-[11px] text-cyan-400">{c.precioKwh.toFixed(4)} €/kWh</span>
-                        <span className="text-[11px] text-slate-500">=</span>
-                        <span className="text-[11px] font-black text-white">{c.total.toFixed(2)} €</span>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                <div className="p-6 rounded-[32px] bg-cyan-500/10 border border-cyan-500/20 space-y-2">
-                  <p className="text-[10px] font-black uppercase tracking-widest text-cyan-400">Cálculo Precio Medio</p>
-                  <p className="text-[11px] text-slate-400">
-                    Total energía ({(bill.costeTotalConsumo || 0).toFixed(2)} €) ÷ Total kWh ({totalKwh.toLocaleString('es-ES', { maximumFractionDigits: 0 })} kWh)
-                  </p>
-                  <p className="text-3xl font-black text-cyan-400">
-                    {((bill.costeTotalConsumo || 0) / totalKwh).toFixed(4)} €/kWh
-                  </p>
-                </div>
-              </motion.div>
-            </div>
-          );
-        })()}
-      </AnimatePresence>
-
       <style jsx global>{`
         html { scroll-behavior: smooth !important; }
         .report-container { width: 100%; position: relative; }
@@ -702,7 +675,133 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
         .custom-scrollbar::-webkit-scrollbar { width: 4px; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 10px; }
       `}</style>
-    </div>
+      </div>
+
+      {/* MODAL MATRIX 3: Desglose factura */}
+      <AnimatePresence>
+        {selectedBillId && filteredValidBills.find(b => b.id === selectedBillId) && (
+          <div className="fixed inset-0 z-[500] flex items-center justify-center p-4 bg-black/95 backdrop-blur-2xl no-print" onClick={() => setSelectedBillId(null)}>
+            <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="glass-card border border-white/10 rounded-[64px] w-full max-w-2xl p-14 relative z-[510]" onClick={e => e.stopPropagation()}>
+              <div className="flex justify-between items-start mb-10">
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-widest text-blue-500 mb-1">Desglose · Matriz Económica Integral</p>
+                  <h4 className="text-3xl font-black uppercase italic">{filteredValidBills.find(b => b.id === selectedBillId)?.fileName.split('.')[0]}</h4>
+                </div>
+                <button onClick={() => setSelectedBillId(null)} className="w-10 h-10 rounded-full glass border border-white/10 flex items-center justify-center hover:bg-white/10">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="grid grid-cols-2 gap-4 mb-8">
+                <div className="p-6 rounded-[32px] bg-blue-600/10 border border-blue-500/20 col-span-2">
+                  <span className="text-[10px] uppercase tracking-widest text-blue-500 block mb-1">Total Factura</span>
+                  <span className="text-4xl font-black">
+                    {(tableData.find((d: any) => d.id === selectedBillId)?.totalFactura || 0).toFixed(2)} €
+                  </span>
+                </div>
+              </div>
+              <div className="space-y-4 max-h-[50vh] overflow-y-auto pr-2 custom-scrollbar">
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-3">Energía por Periodo</p>
+                  <div className="grid grid-cols-3 gap-2">
+                    {filteredValidBills.find(b => b.id === selectedBillId)?.consumo?.filter(c => c.total > 0).map((c, i) => (
+                      <div key={i} className="flex justify-between p-3 rounded-xl bg-white/5 border border-white/5">
+                        <span className="font-black text-[10px] text-slate-400">{c.periodo}</span>
+                        <span className="font-black text-blue-400 text-[11px]">{c.total.toFixed(2)} €</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div className="flex justify-between p-5 rounded-[24px] bg-purple-600/10 border border-purple-500/20">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-purple-400">Total Potencia</span>
+                  <span className="text-xl font-black">{(filteredValidBills.find(b => b.id === selectedBillId)?.costeTotalPotencia || 0).toFixed(2)} €</span>
+                </div>
+                <div className="flex justify-between p-5 rounded-[24px] bg-white/5 border border-white/5">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Otros Conceptos</span>
+                  <span className="text-xl font-black">
+                    {(() => {
+                      const b = filteredValidBills.find(b => b.id === selectedBillId);
+                      let sum = 0;
+                      [...(b?.otrosConceptos || []), ...(customOCs[selectedBillId!] || [])].forEach(oc => {
+                        if (!oc.concepto.toLowerCase().includes('impuesto') && !oc.concepto.toLowerCase().includes('iva')) sum += oc.total;
+                      });
+                      return sum.toFixed(2);
+                    })()} €
+                  </span>
+                </div>
+                <div className="flex justify-between p-5 rounded-[24px] bg-emerald-500/10 border border-emerald-500/20">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-emerald-400">Impuestos y Tasas</span>
+                  <span className="text-xl font-black">
+                    {(() => {
+                      const b = filteredValidBills.find(b => b.id === selectedBillId);
+                      let sum = 0;
+                      [...(b?.otrosConceptos || []), ...(customOCs[selectedBillId!] || [])].forEach(oc => {
+                        if (oc.concepto.toLowerCase().includes('impuesto') || oc.concepto.toLowerCase().includes('iva')) sum += oc.total;
+                      });
+                      return sum.toFixed(2);
+                    })()} €
+                  </span>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* MODAL MATRIX 2: Cálculo precio medio */}
+      <AnimatePresence>
+        {selectedPriceBillId && (() => {
+          const row = tableData.find((d: any) => d.id === selectedPriceBillId);
+          const bill = filteredValidBills.find(b => b.id === selectedPriceBillId);
+          if (!row || !bill) return null;
+          const periods = ['P1','P2','P3','P4','P5','P6'];
+          const validPeriods = periods.filter(p => {
+            const c = bill.consumo?.find(cp => cp.periodo === p);
+            return c && c.kwh > 0;
+          });
+          return (
+            <div className="fixed inset-0 z-[500] flex items-center justify-center p-4 bg-black/95 backdrop-blur-2xl no-print" onClick={() => setSelectedPriceBillId(null)}>
+              <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }}
+                className="glass-card border border-white/10 rounded-[64px] w-full max-w-xl p-14 relative z-[510]" onClick={e => e.stopPropagation()}>
+                <div className="flex justify-between items-start mb-10">
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-widest text-cyan-500 mb-1">Cálculo · Precio Medio por Periodo</p>
+                    <h4 className="text-2xl font-black uppercase italic">{(row as any).name}</h4>
+                  </div>
+                  <button onClick={() => setSelectedPriceBillId(null)} className="w-10 h-10 rounded-full glass border border-white/10 flex items-center justify-center hover:bg-white/10">
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <div className="space-y-3 mb-8">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-4">Precio x kWh consumido</p>
+                  {validPeriods.map(p => {
+                    const c = bill.consumo?.find(cp => cp.periodo === p);
+                    return (
+                      <div key={p} className="flex justify-between p-4 rounded-2xl bg-white/5 border border-white/5 items-center">
+                        <div className="flex items-center gap-4">
+                          <span className="text-xs font-black text-cyan-400">{p}</span>
+                          <span className="text-[10px] font-medium text-slate-500 italic">{c?.kwh.toLocaleString('es-ES')} kWh</span>
+                        </div>
+                        <span className="text-sm font-black text-white">{c?.precioKwh.toFixed(4)} €/kWh</span>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div className="p-6 rounded-[32px] bg-cyan-600/10 border border-cyan-500/20">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-[10px] uppercase tracking-widest text-cyan-500">Precio Medio Ponderado</span>
+                    <span className="text-xs font-bold text-slate-500 italic">Σ(kWh * Precio) / ΣkWh</span>
+                  </div>
+                  <span className="text-3xl font-black text-white">{bill.costeMedioKwh?.toFixed(4)} €/kWh</span>
+                </div>
+              </motion.div>
+            </div>
+          );
+        })()}
+      </AnimatePresence>
+    </>
   );
 }
 
@@ -744,11 +843,16 @@ function MatrixTable({ title, color, tableData, dataKey, unit, decimals, isTop3,
               return (
                 <tr key={idx} className="hover:bg-white/[0.02] transition-all group cursor-pointer" onClick={() => onRowClick(row.id)}>
                   <td className="px-6 py-4 font-black text-white italic uppercase text-[11px]">{row.name}</td>
-                  {[1,2,3,4,5,6].map(p => (
-                    <td key={p} className="px-3 py-4 text-center text-slate-500 font-bold group-hover:text-slate-300 text-[9px]">
-                      {isPriceMatrix ? row.prices[`P${p}`].toFixed(4) : Number(row[`P${p}`]).toLocaleString('es-ES', { maximumFractionDigits: 2 })}
-                    </td>
-                  ))}
+                  {[1,2,3,4,5,6].map(p => {
+                    const price = isPriceMatrix ? row.prices[`P${p}`] : row[`P${p}`];
+                    const isAgg = isPriceMatrix && row.prices[`P${p}_agg`];
+                    return (
+                      <td key={p} className="px-3 py-4 text-center text-slate-500 font-bold group-hover:text-slate-300 text-[9px]">
+                        {isPriceMatrix ? price.toFixed(4) : Number(price).toLocaleString('es-ES', { maximumFractionDigits: 2 })}
+                        {isAgg && <span className="block text-[7px] text-blue-400 mt-0.5 opacity-60">ATR+C</span>}
+                      </td>
+                    );
+                  })}
                   <td className={`px-6 py-4 text-right font-black text-[13px] transition-all ${isTopRow ? 'text-red-500' : color}`}>
                     {val.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {unit}
                   </td>

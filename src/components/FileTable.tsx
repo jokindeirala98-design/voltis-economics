@@ -2,7 +2,8 @@
 
 import React, { useState } from 'react';
 import { ExtractedBill } from '@/lib/types';
-import { AlertTriangle, GripVertical } from 'lucide-react';
+import { AlertTriangle, GripVertical, Calendar } from 'lucide-react';
+import { getAssignedMonth } from '@/lib/date-utils';
 
 interface FileTableProps {
   bills: ExtractedBill[];
@@ -123,7 +124,7 @@ export default function FileTable({ bills, onUpdateBills, customOCs, onUpdateOCs
             {item ? (
               <div className="flex flex-col gap-1">
                 <span className="font-medium text-slate-300">{item.kwh.toLocaleString('es-ES', { maximumFractionDigits: 1 })} kWh</span>
-                <span className={`text-[10px] uppercase font-bold tracking-wider ${item.precioEstimado ? 'text-red-400' : 'text-slate-500'}`}>
+                <span className={`text-[10px] uppercase font-bold tracking-wider ${item.precioEstimated ? 'text-red-400' : 'text-slate-500'}`}>
                   {item.precioKwh.toLocaleString('es-ES', { maximumFractionDigits: 4 })} €/kWh
                 </span>
               </div>
@@ -191,7 +192,22 @@ export default function FileTable({ bills, onUpdateBills, customOCs, onUpdateOCs
            {renderRow('Titular', 'titular')}
            {renderRow('Tarifa', 'tarifa')}
            {renderRow('Fecha Inicio', 'fechaInicio')}
-           {renderRow('Fecha Fin', 'fechaFin')}
+            {renderRow('Fecha Fin', 'fechaFin')}
+            
+            <tr className="border-b border-white/10 bg-blue-500/5 hover:bg-blue-500/10 transition-colors group">
+              <td className="p-3 font-black text-[9px] text-blue-400 uppercase tracking-[0.2em] sticky left-0 bg-[#0a1122] z-10 shadow-[4px_0_24px_-10px_rgba(0,0,0,0.5)] flex items-center gap-2">
+                <Calendar className="w-3 h-3" /> Mes Liquidación
+              </td>
+              {bills.map(bill => {
+                const { month, year } = getAssignedMonth(bill.fechaInicio, bill.fechaFin);
+                const monthNames = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+                return (
+                  <td key={bill.id} className="p-3 text-[10px] font-black text-blue-300/80 border-l border-white/5 whitespace-nowrap uppercase tracking-widest">
+                    {monthNames[month]} {year}
+                  </td>
+                );
+              })}
+            </tr>
            
            <tr className="bg-white/5 border-b border-white/10 mt-4"><td colSpan={bills.length + 1} className="h-6"></td></tr>
            {renderRow('TOTAL CONSUMO (kWh)', 'consumoTotalKwh', true)}

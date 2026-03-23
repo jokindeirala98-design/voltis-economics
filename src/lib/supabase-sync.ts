@@ -47,29 +47,47 @@ export async function syncProjectToDB(project: ProjectWorkspace) {
       updated_at: new Date(project.updatedAt || Date.now()).toISOString()
     });
 
-    // 2. Upsert bills
-    if (project.bills && project.bills.length > 0) {
+    // 2. Sync bills (with deletion of orphans)
+    const currentBillIds = (project.bills || []).map(b => b.id);
+    
+    // Delete any bills in DB for this project that aren't in current list
+    if (currentBillIds.length > 0) {
+      await supabase.from('bills').delete().eq('project_id', project.id).not('id', 'in', `(${currentBillIds.map(id => `'${id}'`).join(',')})`);
+      
       const billRows = project.bills.map(b => ({
         id: b.id,
         project_id: project.id,
         raw_data: b
       }));
       await supabase.from('bills').upsert(billRows);
+    } else {
+      // If no bills, delete all for this project
+      await supabase.from('bills').delete().eq('project_id', project.id);
     }
 
-    // 3. Sync Custom Concepts
+    // 3. Sync Custom Concepts (with deletion of orphans)
     if (project.customOCs) {
-      const entries = Object.entries(project.customOCs);
-      for (const [billId, ocs] of entries) {
-        if (ocs && ocs.length > 0) {
-           // Delete then insert is safer when unique constraints are unknown
-           await supabase.from('custom_concepts').delete().eq('bill_id', billId);
-           await supabase.from('custom_concepts').insert({
-              bill_id: billId,
-              data: ocs
-           });
-        }
-      }
+       const entries = Object.entries(project.customOCs);
+       
+       // Clean up orphans in DB for custom_concepts that are no longer associated with current bill IDs
+       if (currentBillIds.length > 0) {
+         await supabase.from('custom_concepts').delete().in('bill_id', (await supabase.from('bills').select('id').eq('project_id', project.id)).data?.map(b => b.id).filter(id => !currentBillIds.includes(id)) || []);
+       } else {
+         // This project has no bills, but we should handle it via project_id if possible, 
+         // but custom_concepts only has bill_id. We'd have to find bills first. 
+         // Since we already delete all bills for this project above, IF there's a cascade delete on the DB, 
+         // then custom_concepts are gone. If not, we might need more logic.
+       }
+
+       for (const [billId, ocs] of entries) {
+         if (ocs && ocs.length > 0) {
+            await supabase.from('custom_concepts').delete().eq('bill_id', billId);
+            await supabase.from('custom_concepts').insert({
+               bill_id: billId,
+               data: ocs
+            });
+         }
+       }
     }
   } catch (error) {
     console.error('Fatal DB sync error:', error);

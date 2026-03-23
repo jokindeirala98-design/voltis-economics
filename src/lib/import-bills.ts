@@ -82,6 +82,7 @@ export const importBillsFromExcel = async (file: File): Promise<{ bills: Extract
             status: 'success',
             comercializadora: getCellString('Compañía', invKey),
             titular: getCellString('Titular', invKey),
+            cups: getCellString('CUPS', invKey),
             fechaInicio,
             fechaFin,
             tarifa: getCellString('Tarifa', invKey),
