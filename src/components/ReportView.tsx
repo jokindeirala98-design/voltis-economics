@@ -176,13 +176,12 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
     };
 
     const billsForQuarter = filteredValidBills.filter(b => {
-      const d = parseDate(b.fechaFin);
-      if (!d) return false;
-      const month = new Date(d).getMonth() + 1;
-      return selectedQuarter === 1 ? (month >= 1 && month <= 3) :
-             selectedQuarter === 2 ? (month >= 4 && month <= 6) :
-             selectedQuarter === 3 ? (month >= 7 && month <= 9) :
-             selectedQuarter === 4 ? (month >= 10 && month <= 12) : true;
+      const { month: monthIdx } = getAssignedMonth(b.fechaInicio, b.fechaFin);
+      const m1Idx = monthIdx + 1; // 1-indexed for logic below
+      return selectedQuarter === 1 ? (m1Idx >= 1 && m1Idx <= 3) :
+             selectedQuarter === 2 ? (m1Idx >= 4 && m1Idx <= 6) :
+             selectedQuarter === 3 ? (m1Idx >= 7 && m1Idx <= 9) :
+             selectedQuarter === 4 ? (m1Idx >= 10 && m1Idx <= 12) : true;
     });
 
     const totals = { energetic: 0, power: 0, taxes: 0, others: 0, global: 0, kwh: 0 };
@@ -365,8 +364,8 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
           <>
             {/* ── PAGE 1: PORTADA ── */}
             <section id="scene-1" className="report-page flex items-center justify-center relative overflow-hidden">
-              <div className="absolute inset-0 pointer-events-none flex items-center justify-center opacity-20 z-0 mix-blend-screen">
-                <img src="/mascot.jpg" alt="Voltis Mascot" className="w-[600px] h-[600px] object-cover" style={{ maskImage: 'radial-gradient(circle at center, black 30%, transparent 70%)', WebkitMaskImage: 'radial-gradient(circle at center, black 30%, transparent 70%)' }} />
+              <div className="absolute inset-0 pointer-events-none flex items-center justify-center opacity-5 z-0">
+                <img src="/voltis-economics-logo.png" alt="Voltis" className="w-[450px] h-auto object-contain opacity-40" />
               </div>
               <div className="hero-content text-center space-y-12 relative z-10" style={{ opacity: 1 }}>
                 <div className="inline-flex items-center gap-3 px-5 py-2 rounded-full bg-blue-500/10 border border-blue-500/20 text-[9px] font-black uppercase tracking-[0.4em] text-blue-400">
@@ -437,7 +436,7 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
                   </div>
                   <div className="flex-1 h-[300px] glass p-6 rounded-[40px] border border-white/5 overflow-hidden">
                     <ResponsiveContainer width="100%" height={300}>
-                      <BarChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }} layout="horizontal">
+                      <BarChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
                         <CartesianGrid strokeDasharray="5 5" stroke="rgba(255,255,255,0.03)" vertical={false} />
                         <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: 'rgba(255,255,255,0.2)', fontSize: 9, fontWeight: 900 }} dy={10} interval={0} />
                         <YAxis axisLine={false} tickLine={false} tick={{ fill: 'rgba(255,255,255,0.2)', fontSize: 9, fontWeight: 900 }} />
