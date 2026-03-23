@@ -7,7 +7,7 @@ import {
   BarChart, Bar, XAxis, YAxis, Tooltip as RechartsTooltip, ResponsiveContainer, 
   PieChart, Pie, Cell, CartesianGrid
 } from 'recharts';
-import { ArrowLeft, Printer, Zap, Activity, TrendingUp, DollarSign, CheckCircle2, ShieldCheck, Cpu, AlertTriangle, Send, Mail, X } from 'lucide-react';
+import { ArrowLeft, Printer, Zap, Activity, TrendingUp, DollarSign, CheckCircle2, ShieldCheck, Cpu, AlertTriangle, Send, Mail, X, FileText } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import gsap from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
@@ -19,6 +19,7 @@ interface ReportViewProps {
   bills: ExtractedBill[];
   customOCs: Record<string, { concepto: string; total: number }[]>;
   onBack: () => void;
+  onPreviewBill?: (billId: string) => void;
   projectName?: string;
 }
 
@@ -62,7 +63,7 @@ const CountUp = ({ value, duration = 1.2, decimals = 0 }: { value: number, durat
   );
 };
 
-export default function ReportView({ bills, customOCs, onBack, projectName = 'PROYECTO' }: ReportViewProps) {
+export default function ReportView({ bills, customOCs, onBack, onPreviewBill, projectName = 'PROYECTO' }: ReportViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const [selectedBillId, setSelectedBillId] = useState<string | null>(null); // For matrix 3
@@ -98,14 +99,19 @@ export default function ReportView({ bills, customOCs, onBack, projectName = 'PR
 
   useEffect(() => {
     const ctx = gsap.context(() => {
+      // Set 3D perspective on container for all 3D effects
+      gsap.set(containerRef.current, { perspective: 1200 });
+
+      // Ensure hero content is visible immediately
+      gsap.set('.hero-content', { opacity: 1, scale: 1, y: 0 });
+
       // Hero: smooth parallax on scroll-out
       gsap.to('.hero-content', {
         scale: 0.92, opacity: 0.15, y: -60,
         scrollTrigger: { trigger: '#scene-1', start: 'top top', end: 'bottom 30%', scrub: 1.5 }
       });
 
-      // Scene entrances — transformPerspective applies perspective per-element
-      // so position:fixed modals still anchor to viewport (no container perspective needed)
+      // Scene entrances
       ['#scene-2','#scene-3','#scene-4','#scene-5','#scene-6','#scene-7'].forEach((id) => {
         gsap.fromTo(id,
           { y: 70, opacity: 0, transformPerspective: 900, rotationX: 8, scale: 0.98 },
@@ -116,23 +122,12 @@ export default function ReportView({ bills, customOCs, onBack, projectName = 'PR
         );
 
         if (id === '#scene-2') {
-          // KPI cards: staggered 3D Y-flip entrance
           gsap.fromTo('.kpi-card',
             { transformPerspective: 800, rotationY: 25, scale: 0.88, opacity: 0, y: 20 },
             { rotationY: 0, scale: 1, opacity: 1, y: 0,
               stagger: 0.13, duration: 0.9, ease: 'back.out(1.5)',
               immediateRender: false,
               scrollTrigger: { trigger: id, start: 'top 82%', once: true }
-            }
-          );
-        }
-
-        if (id === '#scene-3' || id === '#scene-4') {
-          gsap.fromTo(`${id} .glass`,
-            { scale: 0.94, opacity: 0 },
-            { scale: 1, opacity: 1, duration: 0.8, ease: 'power2.out', stagger: 0.07,
-              immediateRender: false,
-              scrollTrigger: { trigger: id, start: 'top 85%', once: true }
             }
           );
         }
@@ -288,8 +283,8 @@ export default function ReportView({ bills, customOCs, onBack, projectName = 'PR
                 <div className="pt-20 space-y-4">
                   <div className="h-0.5 w-12 bg-blue-500 mx-auto rounded-full shadow-[0_0_15px_rgba(59,130,246,0.6)]" />
                   <h3 className="text-5xl font-black tracking-tighter text-blue-500 uppercase">{projectName}</h3>
-                  <div className="pt-2 flex flex-col items-center gap-1">
-                    <p className="text-[10px] text-slate-500 font-black tracking-wider uppercase">
+                  <div className="pt-2 flex flex-col items-center gap-2">
+                    <p className="text-sm text-white font-black tracking-widest uppercase bg-blue-500/10 px-6 py-2 rounded-full border border-blue-500/20">
                       CUPS: {filteredValidBills[0]?.cups || 'ES00000'}
                     </p>
                     <p className="text-[10px] text-blue-400/60 font-black tracking-[0.4em] uppercase">
@@ -410,6 +405,7 @@ export default function ReportView({ bills, customOCs, onBack, projectName = 'PR
                   decimals={0}
                   isTop3={isTop3}
                   onRowClick={() => {}}
+                  onPreview={(id) => onPreviewBill?.(id)}
                 />
               </div>
             </section>
@@ -426,6 +422,7 @@ export default function ReportView({ bills, customOCs, onBack, projectName = 'PR
                   decimals={2}
                   isTop3={isTop3}
                   onRowClick={(id) => setSelectedPriceBillId(id)}
+                  onPreview={(id) => onPreviewBill?.(id)}
                   isPriceMatrix
                 />
                 <p className="text-center text-[10px] text-slate-600 uppercase tracking-widest">Haz click en una fila para ver el cálculo del precio medio</p>
@@ -444,6 +441,7 @@ export default function ReportView({ bills, customOCs, onBack, projectName = 'PR
                   decimals={2}
                   isTop3={isTop3}
                   onRowClick={(id) => setSelectedBillId(id)}
+                  onPreview={(id) => onPreviewBill?.(id)}
                 />
                 <p className="text-center text-[10px] text-slate-600 uppercase tracking-widest">Haz click en un mes para ver el desglose de la factura</p>
               </div>
@@ -637,7 +635,7 @@ export default function ReportView({ bills, customOCs, onBack, projectName = 'PR
         .text-glow { text-shadow: 0 0 30px rgba(255,255,255,0.4), 0 0 80px rgba(59,130,246,0.2); }
         .report-page { min-height: 100vh; width: 100%; display: flex; }
         .kpi-card { will-change: transform, opacity; backface-visibility: visible; }
-        @page { size: A4 landscape; margin: 8mm 10mm; }
+        @page { size: A4 portrait; margin: 10mm; }
         @media print {
           html, body { 
             background: #020617 !important; 
@@ -647,23 +645,18 @@ export default function ReportView({ bills, customOCs, onBack, projectName = 'PR
           }
           .no-print { display: none !important; }
           .report-container { background: #020617 !important; color: white !important; }
-          /* Reset any GSAP transforms for print */
-          .report-page, .report-page * { 
-            animation: none !important;
-            transition: none !important;
-          }
           .report-page {
-            width: 277mm !important;
-            height: 190mm !important;
-            min-height: unset !important;
-            max-height: 190mm !important;
-            padding: 8mm 12mm !important;
+            width: 210mm !important;
+            min-height: 297mm !important;
+            height: 297mm !important;
+            max-height: 297mm !important;
+            padding: 15mm !important;
             page-break-after: always !important;
             break-after: page !important;
             overflow: hidden !important;
             display: flex !important;
             flex-direction: column !important;
-            align-items: flex-start !important;
+            align-items: center !important;
             justify-content: flex-start !important;
             opacity: 1 !important;
             transform: none !important;
@@ -671,29 +664,34 @@ export default function ReportView({ bills, customOCs, onBack, projectName = 'PR
             background: #020617 !important;
           }
           .report-page:last-child { page-break-after: auto !important; }
+          /* Reset any GSAP transforms for print */
+          .report-page, .report-page * { 
+            animation: none !important;
+            transition: none !important;
+          }
           /* Force ALL elements visible and remove transforms */
           .kpi-card, .glass, table, th, td, h1, h2, h3, h4, p, span, div {
             opacity: 1 !important;
             transform: none !important;
           }
           /* KPI grid compact */
-          .kpi-card { padding: 10px 14px !important; border-radius: 16px !important; margin: 0 !important; }
+          .kpi-card { padding: 20px !important; border-radius: 24px !important; margin: 0 !important; }
           /* Tables compact */
-          table { font-size: 7.5px !important; width: 100% !important; }
-          th, td { padding: 3px 5px !important; }
+          table { font-size: 8px !important; width: 100% !important; margin-top: 20px !important; }
+          th, td { padding: 5px 8px !important; }
           /* Charts — explicit pixel size for recharts to render */
           [class*='recharts-responsive-container'] { 
-            width: 480px !important; 
-            height: 200px !important; 
+            width: 100% !important; 
+            height: 280px !important; 
             display: block !important;
           }
           .recharts-wrapper { 
-            width: 480px !important; 
-            height: 200px !important; 
+            width: 100% !important; 
+            height: 280px !important; 
           }
           /* Glass visible in print */
           .glass { 
-            background: rgba(15,23,42,0.9) !important; 
+            background: rgba(15,23,42,0.95) !important; 
             border: 1px solid rgba(255,255,255,0.1) !important; 
           }
           table, tr, .kpi-card, .pdf-avoid-break { 
@@ -709,11 +707,10 @@ export default function ReportView({ bills, customOCs, onBack, projectName = 'PR
 }
 
 // ── Reusable Matrix Table Component ──
-function MatrixTable({ title, color, tableData, dataKey, unit, decimals, isTop3, onRowClick, isPriceMatrix }: {
+function MatrixTable({ title, color, tableData, dataKey, unit, decimals, isTop3, onRowClick, onPreview, isPriceMatrix }: {
   title: string; color: string; tableData: any[]; dataKey: string; unit: string;
-  decimals: number; isTop3: (v: number, arr: number[]) => boolean; onRowClick: (id: string) => void; isPriceMatrix?: boolean;
+  decimals: number; isTop3: (v: number, arr: number[]) => boolean; onRowClick: (id: string) => void; onPreview?: (id: string) => void; isPriceMatrix?: boolean;
 }) {
-  // Top 3 by actual row position (not unique value) — fixes ties
   const top3Indices = new Set(
     [...tableData]
       .map((d: any, i: number) => ({ val: d[dataKey], i }))
@@ -723,17 +720,21 @@ function MatrixTable({ title, color, tableData, dataKey, unit, decimals, isTop3,
   );
 
   return (
-    <div className="space-y-4 pdf-avoid-break">
-      <h4 className={`text-[11px] font-black uppercase tracking-[0.6em] ${color} flex items-center gap-3 px-4`}>
-        <Activity className="w-4 h-4" /> {title}
+    <div className="space-y-4 pdf-avoid-break w-full">
+      <h4 className={`text-[11px] font-black uppercase tracking-[0.6em] ${color} flex items-center justify-between px-4`}>
+        <div className="flex items-center gap-3">
+          <Activity className="w-4 h-4" /> {title}
+        </div>
+        <span className="text-[8px] opacity-30 lowercase tracking-normal font-medium no-print">Click para detalles • Preview disponible</span>
       </h4>
       <div className="glass p-2 rounded-[40px] border border-white/5 overflow-hidden bg-slate-900/10">
         <table className="w-full text-left border-collapse text-[10px]">
           <thead className="bg-slate-900/30 font-black uppercase tracking-widest text-slate-500">
             <tr>
-              <th className="px-8 py-5">Mes</th>
-              {['P1','P2','P3','P4','P5','P6'].map(p => <th key={p} className="px-4 py-5 text-center">{p}</th>)}
-              <th className="px-8 py-5 text-right">MAGNITUD</th>
+              <th className="px-6 py-5">Mes</th>
+              {['P1','P2','P3','P4','P5','P6'].map(p => <th key={p} className="px-3 py-5 text-center">{p}</th>)}
+              <th className="px-6 py-5 text-right">MAGNITUD</th>
+              <th className="px-4 py-5 text-center no-print"></th>
             </tr>
           </thead>
           <tbody className="divide-y divide-white/[0.03]">
@@ -741,15 +742,24 @@ function MatrixTable({ title, color, tableData, dataKey, unit, decimals, isTop3,
               const val = row[dataKey];
               const isTopRow = top3Indices.has(idx) && val > 0;
               return (
-                <tr key={idx} className="hover:bg-white/[0.01] transition-all group cursor-pointer" onClick={() => onRowClick(row.id)}>
-                  <td className="px-8 py-4 font-black text-white italic uppercase text-[12px]">{row.name}</td>
+                <tr key={idx} className="hover:bg-white/[0.02] transition-all group cursor-pointer" onClick={() => onRowClick(row.id)}>
+                  <td className="px-6 py-4 font-black text-white italic uppercase text-[11px]">{row.name}</td>
                   {[1,2,3,4,5,6].map(p => (
-                    <td key={p} className="px-4 py-4 text-center text-slate-500 font-bold group-hover:text-slate-300 text-[10px]">
+                    <td key={p} className="px-3 py-4 text-center text-slate-500 font-bold group-hover:text-slate-300 text-[9px]">
                       {isPriceMatrix ? row.prices[`P${p}`].toFixed(4) : Number(row[`P${p}`]).toLocaleString('es-ES', { maximumFractionDigits: 2 })}
                     </td>
                   ))}
-                  <td className={`px-8 py-4 text-right font-black text-[14px] transition-all ${isTopRow ? 'text-red-500' : color}`}>
+                  <td className={`px-6 py-4 text-right font-black text-[13px] transition-all ${isTopRow ? 'text-red-500' : color}`}>
                     {val.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {unit}
+                  </td>
+                  <td className="px-4 py-4 text-center no-print">
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); onPreview?.(row.id); }}
+                      className="p-2 rounded-xl bg-white/5 hover:bg-blue-600/20 text-slate-500 hover:text-blue-400 transition-all border border-white/5"
+                      title="Ver factura original"
+                    >
+                      <FileText className="w-3.5 h-3.5" />
+                    </button>
                   </td>
                 </tr>
               );

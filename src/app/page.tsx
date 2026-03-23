@@ -44,6 +44,7 @@ export default function EnergyBillsApp() {
   const [showDiag, setShowDiag] = useState(false);
   const [diagInfo, setDiagInfo] = useState<any>(null);
   const [isCheckingDiag, setIsCheckingDiag] = useState(false);
+  const [previewBillId, setPreviewBillId] = useState<string | null>(null);
 
   const runDiagnostic = async () => {
     setIsCheckingDiag(true);
@@ -387,7 +388,17 @@ export default function EnergyBillsApp() {
   if (showReport) {
     const activeProject = savedProjects.find(p => p.id === currentProjectId);
     const projectName = activeProject?.name || 'PROYECTO';
-    return <div className="min-h-screen bg-[#020617] p-8 md:p-16"><ReportView bills={bills} customOCs={customOCs} onBack={() => setShowReport(false)} projectName={projectName} /></div>;
+    return (
+      <div className="min-h-screen bg-[#020617] p-8 md:p-16">
+        <ReportView 
+          bills={bills} 
+          customOCs={customOCs} 
+          onBack={() => setShowReport(false)} 
+          projectName={projectName}
+          onPreviewBill={(id) => setPreviewBillId(id)}
+        />
+      </div>
+    );
   }
 
   if (!isAuthenticated) {
@@ -878,6 +889,58 @@ export default function EnergyBillsApp() {
               </div>
             </motion.div>
           </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* BILL PREVIEW MODAL */}
+      <AnimatePresence>
+        {previewBillId && (
+          <div className="fixed inset-0 z-[300] flex items-center justify-center p-8 bg-black/95 backdrop-blur-xl" onClick={() => setPreviewBillId(null)}>
+            <div className="absolute top-0 left-0 w-full h-[300px] bg-blue-600/10 blur-[120px] pointer-events-none" />
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 20 }} 
+              animate={{ opacity: 1, scale: 1, y: 0 }} 
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="bg-[#0f172a] border border-white/10 rounded-[48px] w-full max-w-6xl h-[90vh] flex flex-col overflow-hidden shadow-2xl relative z-10"
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="p-10 border-b border-white/5 flex items-center justify-between bg-white/5">
+                <div className="flex items-center gap-5">
+                  <div className="w-12 h-12 rounded-2xl bg-blue-500/20 flex items-center justify-center">
+                    <FileText className="w-6 h-6 text-blue-400" />
+                  </div>
+                  <div>
+                    <h3 className="text-2xl font-black uppercase tracking-tight text-white">
+                      {bills.find(b => b.id === previewBillId)?.fileName}
+                    </h3>
+                    <p className="text-xs text-slate-500 font-bold uppercase tracking-widest mt-1">Audit Control • Original Document</p>
+                  </div>
+                </div>
+                <button onClick={() => setPreviewBillId(null)} className="w-12 h-12 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center transition-all border border-white/10">
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
+              
+              <div className="flex-1 bg-black/40 p-6 overflow-hidden">
+                {fileRefs[previewBillId] ? (
+                  <iframe 
+                    src={URL.createObjectURL(fileRefs[previewBillId])} 
+                    className="w-full h-full rounded-2xl border-none"
+                    title="Bill Preview"
+                  />
+                ) : (
+                  <div className="w-full h-full flex flex-col items-center justify-center gap-6 text-slate-500 border-2 border-dashed border-white/5 rounded-[40px] bg-white/[0.02]">
+                    <AlertTriangle className="w-16 h-16 text-amber-500/50" />
+                    <div className="text-center space-y-2">
+                      <p className="text-xl font-black text-white uppercase tracking-tight">Archivo no disponible</p>
+                      <p className="text-sm font-medium text-slate-500 max-w-xs mx-auto">El archivo original solo está disponible en la sesión en la que se subió.</p>
+                    </div>
+                    <p className="text-[10px] uppercase tracking-[0.3em] text-blue-400/50 font-black">Precisión Voltis IA</p>
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          </div>
         )}
       </AnimatePresence>
 
