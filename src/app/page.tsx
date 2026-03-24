@@ -309,21 +309,42 @@ function EnergyBillsAppContent() {
   });
 
   const createNewProject = async (name: string) => {
-    if (!name.trim() || !session?.user) return;
+    // Debug logging
+    console.log('[Project Creation] Iniciando creación:', { nameLength: name.trim().length, hasSession: !!session?.user });
+
+    if (!name.trim()) {
+      toast.error('El nombre del proyecto no puede estar vacío');
+      return;
+    }
+
+    if (!session?.user) {
+      toast.error('Tu sesión no está disponible. Recarga la página o vuelve a iniciar sesión.');
+      console.warn('[Project Creation] Abortado: No hay sesión de usuario activa');
+      return;
+    }
+
     const userId = (session.user as any).id || session.user.email;
+    
+    // Robust UUID fallback
+    const newId = (typeof crypto !== 'undefined' && crypto.randomUUID) 
+      ? crypto.randomUUID() 
+      : `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+    console.log('[Project Creation] Generando proyecto:', { newId, userId });
+
     const project: ProjectWorkspace = { 
-      id: crypto.randomUUID(), 
+      id: newId, 
       name: name.toUpperCase(), 
       bills: [], 
       customOCs: {}, 
       updatedAt: Date.now() 
     };
     
+    // 1. Local State Update
     setSavedProjects(prev => {
-      const next = [...prev, project];
-      setCloudSyncStatus('syncing');
-      syncProjectToDB(project, userId).then(() => setCloudSyncStatus('synced')).catch(() => setCloudSyncStatus('error'));
-      return next;
+      const isDupp = prev.some(p => p.id === project.id);
+      if (isDupp) return prev;
+      return [...prev, project];
     });
 
     setAllBills(prev => ({ ...prev, [project.id]: [] }));
@@ -333,7 +354,23 @@ function EnergyBillsAppContent() {
     loadWorkspace(project);
     setShowNewProjectModal(false);
     setNewProjectName('');
-    toast.success('Proyecto creado');
+
+    // 2. Database Sync (outside the state updater)
+    setCloudSyncStatus('syncing');
+    try {
+      const success = await syncProjectToDB(project, userId);
+      if (success) {
+        setCloudSyncStatus('synced');
+        toast.success('Proyecto creado y sincronizado en la nube');
+      } else {
+        setCloudSyncStatus('error');
+        toast.error('Proyecto creado localmente, pero falló la sincronización. Verifica tu conexión.');
+      }
+    } catch (err) {
+      console.error('[Project Creation] Error fatal en la sincronización:', err);
+      setCloudSyncStatus('error');
+      toast.error('Error al guardar en la nube. Revisa la consola para más detalles.');
+    }
   };
 
   const loadWorkspace = (proj: ProjectWorkspace) => {

@@ -97,54 +97,64 @@ export async function fetchAllProjectsFromDB(userId: string): Promise<ProjectWor
   }
 }
 
-export async function syncProjectToDB(project: ProjectWorkspace, userId: string) {
+export async function syncProjectToDB(project: ProjectWorkspace, userId: string): Promise<boolean> {
   try {
+    console.log(`[DB Sync] Inciando sync para proyecto: ${project.id} (Usuario: ${userId})`);
+    
     // 1. Upsert project
-    await supabase.from('projects').upsert({
+    const { error: pErr } = await supabase.from('projects').upsert({
       id: project.id,
       name: project.name,
       user_id: userId,
       updated_at: new Date(project.updatedAt || Date.now()).toISOString()
     });
+    
+    if (pErr) {
+      console.error('[DB Sync] Error en tabla projects:', pErr);
+      return false;
+    }
 
     // 2. Sync bills (with deletion of orphans)
     const currentBillIds = (project.bills || []).map(b => b.id);
     
-    // Delete any bills in DB for this project that aren't in current list
     if (currentBillIds.length > 0) {
-      await supabase.from('bills').delete().eq('project_id', project.id).not('id', 'in', `(${currentBillIds.map(id => `'${id}'`).join(',')})`);
+      const { error: dErr } = await supabase.from('bills').delete().eq('project_id', project.id).not('id', 'in', `(${currentBillIds.map(id => `'${id}'`).join(',')})`);
+      if (dErr) console.error('[DB Sync] Error eliminando facturas huérfanas:', dErr);
       
       const billRows = project.bills.map(b => ({
         id: b.id,
         project_id: project.id,
         raw_data: b
       }));
-      await supabase.from('bills').upsert(billRows);
+      const { error: uErr } = await supabase.from('bills').upsert(billRows);
+      if (uErr) {
+        console.error('[DB Sync] Error en upsert de bills:', uErr);
+        return false;
+      }
     } else {
-      // If no bills, delete all for this project
       await supabase.from('bills').delete().eq('project_id', project.id);
     }
 
-    // 3. Sync Custom Concepts (with deletion of orphans)
+    // 3. Sync Custom Concepts
     if (project.customOCs) {
        const entries = Object.entries(project.customOCs);
-       
-       if (currentBillIds.length > 0) {
-         await supabase.from('custom_concepts').delete().in('bill_id', (await supabase.from('bills').select('id').eq('project_id', project.id)).data?.map(b => b.id).filter(id => !currentBillIds.includes(id)) || []);
-       }
-
        for (const [billId, ocs] of entries) {
          if (ocs && ocs.length > 0) {
             await supabase.from('custom_concepts').delete().eq('bill_id', billId);
-            await supabase.from('custom_concepts').insert({
+            const { error: iErr } = await supabase.from('custom_concepts').insert({
                bill_id: billId,
                data: ocs
             });
+            if (iErr) console.error('[DB Sync] Error insertando conceptos custom:', iErr);
          }
        }
     }
+    
+    console.log('[DB Sync] Sync completado con éxito');
+    return true;
   } catch (error) {
-    console.error('Fatal DB sync error:', error);
+    console.error('[DB Sync] Error fatal de sincronización:', error);
+    return false;
   }
 }
 
