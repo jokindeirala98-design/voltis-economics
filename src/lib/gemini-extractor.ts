@@ -96,19 +96,26 @@ export async function extractBillDataWithAI(pdfText: string, pdfBuffer?: Buffer)
     });
   }
 
+  const start = Date.now();
   try {
     const result = await model.generateContent(parts);
-    let output = result.response.text().trim();
+    const output = result.response.text().trim();
+    const duration = Date.now() - start;
+    console.log(`[GEMINI] Extraction complete in ${duration}ms (Model: ${model.model})`);
+    
     const cleaned = cleanJson(output);
     return JSON.parse(cleaned);
   } catch (error: any) {
     console.error('Error in AI extraction:', error);
     
-    // Fallback to Pro if Flash fails or for better reasoning
+    // Fallback to Gemini 2.5 Flash if needed
     try {
-        console.warn('Reintentando con gemini-1.5-pro...');
+        const fallbackStart = Date.now();
+        console.warn('Reintentando con gemini-2.5-flash (Fallback)...');
         const backupModel = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
         const res2 = await backupModel.generateContent(parts);
+        const fallbackDuration = Date.now() - fallbackStart;
+        console.log(`[GEMINI] Fallback extraction complete in ${fallbackDuration}ms`);
         return JSON.parse(cleanJson(res2.response.text()));
     } catch (e2) {
         throw new Error(`Error crítico en Gemini: ${error.message}. Verifica tu API Key.`);

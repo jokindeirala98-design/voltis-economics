@@ -1,6 +1,60 @@
 import { supabase } from './supabase';
 import { ProjectWorkspace, ExtractedBill } from './types';
 
+/**
+ * Fetch a single project by ID (server-side safe)
+ * Used by PDF export and other server routes
+ */
+export async function fetchProjectById(projectId: string): Promise<ProjectWorkspace | null> {
+  try {
+    const { data: project, error: pErr } = await supabase
+      .from('projects')
+      .select('*')
+      .eq('id', projectId)
+      .single();
+    
+    if (pErr) { 
+      console.error('Error fetching project:', pErr); 
+      return null; 
+    }
+    if (!project) return null;
+
+    const { data: bills, error: bErr } = await supabase
+      .from('bills')
+      .select('*')
+      .eq('project_id', projectId);
+    if (bErr) { console.error('Error fetching bills:', bErr); }
+
+    const { data: concepts, error: cErr } = await supabase
+      .from('custom_concepts')
+      .select('*');
+    if (cErr) { console.error('Error fetching concepts:', cErr); }
+
+    const pBills = (bills || [])
+      .filter(b => b.project_id === projectId)
+      .map(b => b.raw_data as ExtractedBill);
+    
+    const pOCs: Record<string, any> = {};
+    pBills.forEach(b => {
+      const bConcepts = (concepts || []).find(c => c.bill_id === b.id);
+      if (bConcepts && bConcepts.data) {
+        pOCs[b.id] = bConcepts.data;
+      }
+    });
+
+    return {
+      id: project.id,
+      name: project.name,
+      updatedAt: new Date(project.updated_at).getTime(),
+      bills: pBills,
+      customOCs: pOCs,
+    };
+  } catch (error) {
+    console.error('Fatal project fetch error:', error);
+    return null;
+  }
+}
+
 export async function fetchAllProjectsFromDB(userId: string): Promise<ProjectWorkspace[]> {
   try {
     const { data: projects, error: pErr } = await supabase

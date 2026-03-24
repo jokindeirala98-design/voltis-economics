@@ -17,6 +17,7 @@ export async function POST(req: Request) {
 
     // 1. Text Extraction from PDF using pdf2json
     let pdfText = '';
+    const parseStart = Date.now();
     try {
       pdfText = await new Promise((resolve, reject) => {
         const pdfParser = new PDFParser(null, 1);
@@ -26,6 +27,7 @@ export async function POST(req: Request) {
         });
         pdfParser.parseBuffer(buffer);
       });
+      console.log(`[EXTRACTION] PDF parsed in ${Date.now() - parseStart}ms`);
     } catch (err) {
       console.error('Error parsing PDF:', err);
       return NextResponse.json({ error: 'No se pudo leer el archivo PDF. Asegúrate de que no esté protegido por contraseña.' }, { status: 400 });

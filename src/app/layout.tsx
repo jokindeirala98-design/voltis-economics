@@ -27,6 +27,9 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="es" className={`${geistSans.variable} ${geistMono.variable}`}>
+      <head>
+        <meta name="voltis-audit-v1" content="stable-2026-03-24" />
+      </head>
       <body className="min-h-screen flex flex-col antialiased">
         <AuthProvider>
           {children}

@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { 
   FileText, Upload, Trash2, Download, AlertTriangle, 
-  CheckCircle, Loader2, Plus, FolderOpen, Edit2, 
+  CheckCircle, Plus, FolderOpen, Edit2, 
   BarChart3, LayoutDashboard, Settings, LogOut,
   ChevronRight, Sparkles, Zap, Smartphone, Layers, X
 } from 'lucide-react';
@@ -27,13 +27,13 @@ const StatusItem = ({ label, status }: { label: string; status: boolean }) => (
   </div>
 );
 
-export default function EnergyBillsApp() {
+function EnergyBillsAppContent() {
   const { data: session, status } = useSession();
   const [allBills, setAllBills] = useState<Record<string, ExtractedBill[]>>({});
   const [allCustomOCs, setAllCustomOCs] = useState<Record<string, Record<string, { concepto: string; total: number }[]>>>({});
   const [allExtractionQueues, setAllExtractionQueues] = useState<Record<string, QueueItem[]>>({});
   const [isExtracting, setIsExtracting] = useState(false);
-  const [currentProjectId, setCurrentProjectId] = useState<string>('default');
+  const [currentProjectId, setCurrentProjectId] = useState<string>('');
   const [savedProjects, setSavedProjects] = useState<ProjectWorkspace[]>([]);
   const [showReport, setShowReport] = useState(false);
   const [renamingProjectId, setRenamingProjectId] = useState<string | null>(null);
@@ -88,20 +88,18 @@ export default function EnergyBillsApp() {
     const initStorage = async () => {
       if (status !== 'authenticated' || !session?.user) return;
       
-      const userId = (session.user as any).id || session.user.email;
+      const userId = (session?.user as any).id || session?.user?.email;
       if (!userId) return;
 
       setCloudSyncStatus('syncing');
       try {
         const dbProjects = await fetchAllProjectsFromDB(userId);
         
-        // Merge with local storage if necessary, but primarily trust cloud now for multi-device login
         if (dbProjects && dbProjects.length > 0) {
           setSavedProjects(dbProjects);
           
           const billsAcc: Record<string, ExtractedBill[]> = {};
           const ocsAcc: Record<string, any> = {};
-          const queueAcc: Record<string, QueueItem[]> = {};
 
           dbProjects.forEach(p => {
             billsAcc[p.id] = (p.bills || []).sort((a, b) => {
@@ -132,7 +130,7 @@ export default function EnergyBillsApp() {
 
   const saveToDisk = useCallback(async (updatedBills: ExtractedBill[], updatedOCs: Record<string, { concepto: string; total: number }[]>, targetProjectId?: string) => {
     if (status !== 'authenticated' || !session?.user) return;
-    const userId = (session.user as any).id || session.user.email;
+    const userId = (session?.user as any).id || session?.user?.email;
     const projectId = targetProjectId || currentProjectId;
     
     setSavedProjects(prev => {
@@ -285,9 +283,21 @@ export default function EnergyBillsApp() {
       return next;
     });
 
-    for (let i = 0; i < validFiles.length; i++) {
-       await processFile(validFiles[i], newItems[i].id, targetProjectId);
-    }
+    // Process files with bounded concurrency (limit 2)
+    const queue = [...validFiles.map((file, i) => ({ file, id: newItems[i].id }))];
+    const concurrencyLimit = 2;
+    const workers = Array(Math.min(concurrencyLimit, queue.length))
+      .fill(null)
+      .map(async () => {
+        while (queue.length > 0) {
+          const item = queue.shift();
+          if (item) {
+            await processFile(item.file, item.id, targetProjectId);
+          }
+        }
+      });
+
+    await Promise.all(workers);
     setIsExtracting(false);
     toast.success('Extracción completada. Todos los datos han sido guardados en el histórico.');
   }, [currentProjectId, saveToDisk, processFile]);
@@ -531,6 +541,7 @@ export default function EnergyBillsApp() {
           customOCs={customOCs} 
           onBack={() => setShowReport(false)} 
           projectName={projectName}
+          projectId={currentProjectId}
           onPreviewBill={(id) => setPreviewBillId(id)}
         />
       </div>
@@ -795,7 +806,7 @@ export default function EnergyBillsApp() {
                           <span className="text-xs font-bold text-white truncate">{item.fileName}</span>
                           {item.error && <span className="text-[10px] text-red-400 font-medium truncate">{item.error}</span>}
                           {item.status === 'success' && <span className="text-[10px] text-emerald-400 font-medium">Extraída correctamente</span>}
-                          {item.status === 'loading' && <span className="text-[10px] text-blue-400 font-medium animate-pulse">Analizando con Llama 3.3...</span>}
+                          {item.status === 'loading' && <span className="text-[10px] text-blue-400 font-medium animate-pulse">Analizando con Voltis AI...</span>}
                         </div>
                       </div>
                       
@@ -974,7 +985,7 @@ export default function EnergyBillsApp() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[500] flex items-center justify-center p-4 bg-black/80 backdrop-blur-xl"
+            className="fixed inset-0 z-[500] flex items-center justify-center p-4 bg-black/80 backdrop-blur-xl no-print"
             onClick={() => setShowNewProjectModal(false)}
           >
             <motion.div
@@ -1030,7 +1041,7 @@ export default function EnergyBillsApp() {
       {/* BILL PREVIEW MODAL */}
       <AnimatePresence>
         {previewBillId && (
-          <div className="fixed inset-0 z-[300] flex items-center justify-center p-8 bg-black/95 backdrop-blur-xl" onClick={() => setPreviewBillId(null)}>
+          <div className="fixed inset-0 z-[300] flex items-center justify-center p-8 bg-black/95 backdrop-blur-xl no-print" onClick={() => setPreviewBillId(null)}>
             <div className="absolute top-0 left-0 w-full h-[300px] bg-blue-600/10 blur-[120px] pointer-events-none" />
             <motion.div 
               initial={{ opacity: 0, scale: 0.95, y: 20 }} 
@@ -1087,4 +1098,8 @@ export default function EnergyBillsApp() {
       `}</style>
     </div>
   );
+}
+
+export default function EnergyBillsApp() {
+  return <EnergyBillsAppContent />;
 }
