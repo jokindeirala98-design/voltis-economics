@@ -1,8 +1,8 @@
 "use client";
 
-import React, { useState } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { ExtractedBill } from '@/lib/types';
-import { AlertTriangle, GripVertical, Calendar } from 'lucide-react';
+import { AlertTriangle, GripVertical, Calendar, Sparkles } from 'lucide-react';
 import { getAssignedMonth } from '@/lib/date-utils';
 
 interface FileTableProps {
@@ -10,22 +10,36 @@ interface FileTableProps {
   onUpdateBills: (bills: ExtractedBill[]) => void;
   customOCs: Record<string, { concepto: string; total: number }[]>;
   onUpdateOCs: (billId: string, ocs: { concepto: string; total: number }[]) => void;
+  onRefine: (bill: ExtractedBill) => void;
 }
 
-export default function FileTable({ bills, onUpdateBills, customOCs, onUpdateOCs }: FileTableProps) {
+const normalizeConceptName = (name: string): string => {
+  const n = name.toUpperCase().trim();
+  if (n.includes('EXCESO') && n.includes('POTENCIA')) return 'EXCESO DE POTENCIA';
+  if (n.includes('BONO SOCIAL')) return 'BONO SOCIAL';
+  if (n.includes('ALQUILER') || n.includes('EQUIPO')) return 'ALQUILER DE EQUIPOS';
+  if (n.includes('PEAJE') || n.includes('TRANSPORTE')) return 'PEAJES Y TRANSPORTES';
+  if (n.includes('EXCEDENTE')) return 'COMPENSACIÓN EXCEDENTES';
+  if (n.includes('IMPUESTO') && n.includes('ELÉCTRICO')) return 'IMPUESTO ELÉCTRICO';
+  if (n.includes('IVA') || n.includes('IGIC')) return 'IVA / IGIC';
+  return n;
+};
+
+export default function FileTable({ bills, onUpdateBills, customOCs, onUpdateOCs, onRefine }: FileTableProps) {
   const [editingCell, setEditingCell] = useState<{ billId: string, field: string } | null>(null);
   const [draggedConcept, setDraggedConcept] = useState<string | null>(null);
 
-  // Derive a unified list of "Otros Conceptos" (OCs) names across all bills
-  const allConceptNames = new Set<string>();
-  bills.forEach(bill => {
-    bill.otrosConceptos?.forEach(oc => allConceptNames.add(oc.concepto));
-    if (customOCs[bill.id]) {
-      customOCs[bill.id].forEach(oc => allConceptNames.add(oc.concepto));
-    }
-  });
-
-  const [orderedConcepts, setOrderedConcepts] = useState<string[]>(Array.from(allConceptNames));
+  // Derive a unified list of NORMALIZED "Otros Conceptos" (OCs) names across all bills
+  const orderedConcepts = useMemo(() => {
+    const allNames = new Set<string>();
+    bills.forEach(bill => {
+      bill.otrosConceptos?.forEach(oc => allNames.add(normalizeConceptName(oc.concepto)));
+      if (customOCs[bill.id]) {
+        customOCs[bill.id].forEach(oc => allNames.add(normalizeConceptName(oc.concepto)));
+      }
+    });
+    return Array.from(allNames);
+  }, [bills, customOCs]);
 
   const handleEdit = (billId: string, field: string, value: string | number) => {
     const updated = bills.map(b => b.id === billId ? { ...b, [field]: value } : b);
@@ -68,11 +82,8 @@ export default function FileTable({ bills, onUpdateBills, customOCs, onUpdateOCs
         onUpdateOCs(bill.id, currentCustom);
       });
       
-      setOrderedConcepts(prev => {
-        const next = prev.filter(c => c !== sourceConcept && c !== targetConcept);
-        next.push(newName);
-        return next;
-      });
+      // Note: Manual reordering via Drag & Drop is temporarily disabled to ensure data integrity
+      // If we need D&D persistence, we should implement a server-side concept order.
     }
     setDraggedConcept(null);
   };
@@ -164,17 +175,26 @@ export default function FileTable({ bills, onUpdateBills, customOCs, onUpdateOCs
                  <div className="flex flex-col gap-1">
                    <div className="flex items-center justify-between">
                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Factura {idx + 1}</span>
-                     <button
-                       onClick={() => {
-                         if (confirm(`¿Eliminar la factura "${bill.fileName}" del proyecto?`)) {
-                           onUpdateBills(bills.filter(b => b.id !== bill.id));
-                         }
-                       }}
-                       className="p-1 rounded-lg hover:bg-red-500/20 text-slate-600 hover:text-red-400 transition-all"
-                       title="Eliminar factura"
-                     >
-                       <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-                     </button>
+                     <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => onRefine(bill)}
+                          className="p-1 rounded-lg hover:bg-blue-500/20 text-slate-500 hover:text-blue-400 transition-all"
+                          title="Refinar con AI"
+                        >
+                          <Sparkles className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => {
+                            if (confirm(`¿Eliminar la factura "${bill.fileName}" del proyecto?`)) {
+                              onUpdateBills(bills.filter(b => b.id !== bill.id));
+                            }
+                          }}
+                          className="p-1 rounded-lg hover:bg-red-500/20 text-slate-600 hover:text-red-400 transition-all"
+                          title="Eliminar factura"
+                        >
+                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                        </button>
+                     </div>
                    </div>
                    <span className="text-sm font-bold text-white truncate" title={bill.fileName}>{bill.fileName}</span>
                    {bill.status !== 'error' ? (
@@ -237,8 +257,15 @@ export default function FileTable({ bills, onUpdateBills, customOCs, onUpdateOCs
                   {conceptName}
                 </td>
                 {bills.map(bill => {
-                  const ocVal = bill.otrosConceptos?.find(c => c.concepto === conceptName)?.total || 0;
-                  const cVal = customOCs[bill.id]?.find(c => c.concepto === conceptName)?.total || 0;
+                  // Sum all original concepts that map to this normalized conceptName
+                  const ocVal = (bill.otrosConceptos || [])
+                    .filter(c => normalizeConceptName(c.concepto) === conceptName)
+                    .reduce((sum, c) => sum + (c.total || 0), 0);
+                    
+                  const cVal = (customOCs[bill.id] || [])
+                    .filter(c => normalizeConceptName(c.concepto) === conceptName)
+                    .reduce((sum, c) => sum + (c.total || 0), 0);
+                    
                   const val = ocVal + cVal;
                   return (
                     <td key={bill.id} className="p-3 text-sm border-l border-white/5 whitespace-nowrap text-slate-300">

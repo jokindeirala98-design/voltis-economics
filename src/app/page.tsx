@@ -49,6 +49,9 @@ function EnergyBillsAppContent() {
   const [diagInfo, setDiagInfo] = useState<any>(null);
   const [isCheckingDiag, setIsCheckingDiag] = useState(false);
   const [previewBillId, setPreviewBillId] = useState<string | null>(null);
+  const [refiningBill, setRefiningBill] = useState<ExtractedBill | null>(null);
+  const [refineInstruction, setRefineInstruction] = useState('');
+  const [isRefining, setIsRefining] = useState(false);
 
   const parseDate = (d?: string) => {
     if (!d) return 0;
@@ -177,9 +180,10 @@ function EnergyBillsAppContent() {
     });
   }, [currentProjectId, isAuthenticated]);
 
-  const processFile = useCallback(async (file: File, queueId: string, targetProjectId: string) => {
+  const processFile = useCallback(async (file: File, queueId: string, targetProjectId: string, userInstruction?: string) => {
     const formData = new FormData();
     formData.append('file', file);
+    if (userInstruction) formData.append('userInstruction', userInstruction);
 
     try {
       const res = await fetch('/api/extract', { method: 'POST', body: formData });
@@ -249,6 +253,41 @@ function EnergyBillsAppContent() {
       toast.error(`Error de red en ${file.name}`);
     }
   }, [allCustomOCs, saveToDisk]);
+  const handleRefine = async () => {
+    if (!refiningBill || !refineInstruction.trim()) return;
+    
+    const file = fileRefs[refiningBill.id];
+    if (!file) {
+      toast.error('Archivo original no encontrado en memoria. Por favor, vuelve a subirlo.');
+      setRefiningBill(null);
+      return;
+    }
+
+    setIsRefining(true);
+    const queueId = `refine-${Date.now()}`;
+    
+    // Add to queue as loading
+    setAllExtractionQueues(prev => ({
+      ...prev,
+      [currentProjectId]: [...(prev[currentProjectId] || []), {
+        id: queueId,
+        fileName: file.name,
+        status: 'loading',
+        addedAt: Date.now()
+      }]
+    }));
+
+    // We remove the old bill first to replace it with the refined one
+    const updatedBills = (allBills[currentProjectId] || []).filter(b => b.id !== refiningBill.id);
+    setAllBills(prev => ({ ...prev, [currentProjectId]: updatedBills }));
+
+    await processFile(file, queueId, currentProjectId, refineInstruction);
+    
+    setIsRefining(false);
+    setRefiningBill(null);
+    setRefineInstruction('');
+    toast.success('Solicitud de refinamiento enviada');
+  };
 
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
     const targetProjectId = currentProjectId;
@@ -942,6 +981,10 @@ function EnergyBillsAppContent() {
                     onUpdateBills={handleUpdateBills} 
                     onUpdateOCs={handleUpdateOCs}
                     customOCs={customOCs}
+                    onRefine={(bill) => {
+                      setRefiningBill(bill);
+                      setRefineInstruction('');
+                    }}
                   />
                 </div>
               </motion.div>
@@ -1150,6 +1193,72 @@ function EnergyBillsAppContent() {
               </div>
             </motion.div>
           </div>
+        )}
+      </AnimatePresence>
+
+      {/* REFINE WITH AI MODAL */}
+      <AnimatePresence>
+        {refiningBill && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[400] flex items-center justify-center p-6 bg-black/90 backdrop-blur-md"
+          >
+            <motion.div 
+              initial={{ scale: 0.9, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              className="glass-card w-full max-w-lg rounded-[40px] p-10 border border-white/10 shadow-3xl text-white relative"
+            >
+              <button onClick={() => setRefiningBill(null)} className="absolute top-8 right-8 text-slate-500 hover:text-white">
+                <X className="w-6 h-6" />
+              </button>
+
+              <div className="flex flex-col gap-8">
+                <div className="flex items-center gap-4">
+                  <div className="p-3 bg-blue-500/10 rounded-2xl">
+                    <Sparkles className="w-8 h-8 text-blue-400" />
+                  </div>
+                  <div>
+                    <h2 className="text-2xl font-black tracking-tighter italic">REFINAR CON INTELIGENCIA</h2>
+                    <p className="text-xs font-bold text-blue-400 tracking-widest uppercase opacity-60">Instrucciones de Corrección</p>
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-4">
+                  <p className="text-sm text-slate-400 font-medium leading-relaxed">
+                    Indica qué datos faltan o deben corregirse en la factura <span className="text-white font-bold">{refiningBill.fileName}</span>.
+                  </p>
+                  
+                  <textarea
+                    autoFocus
+                    value={refineInstruction}
+                    onChange={(e) => setRefineInstruction(e.target.value)}
+                    placeholder="Ej: 'Extrae el exceso de potencia de P4, P5 y P6 que falta' o 'El total no coincide, busca el bono social'..."
+                    className="w-full h-32 bg-white/5 border border-white/10 rounded-2xl p-5 text-white font-medium text-sm focus:outline-none focus:border-blue-500/50 transition-all resize-none"
+                  />
+                </div>
+
+                <div className="flex gap-3 mt-2">
+                  <button
+                    onClick={() => setRefiningBill(null)}
+                    disabled={isRefining}
+                    className="flex-1 py-4 rounded-2xl border border-white/10 text-slate-400 font-bold text-xs uppercase tracking-widest hover:bg-white/5 transition-all"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    onClick={handleRefine}
+                    disabled={isRefining || !refineInstruction.trim()}
+                    className="flex-[2] py-4 rounded-2xl bg-blue-600 hover:bg-blue-500 disabled:opacity-30 disabled:cursor-not-allowed text-white font-bold text-xs uppercase tracking-widest transition-all shadow-[0_0_20px_rgba(37,99,235,0.3)] flex items-center justify-center gap-2"
+                  >
+                    {isRefining ? <Loader className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                    {isRefining ? 'PROCESANDO...' : 'REFINAR EXTRACCIÓN'}
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
         )}
       </AnimatePresence>
 

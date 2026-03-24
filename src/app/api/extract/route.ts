@@ -42,13 +42,13 @@ export async function POST(req: Request) {
 
     // 2. Data Extraction via LLM (Gemini)
     try {
-      // VISION FALLBACK: If text is suspiciously short, it's likely a scanned PDF
       const isScanned = pdfText.trim().length < 100;
       if (isScanned) {
         console.log('[EXTRACTION] Text is sparse. Falling back to Vision (PDF Buffer)...');
       }
 
-      const extractedData = await extractBillDataWithAI(pdfText, isScanned ? buffer : undefined);
+      const userInstruction = formData.get('userInstruction') as string || undefined;
+      const extractedData = await extractBillDataWithAI(pdfText, isScanned ? buffer : undefined, userInstruction);
       
       return NextResponse.json({
         status: 'success',

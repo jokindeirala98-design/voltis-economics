@@ -8,7 +8,7 @@ import {
   BarChart, Bar, XAxis, YAxis, Tooltip as RechartsTooltip, ResponsiveContainer, 
   PieChart, Pie, Cell, CartesianGrid
 } from 'recharts';
-import { ArrowLeft, Printer, Zap, Activity, TrendingUp, DollarSign, CheckCircle2, ShieldCheck, Cpu, AlertTriangle, Send, Mail, X, FileText, Eye, Layout } from 'lucide-react';
+import { ArrowLeft, Printer, Zap, Activity, TrendingUp, DollarSign, CheckCircle2, ShieldCheck, Cpu, AlertTriangle, Send, Mail, X, FileText, Eye, Layout, Loader } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import gsap from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
@@ -453,27 +453,8 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
             </div>
           </div>
           
-          <div className="flex items-center gap-3">
-            <button 
-              onClick={() => setIsPreviewMode(!isPreviewMode)} 
-              className={`glass-btn flex items-center gap-2 px-5 py-2.5 text-[11px] font-bold uppercase tracking-wide ${isPreviewMode ? 'bg-blue-600/20 border-blue-500/40 text-blue-400' : 'text-slate-400'}`}
-            >
-              {isPreviewMode ? <><Layout className="w-4 h-4" /> Salir</> : <><Eye className="w-4 h-4" /> Vista A4</>}
-            </button>
-            <button 
-              onClick={() => {
-                if (!projectId) {
-                  toast.error('Selecciona un proyecto para exportar');
-                  return;
-                }
-                const url = `/api/export?projectId=${encodeURIComponent(projectId)}`;
-                window.open(url, '_blank');
-                toast.info('Generando PDF de Alta Resolución...', { duration: 5000 });
-              }} 
-              className="glass-btn flex items-center gap-2 px-6 py-2.5 text-[11px] font-bold uppercase tracking-wide text-white"
-            >
-              <Cpu className="w-4 h-4 text-blue-400" /> GENERAR PDF
-            </button>
+          <div className="flex items-center gap-3 invisible">
+            {/* Removed top buttons as per request */}
           </div>
         </div>
 
@@ -724,36 +705,32 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
                   <Cpu className="w-5 h-5" /> GENERAR PDF
                 </button>
 
-                {/* Email Box */}
-                <div className="w-full max-w-md glass-immersion border border-white/10 rounded-[40px] p-10 space-y-6 no-print">
-                  <div className="flex flex-col items-center gap-2">
-                    <Mail className="w-8 h-8 text-blue-400" />
-                    <h4 className="text-lg font-black tracking-tight text-white">Enviar informe por correo</h4>
-                    <p className="text-xs text-slate-500">Recibirás el acceso al informe en tu bandeja de entrada</p>
-                  </div>
-                  <form onSubmit={handleSendEmail} className="flex flex-col gap-4">
-                    <input
-                      type="email"
-                      value={email}
-                      onChange={e => setEmail(e.target.value)}
-                      placeholder="correo@ejemplo.com"
-                      className="w-full bg-white/5 border border-white/10 rounded-2xl px-5 py-4 text-white text-sm placeholder:text-slate-600 focus:outline-none focus:border-blue-500/50 transition-all"
-                    />
-                    <button
-                      type="submit"
-                      disabled={isSending || isSent}
-                      className="w-full py-4 rounded-2xl bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-black text-xs uppercase tracking-widest flex items-center justify-center gap-3 transition-all"
-                    >
-                      {isSent ? (
-                        <><CheckCircle2 className="w-4 h-4" /> ¡Enviado!</>
-                      ) : isSending ? (
-                        <><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Enviando...</>
-                      ) : (
-                        <><Send className="w-4 h-4" /> Enviar PDF por correo</>
-                      )}
-                    </button>
-                  </form>
-                </div>
+                {/* Minimal Email Form - Apple Glass Style */}
+                <form 
+                  onSubmit={handleSendEmail} 
+                  className="flex items-center gap-2 mt-8 no-print p-0 bg-transparent border-none w-full max-w-sm justify-center"
+                >
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={e => setEmail(e.target.value)}
+                    placeholder="correo@ejemplo.com"
+                    className="h-10 px-4 bg-white/5 border border-white/10 rounded-full text-[#f5f5f7] text-xs placeholder:text-white/40 backdrop-blur-md focus:outline-none focus:border-white/30 focus:ring-1 focus:ring-white/10 transition-all w-64"
+                  />
+                  <button
+                    type="submit"
+                    disabled={isSending || isSent}
+                    className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${
+                      isSent ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : 
+                      'bg-white/10 border border-white/20 text-white/70 hover:bg-white/20 hover:scale-105 active:scale-95'
+                    } disabled:opacity-50`}
+                    title="Enviar informe por correo"
+                  >
+                    {isSent ? <CheckCircle2 className="w-4 h-4" /> : 
+                     isSending ? <Loader className="w-4 h-4 animate-spin" /> : 
+                     <Send className="w-4 h-4" />}
+                  </button>
+                </form>
               </div>
             </section>
           </>
