@@ -6,7 +6,8 @@ import {
   FileText, Upload, Trash2, Download, AlertTriangle, 
   CheckCircle, Plus, FolderOpen, Edit2, 
   BarChart3, LayoutDashboard, Settings, LogOut,
-  ChevronRight, Sparkles, Zap, Smartphone, Layers, X
+  ChevronRight, Sparkles, Zap, Smartphone, Layers, X,
+  Loader
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { ExtractedBill, ProjectWorkspace, QueueItem } from '@/lib/types';
@@ -744,7 +745,7 @@ function EnergyBillsAppContent() {
             `}>
               <div className="w-20 h-20 rounded-3xl bg-blue-600/10 flex items-center justify-center group-hover:scale-110 transition-transform duration-500 mb-2">
                  {isExtracting ? (
-                   <Loader2 className="w-10 h-10 text-blue-400 animate-spin" />
+                   <Loader className="w-10 h-10 text-blue-400 animate-spin" />
                  ) : (
                    <Upload className={`w-10 h-10 transition-colors ${isDragActive ? 'text-blue-400' : 'text-slate-400'}`} />
                  )}
@@ -798,7 +799,7 @@ function EnergyBillsAppContent() {
                           item.status === 'success' ? 'bg-emerald-500/10 text-emerald-400' :
                           'bg-red-500/10 text-red-400'
                         }`}>
-                          {item.status === 'loading' ? <Loader2 className="w-4 h-4 animate-spin" /> :
+                          {item.status === 'loading' ? <Loader className="w-4 h-4 animate-spin" /> :
                            item.status === 'success' ? <CheckCircle className="w-4 h-4" /> :
                            <X className="w-4 h-4" />}
                         </div>
@@ -919,7 +920,7 @@ function EnergyBillsAppContent() {
 
                 {isCheckingDiag ? (
                   <div className="flex flex-col items-center gap-4 py-12">
-                     <Loader2 className="w-10 h-10 text-blue-500 animate-spin" />
+                     <Loader className="w-10 h-10 text-blue-500 animate-spin" />
                      <span className="text-xs font-black tracking-widest">ANALIZANDO CONEXIONES...</span>
                   </div>
                 ) : (

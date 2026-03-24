@@ -19,7 +19,7 @@
  * - No sample/fake data
  */
 import { NextRequest, NextResponse } from 'next/server';
-import { chromium } from 'playwright-core';
+import { chromium } from 'playwright';
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
