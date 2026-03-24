@@ -15,8 +15,14 @@ export async function GET() {
   };
 
   try {
-    const { data, error } = await supabase.from('projects').select('count', { count: 'exact', head: true });
-    if (error) throw error;
+    const { error: pErr } = await supabase.from('projects').select('count', { count: 'exact', head: true });
+    const { error: bErr } = await supabase.from('bills').select('count', { count: 'exact', head: true });
+    const { error: cErr } = await supabase.from('custom_concepts').select('count', { count: 'exact', head: true });
+    
+    if (pErr) throw new Error(`projects: ${pErr.message}`);
+    if (bErr) throw new Error(`bills: ${bErr.message}`);
+    if (cErr) throw new Error(`custom_concepts: ${cErr.message}`);
+    
     diag.database.status = 'connected';
   } catch (err: any) {
     diag.database.status = 'error';

@@ -18,7 +18,6 @@ export const metadata: Metadata = {
   description: "Sistema experto de análisis energético y optimización de facturas.",
 };
 
-import { AuthProvider } from "@/components/AuthProvider";
 
 export default function RootLayout({
   children,
@@ -31,10 +30,8 @@ export default function RootLayout({
         <meta name="voltis-audit-v1" content="stable-2026-03-24" />
       </head>
       <body className="min-h-screen flex flex-col antialiased">
-        <AuthProvider>
-          {children}
-          <Toaster richColors position="top-center" />
-        </AuthProvider>
+        {children}
+        <Toaster richColors position="top-center" />
       </body>
     </html>
   );

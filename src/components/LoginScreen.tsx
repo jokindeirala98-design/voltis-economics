@@ -1,13 +1,25 @@
 "use client";
 
-import React from 'react';
-import { signIn } from 'next-auth/react';
-import { motion } from 'framer-motion';
-import { Sparkles, ArrowRight, Smartphone, Zap, ShieldCheck } from 'lucide-react';
+import React, { useState } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Sparkles, ArrowRight, Smartphone, Zap, ShieldCheck, Lock, Eye, EyeOff } from 'lucide-react';
 
-export default function LoginScreen() {
+interface LoginScreenProps {
+  onLogin: (password: string) => void;
+  error: string | null;
+}
+
+export default function LoginScreen({ onLogin, error }: LoginScreenProps) {
+  const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    onLogin(password);
+  };
+
   return (
-    <div className="relative min-h-screen w-full bg-[#020617] text-white flex flex-col items-center justify-center p-6 overflow-hidden">
+    <div className="relative min-h-screen w-full bg-[#020617] text-white flex flex-col items-center justify-center p-6 overflow-hidden font-inter">
       {/* Background Decorative Elements */}
       <div className="absolute inset-0 pointer-events-none z-0">
         <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[800px] h-[400px] bg-blue-600/10 blur-[120px] rounded-full" />
@@ -19,7 +31,7 @@ export default function LoginScreen() {
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 1, ease: "easeOut" }}
-        className="relative z-10 w-full max-w-xl text-center space-y-12"
+        className="relative z-10 w-full max-w-xl text-center space-y-10"
       >
         {/* Logo Section */}
         <div className="space-y-4">
@@ -39,33 +51,70 @@ export default function LoginScreen() {
             Annual <br />
             <span className="text-blue-500">Economics</span>
           </h1>
-          <p className="text-slate-500 font-medium tracking-tight text-lg max-w-sm mx-auto pt-4">
+          <p className="text-slate-500 font-medium tracking-tight text-lg max-w-sm mx-auto pt-4 leading-relaxed">
             Auditoría energética avanzada asistida por IA para comerciales expertos.
           </p>
         </div>
 
-        {/* Action Button */}
+        {/* Password Form */}
         <motion.div 
           initial={{ opacity: 0, scale: 0.95 }}
           animate={{ opacity: 1, scale: 1 }}
           transition={{ delay: 0.4, duration: 0.5 }}
-          className="pt-4"
+          className="pt-4 max-w-sm mx-auto w-full"
         >
-          <button
-            onClick={() => signIn('google')}
-            className="group relative flex items-center justify-center gap-4 w-full max-w-xs mx-auto px-8 py-5 rounded-[32px] bg-white text-black font-black text-sm uppercase tracking-widest hover:bg-blue-50 transition-all duration-300 shadow-2xl shadow-white/5 active:scale-95"
-          >
-            <img src="https://www.google.com/favicon.ico" alt="Google" className="w-4 h-4" />
-            Iniciar sesión con Gmail
-            <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-          </button>
-          <p className="text-[10px] text-slate-600 font-bold uppercase tracking-[0.2em] mt-8">
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="relative group">
+              <div className="absolute inset-y-0 left-0 pl-6 flex items-center pointer-events-none">
+                <Lock className="h-5 w-5 text-slate-500 group-focus-within:text-blue-400 transition-colors" />
+              </div>
+              <input
+                type={showPassword ? "text" : "password"}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Contraseña de acceso"
+                className="block w-full pl-16 pr-14 py-5 bg-white/5 border border-white/10 rounded-[32px] text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 transition-all text-sm font-bold tracking-widest uppercase"
+                autoFocus
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute inset-y-0 right-0 pr-6 flex items-center text-slate-500 hover:text-white transition-colors"
+              >
+                {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+              </button>
+            </div>
+
+            <AnimatePresence mode="wait">
+              {error && (
+                <motion.p 
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  className="text-red-400 text-[10px] font-black uppercase tracking-widest"
+                >
+                  {error}
+                </motion.p>
+              )}
+            </AnimatePresence>
+
+            <button
+              type="submit"
+              className="group relative flex items-center justify-center gap-4 w-full px-8 py-5 rounded-[32px] bg-white text-black font-black text-sm uppercase tracking-widest hover:bg-blue-50 transition-all duration-300 shadow-2xl shadow-blue-500/10 active:scale-95 overflow-hidden"
+            >
+              <div className="absolute inset-0 bg-gradient-to-r from-blue-500/10 to-indigo-500/10 opacity-0 group-hover:opacity-100 transition-opacity" />
+              Acceder al Sistema
+              <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+            </button>
+          </form>
+
+          <p className="text-[10px] text-slate-700 font-bold uppercase tracking-[0.2em] mt-8">
             Exclusivo para la red comercial de Voltis
           </p>
         </motion.div>
 
         {/* Feature Grid */}
-        <div className="grid grid-cols-3 gap-4 pt-12 border-t border-white/5 max-w-md mx-auto">
+        <div className="grid grid-cols-3 gap-4 pt-12 border-t border-white/5 max-w-sm mx-auto">
           {[
             { icon: <ShieldCheck className="w-4 h-4" />, label: 'Seguro' },
             { icon: <Smartphone className="w-4 h-4" />, label: 'Mobile Ready' },

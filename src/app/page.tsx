@@ -18,7 +18,6 @@ import ReportView from '@/components/ReportView';
 import { motion, AnimatePresence } from 'framer-motion';
 import { fetchAllProjectsFromDB, syncProjectToDB, deleteProjectFromDB } from '@/lib/supabase-sync';
 import { getAssignedMonth } from '@/lib/date-utils';
-import { useSession, signOut } from 'next-auth/react';
 import LoginScreen from '@/components/LoginScreen';
 
 const StatusItem = ({ label, status }: { label: string; status: boolean }) => (
@@ -29,12 +28,15 @@ const StatusItem = ({ label, status }: { label: string; status: boolean }) => (
 );
 
 function EnergyBillsAppContent() {
-  const { data: session, status } = useSession();
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+  const [isAuthLoading, setIsAuthLoading] = useState(true);
+  const [authError, setAuthError] = useState<string | null>(null);
+
   const [allBills, setAllBills] = useState<Record<string, ExtractedBill[]>>({});
   const [allCustomOCs, setAllCustomOCs] = useState<Record<string, Record<string, { concepto: string; total: number }[]>>>({});
   const [allExtractionQueues, setAllExtractionQueues] = useState<Record<string, QueueItem[]>>({});
   const [isExtracting, setIsExtracting] = useState(false);
-  const [currentProjectId, setCurrentProjectId] = useState<string>('');
+  const [currentProjectId, setCurrentProjectId] = useState<string>('default');
   const [savedProjects, setSavedProjects] = useState<ProjectWorkspace[]>([]);
   const [showReport, setShowReport] = useState(false);
   const [renamingProjectId, setRenamingProjectId] = useState<string | null>(null);
@@ -84,14 +86,21 @@ function EnergyBillsAppContent() {
   const extractionQueue = allExtractionQueues[currentProjectId] || [];
   const customOCs = allCustomOCs[currentProjectId] || {};
 
-  // Initialization: Sync Cloud -> Local
+  // Initialization: Check local auth and Sync Cloud -> Local
+  useEffect(() => {
+    const checkAuth = () => {
+      const loggedIn = localStorage.getItem('voltis_logged_in') === 'true';
+      if (loggedIn) setIsAuthenticated(true);
+      setIsAuthLoading(false);
+    };
+    checkAuth();
+  }, []);
+
   useEffect(() => {
     const initStorage = async () => {
-      if (status !== 'authenticated' || !session?.user) return;
+      if (!isAuthenticated) return;
       
-      const userId = (session?.user as any).id || session?.user?.email;
-      if (!userId) return;
-
+      const userId = 'voltis_user_global';
       setCloudSyncStatus('syncing');
       try {
         const dbProjects = await fetchAllProjectsFromDB(userId);
@@ -115,7 +124,7 @@ function EnergyBillsAppContent() {
           setAllBills(billsAcc);
           setAllCustomOCs(ocsAcc);
           
-          const lastId = localStorage.getItem(`voltis_last_project_${userId}`) || dbProjects[0].id;
+          const lastId = localStorage.getItem(`voltis_last_project`) || dbProjects[0].id;
           setCurrentProjectId(lastId);
           setCloudSyncStatus('synced');
         } else {
@@ -127,11 +136,29 @@ function EnergyBillsAppContent() {
       }
     };
     initStorage();
-  }, [status, session]);
+  }, [isAuthenticated]);
+
+  const handleLogin = (password: string) => {
+    if (password.toLowerCase() === 'voltis2026') {
+      setIsAuthenticated(true);
+      setAuthError(null);
+      localStorage.setItem('voltis_logged_in', 'true');
+      toast.success('Acceso concedido');
+    } else {
+      setAuthError('Contraseña incorrecta');
+      toast.error('Acceso denegado');
+    }
+  };
+
+  const handleLogout = () => {
+    setIsAuthenticated(false);
+    localStorage.removeItem('voltis_logged_in');
+    toast.success('Sesión cerrada');
+  };
 
   const saveToDisk = useCallback(async (updatedBills: ExtractedBill[], updatedOCs: Record<string, { concepto: string; total: number }[]>, targetProjectId?: string) => {
-    if (status !== 'authenticated' || !session?.user) return;
-    const userId = (session?.user as any).id || session?.user?.email;
+    if (!isAuthenticated) return;
+    const userId = 'voltis_user_global';
     const projectId = targetProjectId || currentProjectId;
     
     setSavedProjects(prev => {
@@ -148,7 +175,7 @@ function EnergyBillsAppContent() {
       }
       return next;
     });
-  }, [currentProjectId, status, session]);
+  }, [currentProjectId, isAuthenticated]);
 
   const processFile = useCallback(async (file: File, queueId: string, targetProjectId: string) => {
     const formData = new FormData();
@@ -310,20 +337,20 @@ function EnergyBillsAppContent() {
 
   const createNewProject = async (name: string) => {
     // Debug logging
-    console.log('[Project Creation] Iniciando creación:', { nameLength: name.trim().length, hasSession: !!session?.user });
+    console.log('[Project Creation] Iniciando creación:', { nameLength: name.trim().length, isAuthenticated });
 
     if (!name.trim()) {
       toast.error('El nombre del proyecto no puede estar vacío');
       return;
     }
 
-    if (!session?.user) {
+    if (!isAuthenticated) {
       toast.error('Tu sesión no está disponible. Recarga la página o vuelve a iniciar sesión.');
-      console.warn('[Project Creation] Abortado: No hay sesión de usuario activa');
+      console.warn('[Project Creation] Abortado: No hay sesión activa');
       return;
     }
 
-    const userId = (session.user as any).id || session.user.email;
+    const userId = 'voltis_user_global';
     
     // Robust UUID fallback
     const newId = (typeof crypto !== 'undefined' && crypto.randomUUID) 
@@ -382,8 +409,8 @@ function EnergyBillsAppContent() {
 
   const deleteProject = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!session?.user) return;
-    const userId = (session.user as any).id || session.user.email;
+    if (!isAuthenticated) return;
+    const userId = 'voltis_user_global';
 
     if (confirm('¿Eliminar este proyecto permanentemente de la nube?')) {
       const next = savedProjects.filter(p => p.id !== id);
@@ -412,8 +439,8 @@ function EnergyBillsAppContent() {
   };
 
   const renameProject = async (id: string, newName: string) => {
-    if (!newName.trim() || !session?.user) return;
-    const userId = (session.user as any).id || session.user.email;
+    if (!newName.trim() || !isAuthenticated) return;
+    const userId = 'voltis_user_global';
     const upperName = newName.toUpperCase();
     setSavedProjects(prev => {
       const next = prev.map(p => p.id === id ? { ...p, name: upperName, updatedAt: Date.now() } : p);
@@ -683,25 +710,23 @@ function EnergyBillsAppContent() {
               <div className={`w-1.5 h-1.5 rounded-full ${cloudSyncStatus === 'synced' ? 'bg-emerald-500' : 'bg-red-500 animate-pulse'}`} />
             </button>
             <div className="glass p-4 rounded-2xl border border-white/5 flex items-center justify-between group relative">
-               <div className="flex items-center gap-4">
-                 {session?.user?.image ? (
-                   <img src={session.user.image} className="w-8 h-8 rounded-full border border-white/10" alt="Avatar" />
-                 ) : (
-                   <div className="w-8 h-8 rounded-full bg-slate-800 border border-white/10" />
-                 )}
-                 <div className="flex flex-col overflow-hidden max-w-[120px]">
-                   <span className="text-xs font-bold text-white uppercase tracking-tight truncate">{session?.user?.name || 'Comercial'}</span>
-                   <span className="text-[10px] text-slate-500 tracking-wider truncate">Plan Expert</span>
-                 </div>
-               </div>
-               <button 
-                 onClick={() => signOut()}
-                 className="p-2 hover:bg-red-500/10 text-slate-600 hover:text-red-400 rounded-lg transition-all"
-                 title="Cerrar sesión"
-               >
-                 <LogOut className="w-4 h-4" />
-               </button>
-            </div>
+                <div className="flex items-center gap-4">
+                  <div className="w-8 h-8 rounded-full bg-slate-800 border border-white/10 flex items-center justify-center">
+                    <Zap className="w-4 h-4 text-blue-500" />
+                  </div>
+                  <div className="flex flex-col overflow-hidden max-w-[120px]">
+                    <span className="text-xs font-bold text-white uppercase tracking-tight truncate">COMERCIAL</span>
+                    <span className="text-[10px] text-slate-500 tracking-wider truncate">Plan Expert</span>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => handleLogout()}
+                  className="p-2 hover:bg-red-500/10 text-slate-600 hover:text-red-400 rounded-lg transition-all"
+                  title="Cerrar sesión"
+                >
+                  <LogOut className="w-4 h-4" />
+                </button>
+             </div>
           </div>
       </aside>
 
@@ -1139,5 +1164,39 @@ function EnergyBillsAppContent() {
 }
 
 export default function EnergyBillsApp() {
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+  const [isAuthLoading, setIsAuthLoading] = useState(true);
+  const [authError, setAuthError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const loggedIn = localStorage.getItem('voltis_logged_in') === 'true';
+    if (loggedIn) setIsAuthenticated(true);
+    setIsAuthLoading(false);
+  }, []);
+
+  if (isAuthLoading) {
+    return (
+      <div className="h-screen bg-[#020617] flex items-center justify-center">
+        <Loader className="w-10 h-10 text-blue-500 animate-spin" />
+      </div>
+    );
+  }
+
+  const handleLogin = (password: string) => {
+    if (password.toLowerCase() === 'voltis2026') {
+      setIsAuthenticated(true);
+      setAuthError(null);
+      localStorage.setItem('voltis_logged_in', 'true');
+      toast.success('Acceso concedido');
+    } else {
+      setAuthError('Contraseña incorrecta');
+      toast.error('Acceso denegado');
+    }
+  };
+
+  if (!isAuthenticated) {
+    return <LoginScreen onLogin={handleLogin} error={authError} />;
+  }
+
   return <EnergyBillsAppContent />;
 }
