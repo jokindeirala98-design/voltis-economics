@@ -48,7 +48,7 @@ export async function POST(req: Request) {
       }
 
       const userInstruction = formData.get('userInstruction') as string || undefined;
-      const extractedData = await extractBillDataWithAI(pdfText, isScanned ? buffer : undefined, userInstruction);
+      const extractedData = await extractBillDataWithAI(buffer, file.type, userInstruction);
       
       return NextResponse.json({
         status: 'success',
