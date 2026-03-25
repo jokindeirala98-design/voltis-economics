@@ -357,25 +357,84 @@ function importMonthlyMatrixFormat(
   const bills: ExtractedBill[] = [];
   const customOCs: Record<string, { concepto: string; total: number }[]> = {};
   
-  // Find relevant sheets
-  const sheetNames = workbook.SheetNames;
-  
-  // Structure to hold cost data per month
-  const monthCosts: Record<string, Record<string, number>> = {};
+  // Structure to hold cost data per month (includes custom OCs as nested object)
+  const monthCosts: Record<string, Record<string, number | Record<string, number>>> = {};
   // Structure to hold consumption data per month
   const monthConsumption: Record<string, Record<string, number>> = {};
+  // Structure to hold period prices per month (€/kWh)
+  const monthPrices: Record<string, Record<string, number>> = {};
   
-  let totalKwhRow = '';
-  let totalEurRow = '';
+  // Extract metadata from workbook
+  let metadata: { company?: string; tariff?: string; titular?: string; cups?: string } = {};
+  
+  // Scan all sheets for metadata
+  for (const sheetName of workbook.SheetNames) {
+    const worksheet = workbook.Sheets[sheetName];
+    const rows = XLSX.utils.sheet_to_json<Record<string, any>>(worksheet, { defval: '' });
+    
+    // Look for metadata in first few rows
+    for (const row of rows.slice(0, 10)) {
+      const keys = Object.keys(row);
+      for (const key of keys) {
+        const value = String(row[key] || '').toLowerCase();
+        
+        // Detect company
+        if (!metadata.company && (
+          value.includes('compañia') || value.includes('comercializadora') || 
+          value.includes('empresa') || value.includes('distribuidora')
+        )) {
+          const val = String(row[key]).replace(/^[^:]+:\s*/i, '');
+          if (val && val.length > 1 && val !== key) {
+            metadata.company = val.trim();
+          }
+        }
+        
+        // Detect tariff
+        if (!metadata.tariff && (
+          value.includes('tarifa') || value.includes('contrato')
+        )) {
+          const val = String(row[key]).replace(/^[^:]+:\s*/i, '');
+          if (val && val.length > 1 && val !== key) {
+            metadata.tariff = val.trim();
+          }
+        }
+        
+        // Detect titular
+        if (!metadata.titular && (
+          value.includes('titular') || value.includes('cliente') || value.includes('nombre')
+        )) {
+          const val = String(row[key]).replace(/^[^:]+:\s*/i, '');
+          if (val && val.length > 1 && val !== key) {
+            metadata.titular = val.trim();
+          }
+        }
+        
+        // Detect CUPS
+        if (!metadata.cups && (
+          value.includes('cups') || /^es[a-z0-9]{18,22}$/i.test(value.replace(/\s/g, ''))
+        )) {
+          const cupsMatch = String(row[key]).match(/es[a-z0-9]{18,22}/i);
+          if (cupsMatch) {
+            metadata.cups = cupsMatch[0].toUpperCase();
+          }
+        }
+      }
+    }
+  }
+  
+  // Use default tariff if not found
+  if (!metadata.tariff) {
+    metadata.tariff = '3.0TD';
+  }
   
   // Process each sheet
-  for (const sheetName of sheetNames) {
+  for (const sheetName of workbook.SheetNames) {
     const worksheet = workbook.Sheets[sheetName];
     const rows = XLSX.utils.sheet_to_json<Record<string, any>>(worksheet, { defval: '' });
     
     if (rows.length === 0) continue;
     
-    // Get column headers (row 0 values)
+    // Get column headers
     const headers = Object.keys(rows[0] || {});
     
     // Check if this sheet has month columns
@@ -387,36 +446,57 @@ function importMonthlyMatrixFormat(
       }
     }
     
-    // If we found month columns, this is likely a matrix sheet
+    // If we found month columns, this is a matrix sheet
     if (monthColumns.length > 0) {
-      // Check if this looks like a consumption sheet (has P1-P6 rows)
       const firstColumn = headers[0] || '';
-      const hasPeriodRows = headers.some(h => 
-        PERIOD_ROW_PATTERNS.some(([pattern]) => pattern.test(h))
-      ) || rows.some(row => {
-        const firstCol = String(row[firstColumn] || '');
-        return PERIOD_ROW_PATTERNS.some(([pattern]) => pattern.test(firstCol));
+      
+      // Check if this is a consumption sheet (has P1-P6 rows)
+      const hasPeriodRows = rows.some(row => {
+        const label = String(row[firstColumn] || '').trim();
+        return PERIOD_ROW_PATTERNS.some(([pattern]) => pattern.test(label));
       });
       
-      if (hasPeriodRows || sheetName.toLowerCase().includes('consum')) {
+      // Also check for kWh headers
+      const hasKwhColumns = headers.some(h => /kwh|kwh/i.test(h));
+      
+      if (hasPeriodRows || sheetName.toLowerCase().includes('consum') || hasKwhColumns) {
         // This is a consumption matrix sheet
         for (const row of rows) {
           const label = String(row[firstColumn] || '').trim();
           
           // Detect period
           for (const [pattern, period] of PERIOD_ROW_PATTERNS) {
-            if (pattern.test(label)) {
+            if (pattern.test(label) && period !== 'TOTAL') {
               // This row contains period data
               for (const col of monthColumns) {
                 if (!monthConsumption[col.header]) {
                   monthConsumption[col.header] = {};
                 }
+                if (!monthPrices[col.header]) {
+                  monthPrices[col.header] = {};
+                }
                 const value = parseNumber(row[col.header]);
-                if (value > 0 || period === 'TOTAL') {
+                if (value > 0) {
                   monthConsumption[col.header][period] = value;
                 }
               }
               break;
+            }
+          }
+          
+          // Look for price row (€/kWh)
+          if (/precio|kwh|€.*kwh/i.test(label)) {
+            for (const col of monthColumns) {
+              if (!monthPrices[col.header]) {
+                monthPrices[col.header] = {};
+              }
+              const value = parseNumber(row[col.header]);
+              // Try to detect which period this price belongs to
+              for (let p = 1; p <= 6; p++) {
+                if (label.toLowerCase().includes(`p${p}`) || label.toLowerCase().includes(`periodo ${p}`)) {
+                  monthPrices[col.header][`P${p}`] = value;
+                }
+              }
             }
           }
         }
@@ -439,9 +519,20 @@ function importMonthlyMatrixFormat(
                 monthCosts[col.header][match.field] = value;
               }
             }
-          } else if (label.toLowerCase() !== 'total' && !label.startsWith('-')) {
-            // Unmapped concept - add as custom OC
+          } else if (label.toLowerCase() !== 'total' && !label.startsWith('-') && label.length > 1) {
+            // Unmapped concept - add as custom OC for all months
             warnings.push(`Concepto no mapeado: "${label}" - añadido como concepto personalizado`);
+            for (const col of monthColumns) {
+              if (!monthCosts[col.header]) {
+                monthCosts[col.header] = {};
+              }
+              const value = parseNumber(row[col.header]);
+                if (value !== 0) {
+                const customOCs = (monthCosts[col.header]['_customOCs'] as Record<string, number>) || {};
+                customOCs[label] = value;
+                (monthCosts[col.header] as any)['_customOCs'] = customOCs;
+              }
+            }
           }
         }
       }
@@ -461,67 +552,127 @@ function importMonthlyMatrixFormat(
     const { month, year } = parsed;
     const costs = monthCosts[monthHeader] || {};
     const consumption = monthConsumption[monthHeader] || {};
+    const prices = monthPrices[monthHeader] || {};
     
     // Build the bill
     const billId = `matrix_${year}_${String(month + 1).padStart(2, '0')}`;
     
+    // Helper to safely get number from costs
+    const getCost = (key: string): number => {
+      const val = costs[key];
+      return typeof val === 'number' ? val : 0;
+    };
+    
     // Calculate totals
-    const costeEnergia = (costs.precioMercado || 0) + (costs.peajeEnergia || 0) + (costs.cargosEnergia || 0);
-    const costePotencia = costs.terminoPotencia || 0;
-    const impuestos = (costs.impuestosElectricos || 0) + (costs.iva || 0);
+    // In Spanish billing, "costeTotalConsumo" typically includes all energy-related costs
+    const costeEnergia = getCost('precioMercado') + getCost('peajeEnergia') + getCost('cargosEnergia');
+    const costePotencia = getCost('terminoPotencia');
+    const impuestosElectricos = getCost('impuestosElectricos');
+    const iva = getCost('iva');
+    const totalImpuestos = impuestosElectricos + iva;
     
     const otrosConceptos: { concepto: string; total: number }[] = [];
     
     // Add unmapped concepts as custom OCs
-    if (costs.reactivas) otrosConceptos.push({ concepto: 'Energía Reactiva', total: costs.reactivas });
-    if (costs.excesosPotencia) otrosConceptos.push({ concepto: 'Excesos de Potencia', total: costs.excesosPotencia });
-    if (costs.remuneracionComercial) otrosConceptos.push({ concepto: 'Remuneración Comercial', total: costs.remuneracionComercial });
-    if (costs.ajusteAdenda) otrosConceptos.push({ concepto: 'Ajuste Adenda', total: costs.ajusteAdenda });
-    if (costs.excedentePlacas) otrosConceptos.push({ concepto: 'Excedente Placas', total: costs.excedentePlacas });
-    if (impuestos > 0) otrosConceptos.push({ concepto: 'Impuestos Eléctricos', total: impuestos });
+    const reactivas = getCost('reactivas');
+    const excesosPotencia = getCost('excesosPotencia');
+    const remuneracionComercial = getCost('remuneracionComercial');
+    const ajusteAdenda = getCost('ajusteAdenda');
+    const excedentePlacas = getCost('excedentePlacas');
     
-    // Build consumption array (P1-P6)
+    if (reactivas > 0) otrosConceptos.push({ concepto: 'Energía Reactiva', total: reactivas });
+    if (excesosPotencia > 0) otrosConceptos.push({ concepto: 'Excesos de Potencia', total: excesosPotencia });
+    if (remuneracionComercial > 0) otrosConceptos.push({ concepto: 'Remuneración Comercial', total: remuneracionComercial });
+    if (ajusteAdenda > 0) otrosConceptos.push({ concepto: 'Ajuste Adenda', total: ajusteAdenda });
+    if (excedentePlacas > 0) otrosConceptos.push({ concepto: 'Excedente Placas', total: excedentePlacas });
+    if (totalImpuestos > 0) otrosConceptos.push({ concepto: 'Impuestos Eléctricos', total: totalImpuestos });
+    
+    // Add any unmapped custom OCs from this month
+    const customOCsData = costs._customOCs as Record<string, number> | undefined;
+    if (customOCsData) {
+      for (const [conceptName, value] of Object.entries(customOCsData)) {
+        if (value > 0 && !conceptName.toLowerCase().includes('total')) {
+          otrosConceptos.push({ concepto: conceptName, total: value });
+        }
+      }
+    }
+    
+    // Calculate total consumption from P1-P6 values
+    let totalKwh = 0;
+    for (let p = 1; p <= 6; p++) {
+      totalKwh += consumption[`P${p}`] || 0;
+    }
+    
+    // Build consumption array (P1-P6) with proper pricing
     const consumo: ExtractedBill['consumo'] = [];
     for (let p = 1; p <= 6; p++) {
       const periodKey = `P${p}`;
       const kwh = consumption[periodKey] || 0;
-      if (kwh > 0 || consumption[periodKey] !== undefined) {
-        const precioUnitario = costeEnergia > 0 && (consumption.TOTAL || 0) > 0 
-          ? costeEnergia / (consumption.TOTAL || 1) 
-          : 0;
+      
+      // Determine price: use explicit price if available, otherwise derive from total
+      let precioKwh = prices[periodKey] || 0;
+      
+      if (kwh > 0 && precioKwh === 0 && costeEnergia > 0 && totalKwh > 0) {
+        // Derive average price: costeEnergia / totalKwh
+        precioKwh = costeEnergia / totalKwh;
+      }
+      
+      if (kwh > 0 || precioKwh > 0) {
         consumo.push({
           periodo: periodKey,
           kwh,
-          precioKwh: precioUnitario,
-          total: kwh * precioUnitario
+          precioKwh,
+          total: kwh * precioKwh
         });
       }
     }
     
-    // Total consumption
-    const totalKwh = consumption.TOTAL || Object.values(consumption).reduce((a, b) => a + b, 0) || 0;
+    // Total factura - use explicit total if available, otherwise sum all components
+    let totalFactura = getCost('totalFactura');
+    if (totalFactura === 0) {
+      // Sum all cost components
+      totalFactura = costeEnergia + costePotencia + totalImpuestos + 
+        otrosConceptos.reduce((sum, oc) => sum + oc.total, 0);
+    }
     
-    // Total factura
-    const totalFactura = costs.totalFactura || (costeEnergia + costePotencia + impuestos + 
-      otrosConceptos.reduce((sum, oc) => sum + oc.total, 0));
+    // Calculate proper average price per kWh
+    const avgPricePerKwh = totalKwh > 0 ? costeEnergia / totalKwh : 0;
+    
+    // Calculate dates correctly
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const fechaInicio = `${year}-${String(month + 1).padStart(2, '0')}-01`;
+    const fechaFin = `${year}-${String(month + 1).padStart(2, '0')}-${String(daysInMonth).padStart(2, '0')}`;
     
     const bill: ExtractedBill = {
       id: billId,
       fileName: `Mes_${String(month + 1).padStart(2, '0')}_${year}.xlsx`,
       status: 'success',
-      fechaInicio: `${year}-${String(month + 1).padStart(2, '0')}-01`,
-      fechaFin: `${year}-${String(month + 1).padStart(2, '0')}-28`,
+      comercializadora: metadata.company,
+      titular: metadata.titular,
+      cups: metadata.cups,
+      tarifa: metadata.tariff,
+      fechaInicio,
+      fechaFin,
       consumo,
       potencia: [],
       otrosConceptos,
       consumoTotalKwh: totalKwh,
       costeTotalConsumo: costeEnergia,
       costeTotalPotencia: costePotencia,
+      costeMedioKwh: avgPricePerKwh,
       totalFactura,
     };
     
     bills.push(bill);
     customOCs[billId] = otrosConceptos;
+    
+    // Log warnings for debugging
+    if (costeEnergia === 0 && totalKwh > 0) {
+      warnings.push(`Mes ${monthHeader}: Energía sin coste definido`);
+    }
+    if (totalKwh === 0 && costeEnergia > 0) {
+      warnings.push(`Mes ${monthHeader}: Consumo sin datos`);
+    }
   }
   
   // Sort bills by date
@@ -530,6 +681,10 @@ function importMonthlyMatrixFormat(
     const dateB = b.fechaFin || '';
     return dateA.localeCompare(dateB);
   });
+  
+  // Add metadata warnings
+  if (!metadata.company) warnings.push('Compañía no detectada en el workbook');
+  if (!metadata.tariff) warnings.push('Tarifa no detectada en el workbook');
   
   return {
     bills,
