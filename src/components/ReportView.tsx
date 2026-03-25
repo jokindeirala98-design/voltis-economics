@@ -438,6 +438,7 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
             <button onClick={onBack} className="back-btn" title="Volver">
               <ArrowLeft className="w-5 h-5" />
             </button>
+            <span className="text-[8px] text-white/20 uppercase tracking-widest px-2 py-1 border border-white/10 rounded-md">V-SYNC-AUDIT-01</span>
             
             {/* iOS Segmented Control - Centered */}
             <div className="segment-control">
