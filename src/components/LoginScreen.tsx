@@ -41,8 +41,17 @@ export default function LoginScreen({ onLogin, error }: LoginScreenProps) {
             transition={{ delay: 0.2, duration: 0.8 }}
             className="flex items-center justify-center gap-2 mb-6"
           >
-            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center shadow-xl shadow-blue-500/20">
-              <Zap className="w-6 h-6 text-white fill-white" />
+            <div className="flex flex-col items-center">
+              <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center shadow-xl shadow-blue-500/20">
+                <Zap className="w-6 h-6 text-white fill-white" />
+              </div>
+              <motion.span 
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                className="mt-2 text-[10px] font-mono font-bold tracking-[0.3em] text-blue-400/80 uppercase"
+              >
+                System V2.5.2 • Gemini PRO
+              </motion.span>
             </div>
             <span className="text-2xl font-black tracking-tighter uppercase italic">Voltis</span>
           </motion.div>
