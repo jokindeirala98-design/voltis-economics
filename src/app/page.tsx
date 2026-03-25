@@ -14,6 +14,7 @@ import { ExtractedBill, ProjectWorkspace, QueueItem } from '@/lib/types';
 import FileTable from '@/components/FileTable';
 import { exportBillsToExcel } from '@/lib/export';
 import { importBillsFromExcel } from '@/lib/import-bills';
+import { importFlexibleExcel, FlexibleImportResult } from '@/lib/import-flexible';
 import { 
   exportBillsToCorrectionExcel, 
   parseCorrectionExcel, 
@@ -421,12 +422,49 @@ function EnergyBillsAppContent() {
     const excelFiles = acceptedFiles.filter(f => f.name.endsWith('.xlsx'));
     if (excelFiles.length > 0) {
       const file = excelFiles[0];
-      const result = await importBillsFromExcel(file);
-      if (result) {
-        setAllBills(prev => ({ ...prev, [targetProjectId]: result.bills }));
-        setAllCustomOCs(prev => ({ ...prev, [targetProjectId]: result.customOCs }));
-        saveToDisk(result.bills, result.customOCs, targetProjectId);
-        toast.success('Proyecto sincronizado desde Excel');
+      
+      // Use flexible import for better detection
+      try {
+        const result = await importFlexibleExcel(file);
+        
+        if (result.imported === 0) {
+          toast.error('No se detectaron facturas en el archivo Excel');
+          if (result.warnings.length > 0) {
+            console.warn('Import warnings:', result.warnings);
+          }
+          return;
+        }
+        
+        // Merge with existing bills (avoid duplicates)
+        const existingBills = allBills[targetProjectId] || [];
+        const newBills = result.bills.filter(newBill => {
+          return !existingBills.some(existing => 
+            existing.cups === newBill.cups && 
+            existing.fechaFin === newBill.fechaFin
+          );
+        });
+        
+        const mergedBills = [...existingBills, ...newBills].sort((a, b) => {
+          const am = getAssignedMonth(a.fechaInicio, a.fechaFin);
+          const bm = getAssignedMonth(b.fechaInicio, b.fechaFin);
+          if (am.year !== bm.year) return am.year - bm.year;
+          return am.month - bm.month;
+        });
+        
+        setAllBills(prev => ({ ...prev, [targetProjectId]: mergedBills }));
+        setAllCustomOCs(prev => ({ ...prev, [targetProjectId]: result.customOCs || {} }));
+        saveToDisk(mergedBills, result.customOCs || {}, targetProjectId);
+        
+        // Show result summary
+        const message = `${result.imported} factura${result.imported > 1 ? 's' : ''} importada${result.imported > 1 ? 's' : ''} de Excel`;
+        toast.success(message);
+        
+        if (result.warnings.length > 0) {
+          toast.warning(`${result.warnings.length} advertencia${result.warnings.length > 1 ? 's' : ''} durante la importación`);
+        }
+        
+      } catch (err: any) {
+        toast.error('Error al importar Excel: ' + err.message);
       }
       return;
     }

@@ -85,12 +85,32 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
   const contentRef = useRef<HTMLDivElement>(null);
   const [selectedBillId, setSelectedBillId] = useState<string | null>(null); // For matrix 3
   const [selectedPriceBillId, setSelectedPriceBillId] = useState<string | null>(null); // For matrix 2
-  const [selectedQuarter, setSelectedQuarter] = useState<number>(0);
+  const [selectedMonths, setSelectedMonths] = useState<Set<number>>(new Set([0,1,2,3,4,5,6,7,8,9,10,11])); // All months selected by default
   const [email, setEmail] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [isSent, setIsSent] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [revealedIds, setRevealedIds] = useState<Set<string>>(new Set());
+
+  const MONTH_LABELS = ['1','2','3','4','5','6','7','8','9','10','11','12'];
+  
+  const isAnnual = selectedMonths.size === 12;
+  
+  const toggleMonth = (monthIdx: number) => {
+    setSelectedMonths(prev => {
+      const next = new Set(prev);
+      if (next.has(monthIdx)) {
+        next.delete(monthIdx);
+      } else {
+        next.add(monthIdx);
+      }
+      return next;
+    });
+  };
+  
+  const selectAllMonths = () => {
+    setSelectedMonths(new Set([0,1,2,3,4,5,6,7,8,9,10,11]));
+  };
 
   const getMonthYear = (dateStr?: string) => {
     if (!dateStr) return 'S/D';
@@ -275,7 +295,7 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
       });
     }, containerRef);
     return () => ctx.revert();
-  }, [selectedQuarter]);
+  }, []);
 
   useEffect(() => {
     // Small timeout to ensure everything is rendered and measured
@@ -313,18 +333,14 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
   }, [filteredValidBills]);
 
   const { chartData, pieData, summaryStats, tableData } = useMemo(() => {
-    const billsForQuarter = filteredValidBills.filter(b => {
+    const billsForSelectedMonths = filteredValidBills.filter(b => {
       const { month: monthIdx } = getAssignedMonth(b.fechaInicio, b.fechaFin);
-      const m1Idx = monthIdx + 1; // 1-indexed for logic below
-      return selectedQuarter === 1 ? (m1Idx >= 1 && m1Idx <= 3) :
-             selectedQuarter === 2 ? (m1Idx >= 4 && m1Idx <= 6) :
-             selectedQuarter === 3 ? (m1Idx >= 7 && m1Idx <= 9) :
-             selectedQuarter === 4 ? (m1Idx >= 10 && m1Idx <= 12) : true;
+      return selectedMonths.has(monthIdx);
     });
 
     // CANONICAL 12-MONTH CHART DATA
     // Always returns exactly 12 entries, one per month
-    const cData = getMonthlyAggregatedData(billsForQuarter, customOCs);
+    const cData = getMonthlyAggregatedData(billsForSelectedMonths, customOCs);
 
     // Calculate totals from chart data
     const totals = {
@@ -337,7 +353,7 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
     };
 
     // Keep the tableData as individual bills for the detailed matrix
-    const tData = billsForQuarter.map(b => {
+    const tData = billsForSelectedMonths.map(b => {
       const energia = b.costeTotalConsumo || 0;
       const potencia = b.costeTotalPotencia || 0;
       let imp = 0, others = 0;
@@ -384,7 +400,7 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
       { name: 'Otros Conceptos', value: totals.others, color: '#f59e0b' }
     ].filter(i => i.value > 0);
     return { chartData: cData, pieData: pData, summaryStats: totals, tableData: tData };
-  }, [filteredValidBills, customOCs, selectedQuarter]);
+  }, [filteredValidBills, customOCs, selectedMonths]);
 
 
 
@@ -443,15 +459,30 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
             </button>
             <span className="text-[8px] text-white/20 uppercase tracking-widest px-2 py-1 border border-white/10 rounded-md">V-SYNC-AUDIT-01</span>
             
-            {/* iOS Segmented Control - Centered */}
-            <div className="segment-control">
-              {[0, 1, 2, 3, 4].map(q => (
+            {/* Month Selector - Individual month toggles */}
+            <div className="flex items-center gap-1">
+              <button 
+                onClick={selectAllMonths}
+                className={`px-3 py-2 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all ${
+                  isAnnual 
+                    ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/30' 
+                    : 'bg-white/5 text-white/50 hover:bg-white/10 hover:text-white'
+                }`}
+              >
+                ANUAL
+              </button>
+              <div className="w-px h-6 bg-white/10 mx-1" />
+              {MONTH_LABELS.map((label, idx) => (
                 <button 
-                  key={q} 
-                  onClick={() => setSelectedQuarter(q)}
-                  className={`segment-btn ${selectedQuarter === q ? 'active' : ''}`}
+                  key={idx}
+                  onClick={() => toggleMonth(idx)}
+                  className={`w-8 h-8 rounded-lg text-[10px] font-black transition-all ${
+                    selectedMonths.has(idx)
+                      ? 'bg-blue-600/80 text-white' 
+                      : 'bg-white/5 text-white/40 hover:bg-white/10 hover:text-white/60'
+                  }`}
                 >
-                  {q === 0 ? 'ANUAL' : `Q${q}`}
+                  {label}
                 </button>
               ))}
             </div>
@@ -465,7 +496,7 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
         {!hasData ? (
           <div className="min-h-screen flex flex-col items-center justify-center p-12 text-center space-y-6">
             <AlertTriangle className="w-16 h-16 text-amber-500 animate-pulse" />
-            <h3 className="text-4xl font-black uppercase tracking-tighter">Sin datos en {selectedQuarter === 0 ? 'este proyecto' : `Q${selectedQuarter}`}</h3>
+            <h3 className="text-4xl font-black uppercase tracking-tighter">Sin datos{isAnnual ? '' : ` (${selectedMonths.size} mes${selectedMonths.size !== 1 ? 'es' : ''})`}</h3>
             <p className="text-slate-500 max-w-md mx-auto">Sube una factura o cambia el filtro.</p>
           </div>
         ) : (
@@ -477,7 +508,7 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
               <GlowOrb className="-bottom-20 -right-20 opacity-30 parallax-bg" size="xl" />
               
               <div className="max-w-5xl w-full flex flex-col items-center text-center relative z-10">
-                <HeroTitle subtitle={selectedQuarter === 0 ? 'ANUAL' : `Q${selectedQuarter} EVOLUTION`}>
+                <HeroTitle subtitle={isAnnual ? 'ANUAL' : `${selectedMonths.size} MESES`}>
                   VOLTIS
                 </HeroTitle>
                 
@@ -505,9 +536,9 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
                   <div className="mb-12 flex items-end justify-between border-b border-white/5 pb-8">
                     <div className="space-y-3">
                       <span className="text-[10px] font-black uppercase tracking-[0.5em] text-blue-500">Métricas Auditadas</span>
-                      <h3 className="text-6xl font-black tracking-tighter uppercase">Resultados {selectedQuarter === 0 ? 'Anuales' : `Q${selectedQuarter}`}</h3>
+                      <h3 className="text-6xl font-black tracking-tighter uppercase">Resultados {isAnnual ? 'Anuales' : 'Personalizados'}</h3>
                     </div>
-                    <div className="text-[10px] font-black text-slate-600 uppercase tracking-widest mb-2">v4.6 Certified Analysis</div>
+                    <div className="text-[10px] font-black text-slate-600 uppercase tracking-widest mb-2">v5.0 Certified Analysis</div>
                   </div>
                   <div className="grid grid-cols-2 lg:grid-cols-4 gap-6">
                     {[
