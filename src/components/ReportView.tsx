@@ -421,9 +421,9 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
 
   return (
     <>
-      <div 
+        <div 
         ref={containerRef} 
-        className={`relative w-full bg-[#020617] text-white selection:bg-blue-500/30 scroll-smooth ${isExportMode ? 'is-exporting' : ''} ${(isPreviewMode || isExportMode) ? 'overflow-y-visible h-auto' : 'overflow-y-auto h-screen'}`}
+        className={`relative w-full bg-[#020617] text-white selection:bg-blue-500/30 scroll-smooth ${isExportMode ? 'is-exporting' : ''} ${(isPreviewMode || isExportMode) ? 'overflow-y-visible' : ''}`}
         data-report-ready={isExportMode ? (isReportReady ? "true" : "false") : undefined}
       >
         <div className="fixed inset-0 pointer-events-none z-0 no-print">
@@ -453,9 +453,8 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
             </div>
           </div>
           
-          <div className="flex items-center gap-3 invisible">
-            {/* Removed top buttons as per request */}
-          </div>
+          {/* Top-right buttons removed to keep focus on the final call-to-action */}
+
         </div>
 
       <div ref={contentRef} className={`relative z-10 report-container ${isPreviewMode || isExportMode ? 'preview-mode' : ''}`}>
@@ -545,7 +544,7 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
                         <ResponsiveContainer width="100%" height={330}>
                           <BarChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
                             <CartesianGrid strokeDasharray="5 5" stroke="rgba(255,255,255,0.03)" vertical={false} />
-                            <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: 'rgba(255,255,255,0.2)', fontSize: 9, fontWeight: 900 }} dy={10} interval={0} />
+                            <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: 'rgba(255,255,255,0.3)', fontSize: 11, fontWeight: 900 }} dy={15} interval={0} angle={-35} textAnchor="end" height={80} />
                             <YAxis axisLine={false} tickLine={false} tick={{ fill: 'rgba(255,255,255,0.2)', fontSize: 9, fontWeight: 900 }} />
                             <RechartsTooltip content={<CustomBarTooltip />} cursor={{ fill: 'rgba(59, 130, 246, 0.05)' }} />
                             <Bar dataKey="totalFactura" fill="url(#blueGrad)" radius={[10, 10, 0, 0]} barSize={30} minPointSize={4}>
@@ -564,7 +563,7 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
                       ) : (
                         <BarChart width={750} height={330} data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
                           <CartesianGrid strokeDasharray="5 5" stroke="rgba(255,255,255,0.03)" vertical={false} />
-                          <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: 'rgba(255,255,255,0.2)', fontSize: 9, fontWeight: 900 }} dy={10} interval={0} />
+                          <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: 'rgba(255,255,255,0.3)', fontSize: 11, fontWeight: 900 }} dy={15} interval={0} angle={-35} textAnchor="end" height={80} />
                           <YAxis axisLine={false} tickLine={false} tick={{ fill: 'rgba(255,255,255,0.2)', fontSize: 9, fontWeight: 900 }} />
                           <Bar dataKey="totalFactura" fill="#3b82f6" radius={[10, 10, 0, 0]} barSize={30} isAnimationActive={false}>
                             {chartData.map((entry: any, index: number) => (

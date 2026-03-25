@@ -635,22 +635,8 @@ function EnergyBillsAppContent() {
     exportBillsToExcel(bills, concepts, getVal);
   };
 
-  if (showReport) {
-    const activeProject = savedProjects.find(p => p.id === currentProjectId);
-    const projectName = activeProject?.name || 'PROYECTO';
-    return (
-      <div className="min-h-screen bg-[#020617] p-8 md:p-16">
-        <ReportView 
-          bills={bills} 
-          customOCs={customOCs} 
-          onBack={() => setShowReport(false)} 
-          projectName={projectName}
-          projectId={currentProjectId}
-          onPreviewBill={(id) => setPreviewBillId(id)}
-        />
-      </div>
-    );
-  }
+  // Early return for showReport removed to allow embedded layout with sidebar.
+
 
 
   return (
@@ -776,222 +762,233 @@ function EnergyBillsAppContent() {
         <div className="absolute top-[-20%] left-[-10%] w-[60%] h-[60%] bg-blue-600/5 rounded-full blur-[140px] pointer-events-none" />
         <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-purple-600/5 rounded-full blur-[120px] pointer-events-none" />
 
-        <div className="px-8 md:px-16 py-12 flex flex-col gap-10 max-w-7xl mx-auto w-full relative z-10">
-          
-          <header className="flex flex-col md:flex-row items-end justify-between gap-8">
-            <div className="flex flex-col gap-3">
-              <div className="flex items-center gap-3 mb-2">
-                 <div className={`w-2 h-2 rounded-full ${
-                  cloudSyncStatus === 'synced' ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' :
-                  cloudSyncStatus === 'syncing' ? 'bg-blue-500 animate-pulse' :
-                  cloudSyncStatus === 'error' ? 'bg-red-500' : 'bg-slate-500'
-                }`} />
-                <span className="text-[10px] font-black tracking-[0.2em] text-white/40 uppercase">
-                  {cloudSyncStatus === 'synced' ? 'Cloud Synced' :
-                   cloudSyncStatus === 'syncing' ? 'Syncing...' :
-                   cloudSyncStatus === 'error' ? 'Cloud Error' : 'Offline Mode'}
-                </span>
-              </div>
-              <h1 className="text-5xl font-black tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-white via-white to-blue-500 leading-none py-2">
-                VOLTIS ANUAL <br/> ECONOMICS
-              </h1>
-              <div className="flex items-center gap-3">
-                 <div className="h-1 w-12 bg-blue-500 rounded-full" />
-                 <span className="text-sm font-bold text-blue-400 tracking-[0.3em] uppercase opacity-80 flex items-center gap-3">
-                   {savedProjects.find(p => p.id === currentProjectId)?.name}
-                   <button 
-                     onClick={clearProjectBills}
-                     className="p-1 hover:bg-white/10 rounded-md transition-colors text-slate-500 hover:text-red-400"
-                     title="Vaciar todas las facturas de este proyecto"
-                   >
-                     <Trash2 className="w-4 h-4" />
-                   </button>
-                 </span>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-4 no-print">
-              <button 
-                onClick={() => setShowReport(true)}
-                disabled={bills.length === 0}
-                className="group relative px-8 py-4 bg-white text-black font-black text-xs uppercase tracking-widest rounded-full hover:scale-105 transition-all disabled:opacity-20 flex items-center gap-3 overflow-hidden"
-              >
-                <div className="absolute inset-0 bg-gradient-to-r from-blue-500 to-indigo-500 opacity-0 group-hover:opacity-10 transition-opacity" />
-                <Sparkles className="w-4 h-4 text-blue-500" />
-                Informe Visual IA
-              </button>
-              <button 
-                onClick={handleExport}
-                disabled={bills.length === 0}
-                className="px-8 py-4 bg-slate-900 border border-white/10 text-white font-black text-xs uppercase tracking-widest rounded-full hover:bg-slate-800 transition-all disabled:opacity-20 flex items-center gap-3"
-              >
-                <Download className="w-4 h-4 text-emerald-400" />
-                Exportar Excel
-              </button>
-            </div>
-          </header>
-
-          {/* FUTURISTIC SCANNER DROPZONE */}
-          <div 
-            {...getRootProps()} 
-            className={`
-              relative group cursor-pointer transition-all duration-500
-              ${isDragActive ? 'scale-[1.02]' : 'hover:scale-[1.01]'}
-            `}
-          >
-            <input {...getInputProps()} />
-            <div className={`
-              glass-card p-14 rounded-[40px] border border-white/5 text-center flex flex-col items-center gap-6 overflow-hidden scanner-glow
-              ${isDragActive ? 'border-blue-500/50 bg-blue-500/5' : 'hover:border-white/10'}
-            `}>
-              <div className="w-20 h-20 rounded-3xl bg-blue-600/10 flex items-center justify-center group-hover:scale-110 transition-transform duration-500 mb-2">
-                 {isExtracting ? (
-                   <Loader className="w-10 h-10 text-blue-400 animate-spin" />
-                 ) : (
-                   <Upload className={`w-10 h-10 transition-colors ${isDragActive ? 'text-blue-400' : 'text-slate-400'}`} />
-                 )}
-              </div>
-              <div className="flex flex-col gap-2">
-                 <h3 className="text-xl font-black text-white tracking-tight">ARRASTRA TUS FACTURAS</h3>
-                 <p className="text-slate-500 text-sm font-medium tracking-wide">Compatible con PDF y Excel sincronizado</p>
-              </div>
-            </div>
-          </div>
-          
-          {/* EXTRACTION QUEUE UI */}
-          <AnimatePresence>
-            {extractionQueue.length > 0 && (
-              <motion.div 
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: 'auto' }}
-                exit={{ opacity: 0, height: 0 }}
-                className="flex flex-col gap-4"
-              >
-                <div className="flex items-center justify-between">
-                   <h3 className="text-[11px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
-                     <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" /> Cola de Procesamiento
-                   </h3>
-                   <button 
-                    onClick={() => {
-                      setAllExtractionQueues(prev => ({ ...prev, [currentProjectId]: [] }));
-                    }}
-                    className="text-[10px] font-bold text-slate-500 hover:text-white transition-colors uppercase tracking-widest"
-                   >
-                     Limpiar Cola
-                   </button>
+        {showReport ? (
+          <ReportView 
+            bills={bills} 
+            customOCs={customOCs} 
+            onBack={() => setShowReport(false)} 
+            projectName={savedProjects.find(p => p.id === currentProjectId)?.name || 'PROYECTO'}
+            projectId={currentProjectId}
+            onPreviewBill={(id) => setPreviewBillId(id)}
+          />
+        ) : (
+          <div className="px-8 md:px-16 py-12 flex flex-col gap-10 max-w-7xl mx-auto w-full relative z-10">
+            
+            <header className="flex flex-col md:flex-row items-end justify-between gap-8">
+              <div className="flex flex-col gap-3">
+                <div className="flex items-center gap-3 mb-2">
+                   <div className={`w-2 h-2 rounded-full ${
+                    cloudSyncStatus === 'synced' ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' :
+                    cloudSyncStatus === 'syncing' ? 'bg-blue-500 animate-pulse' :
+                    cloudSyncStatus === 'error' ? 'bg-red-500' : 'bg-slate-500'
+                  }`} />
+                  <span className="text-[10px] font-black tracking-[0.2em] text-white/40 uppercase">
+                    {cloudSyncStatus === 'synced' ? 'Cloud Synced' :
+                     cloudSyncStatus === 'syncing' ? 'Syncing...' :
+                     cloudSyncStatus === 'error' ? 'Cloud Error' : 'Offline Mode'}
+                  </span>
                 </div>
-                
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                  {extractionQueue.map((item) => (
-                    <motion.div 
-                      key={item.id}
-                      layout
-                      initial={{ opacity: 0, scale: 0.9 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      className={`glass p-4 rounded-2xl border flex items-center justify-between transition-all ${
-                        item.status === 'loading' ? 'border-blue-500/20 bg-blue-500/5' :
-                        item.status === 'success' ? 'border-emerald-500/20 bg-emerald-500/5' :
-                        'border-red-500/20 bg-red-500/5'
-                      }`}
-                    >
-                      <div className="flex items-center gap-3 overflow-hidden">
-                        <div className={`p-2 rounded-lg ${
-                          item.status === 'loading' ? 'bg-blue-500/10 text-blue-400' :
-                          item.status === 'success' ? 'bg-emerald-500/10 text-emerald-400' :
-                          'bg-red-500/10 text-red-400'
-                        }`}>
-                          {item.status === 'loading' ? <Loader className="w-4 h-4 animate-spin" /> :
-                           item.status === 'success' ? <CheckCircle className="w-4 h-4" /> :
-                           <X className="w-4 h-4" />}
+                <h1 className="text-5xl font-black tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-white via-white to-blue-500 leading-none py-2">
+                  VOLTIS ANUAL <br/> ECONOMICS
+                </h1>
+                <div className="flex items-center gap-3">
+                   <div className="h-1 w-12 bg-blue-500 rounded-full" />
+                   <span className="text-sm font-bold text-blue-400 tracking-[0.3em] uppercase opacity-80 flex items-center gap-3">
+                     {savedProjects.find(p => p.id === currentProjectId)?.name}
+                     <button 
+                       onClick={clearProjectBills}
+                       className="p-1 hover:bg-white/10 rounded-md transition-colors text-slate-500 hover:text-red-400"
+                       title="Vaciar todas las facturas de este proyecto"
+                     >
+                       <Trash2 className="w-4 h-4" />
+                     </button>
+                   </span>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-4 no-print">
+                <button 
+                  onClick={() => setShowReport(true)}
+                  disabled={bills.length === 0}
+                  className="group relative px-8 py-4 bg-white text-black font-black text-xs uppercase tracking-widest rounded-full hover:scale-105 transition-all disabled:opacity-20 flex items-center gap-3 overflow-hidden"
+                >
+                  <div className="absolute inset-0 bg-gradient-to-r from-blue-500 to-indigo-500 opacity-0 group-hover:opacity-10 transition-opacity" />
+                  <Sparkles className="w-4 h-4 text-blue-500" />
+                  Informe Visual IA
+                </button>
+                <button 
+                  onClick={handleExport}
+                  disabled={bills.length === 0}
+                  className="px-8 py-4 bg-slate-900 border border-white/10 text-white font-black text-xs uppercase tracking-widest rounded-full hover:bg-slate-800 transition-all disabled:opacity-20 flex items-center gap-3"
+                >
+                  <Download className="w-4 h-4 text-emerald-400" />
+                  Exportar Excel
+                </button>
+              </div>
+            </header>
+
+            {/* FUTURISTIC SCANNER DROPZONE */}
+            <div 
+              {...getRootProps()} 
+              className={`
+                relative group cursor-pointer transition-all duration-500
+                ${isDragActive ? 'scale-[1.02]' : 'hover:scale-[1.01]'}
+              `}
+            >
+              <input {...getInputProps()} />
+              <div className={`
+                glass-card p-14 rounded-[40px] border border-white/5 text-center flex flex-col items-center gap-6 overflow-hidden scanner-glow
+                ${isDragActive ? 'border-blue-500/50 bg-blue-500/5' : 'hover:border-white/10'}
+              `}>
+                <div className="w-20 h-20 rounded-3xl bg-blue-600/10 flex items-center justify-center group-hover:scale-110 transition-transform duration-500 mb-2">
+                   {isExtracting ? (
+                     <Loader className="w-10 h-10 text-blue-400 animate-spin" />
+                   ) : (
+                     <Upload className={`w-10 h-10 transition-colors ${isDragActive ? 'text-blue-400' : 'text-slate-400'}`} />
+                   )}
+                </div>
+                <div className="flex flex-col gap-2">
+                   <h3 className="text-xl font-black text-white tracking-tight">ARRASTRA TUS FACTURAS</h3>
+                   <p className="text-slate-500 text-sm font-medium tracking-wide">Compatible con PDF y Excel sincronizado</p>
+                </div>
+              </div>
+            </div>
+            
+            {/* EXTRACTION QUEUE UI */}
+            <AnimatePresence>
+              {extractionQueue.length > 0 && (
+                <motion.div 
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="flex flex-col gap-4"
+                >
+                  <div className="flex items-center justify-between">
+                     <h3 className="text-[11px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
+                       <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" /> Cola de Procesamiento
+                     </h3>
+                     <button 
+                      onClick={() => {
+                        setAllExtractionQueues(prev => ({ ...prev, [currentProjectId]: [] }));
+                      }}
+                      className="text-[10px] font-bold text-slate-500 hover:text-white transition-colors uppercase tracking-widest"
+                     >
+                       Limpiar Cola
+                     </button>
+                  </div>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                    {extractionQueue.map((item) => (
+                      <motion.div 
+                        key={item.id}
+                        layout
+                        initial={{ opacity: 0, scale: 0.9 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        className={`glass p-4 rounded-2xl border flex items-center justify-between transition-all ${
+                          item.status === 'loading' ? 'border-blue-500/20 bg-blue-500/5' :
+                          item.status === 'success' ? 'border-emerald-500/20 bg-emerald-500/5' :
+                          'border-red-500/20 bg-red-500/5'
+                        }`}
+                      >
+                        <div className="flex items-center gap-3 overflow-hidden">
+                          <div className={`p-2 rounded-lg ${
+                            item.status === 'loading' ? 'bg-blue-500/10 text-blue-400' :
+                            item.status === 'success' ? 'bg-emerald-500/10 text-emerald-400' :
+                            'bg-red-500/10 text-red-400'
+                          }`}>
+                            {item.status === 'loading' ? <Loader className="w-4 h-4 animate-spin" /> :
+                             item.status === 'success' ? <CheckCircle className="w-4 h-4" /> :
+                             <X className="w-4 h-4" />}
+                          </div>
+                          <div className="flex flex-col overflow-hidden">
+                            <span className="text-xs font-bold text-white truncate">{item.fileName}</span>
+                            {item.error && <span className="text-[10px] text-red-400 font-medium truncate">{item.error}</span>}
+                            {item.status === 'success' && <span className="text-[10px] text-emerald-400 font-medium">Extraída correctamente</span>}
+                            {item.status === 'loading' && <span className="text-[10px] text-blue-400 font-medium animate-pulse">Analizando con Voltis AI...</span>}
+                          </div>
                         </div>
-                        <div className="flex flex-col overflow-hidden">
-                          <span className="text-xs font-bold text-white truncate">{item.fileName}</span>
-                          {item.error && <span className="text-[10px] text-red-400 font-medium truncate">{item.error}</span>}
-                          {item.status === 'success' && <span className="text-[10px] text-emerald-400 font-medium">Extraída correctamente</span>}
-                          {item.status === 'loading' && <span className="text-[10px] text-blue-400 font-medium animate-pulse">Analizando con Voltis AI...</span>}
-                        </div>
-                      </div>
-                      
-                      <div className="flex items-center gap-2">
-                        {item.status === 'error' && fileRefs[item.id] && (
-                          <button 
-                            onClick={() => {
-                              setAllExtractionQueues(prev => ({
-                                ...prev,
-                                [currentProjectId]: (prev[currentProjectId] || []).map(q => 
-                                  q.id === item.id ? { ...q, status: 'loading' as const, error: undefined } : q
-                                )
-                              }));
-                              processFile(fileRefs[item.id], item.id, currentProjectId);
-                            }}
-                            className="px-3 py-1 bg-blue-600/20 text-blue-400 text-[10px] font-bold rounded-lg border border-blue-500/30 hover:bg-blue-600/40 transition-all uppercase tracking-tighter"
-                          >
-                            Reintentar
-                          </button>
-                        )}
-                        {item.status !== 'loading' && (
-                          <button 
-                            onClick={() => {
-                              if (item.status === 'success') {
-                                const linked = bills.find(b => b.fileName === item.fileName);
-                                if (linked) { 
-                                  const nb = bills.filter(b => b.id !== linked.id); 
-                                  setAllBills(prev => ({ ...prev, [currentProjectId]: nb }));
-                                  saveToDisk(nb, customOCs, currentProjectId); 
+                        
+                        <div className="flex items-center gap-2">
+                          {item.status === 'error' && fileRefs[item.id] && (
+                            <button 
+                              onClick={() => {
+                                setAllExtractionQueues(prev => ({
+                                  ...prev,
+                                  [currentProjectId]: (prev[currentProjectId] || []).map(q => 
+                                    q.id === item.id ? { ...q, status: 'loading' as const, error: undefined } : q
+                                  )
+                                }));
+                                processFile(fileRefs[item.id], item.id, currentProjectId);
+                              }}
+                              className="px-3 py-1 bg-blue-600/20 text-blue-400 text-[10px] font-bold rounded-lg border border-blue-500/30 hover:bg-blue-600/40 transition-all uppercase tracking-tighter"
+                            >
+                              Reintentar
+                            </button>
+                          )}
+                          {item.status !== 'loading' && (
+                            <button 
+                              onClick={() => {
+                                if (item.status === 'success') {
+                                  const linked = bills.find(b => b.fileName === item.fileName);
+                                  if (linked) { 
+                                    const nb = bills.filter(b => b.id !== linked.id); 
+                                    setAllBills(prev => ({ ...prev, [currentProjectId]: nb }));
+                                    saveToDisk(nb, customOCs, currentProjectId); 
+                                  }
                                 }
-                              }
-                              setAllExtractionQueues(prev => ({
-                                ...prev,
-                                [currentProjectId]: (prev[currentProjectId] || []).filter(q => q.id !== item.id)
-                              }));
-                            }}
-                            className="p-1 hover:bg-white/10 rounded-md text-slate-500 transition-colors"
-                          >
-                            <X className="w-3 h-3" />
-                          </button>
-                        )}
-                      </div>
-                    </motion.div>
-                  ))}
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
+                                setAllExtractionQueues(prev => ({
+                                  ...prev,
+                                  [currentProjectId]: (prev[currentProjectId] || []).filter(q => q.id !== item.id)
+                                }));
+                              }}
+                              className="p-1 hover:bg-white/10 rounded-md text-slate-500 transition-colors"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          )}
+                        </div>
+                      </motion.div>
+                    ))}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
 
-          <AnimatePresence>
-            {bills.length > 0 && (
-              <motion.div 
-                initial={{ opacity: 0, y: 30 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="flex flex-col gap-6 mb-20"
-              >
-                <div className="flex items-center justify-between border-b border-white/5 pb-6">
-                   <h2 className="text-2xl font-black tracking-tight flex items-center gap-4">
-                     DATOS EXTRAÍDOS <span className="bg-white/5 text-blue-400 text-sm px-4 py-1 rounded-full">{bills.length}</span>
-                   </h2>
-                   <div className="text-[10px] items-center gap-6 text-slate-500 font-bold tracking-widest hidden md:flex">
-                      <span className="flex items-center gap-2"><CheckCircle className="w-3 h-3 text-emerald-500" /> AI VERIFIED</span>
-                      <span className="flex items-center gap-2"><Smartphone className="w-3 h-3 text-blue-500" /> MOBILE SYNC</span>
-                   </div>
-                </div>
+            <AnimatePresence>
+              {bills.length > 0 && (
+                <motion.div 
+                  initial={{ opacity: 0, y: 30 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="flex flex-col gap-6 mb-20"
+                >
+                  <div className="flex items-center justify-between border-b border-white/5 pb-6">
+                     <h2 className="text-2xl font-black tracking-tight flex items-center gap-4">
+                       DATOS EXTRAÍDOS <span className="bg-white/5 text-blue-400 text-sm px-4 py-1 rounded-full">{bills.length}</span>
+                     </h2>
+                     <div className="text-[10px] items-center gap-6 text-slate-500 font-bold tracking-widest hidden md:flex">
+                        <span className="flex items-center gap-2"><CheckCircle className="w-3 h-3 text-emerald-500" /> AI VERIFIED</span>
+                        <span className="flex items-center gap-2"><Smartphone className="w-3 h-3 text-blue-500" /> MOBILE SYNC</span>
+                     </div>
+                  </div>
 
-                <div className="glass-card rounded-[40px] border border-white/5 overflow-hidden shadow-3xl">
-                  <FileTable 
-                    bills={bills} 
-                    onUpdateBills={handleUpdateBills} 
-                    onUpdateOCs={handleUpdateOCs}
-                    customOCs={customOCs}
-                    onRefine={(bill) => {
-                      setRefiningBill(bill);
-                      setRefineInstruction('');
-                    }}
-                  />
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
+                  <div className="glass-card rounded-[40px] border border-white/5 overflow-hidden shadow-3xl">
+                    <FileTable 
+                      bills={bills} 
+                      onUpdateBills={handleUpdateBills} 
+                      onUpdateOCs={handleUpdateOCs}
+                      customOCs={customOCs}
+                      onRefine={(bill) => {
+                        setRefiningBill(bill);
+                        setRefineInstruction('');
+                      }}
+                    />
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
 
-        </div>
+          </div>
+        )}
       </main>
 
       {/* DIAGNOSTIC MODAL */}
