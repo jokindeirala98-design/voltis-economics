@@ -669,7 +669,7 @@ function EnergyBillsAppContent() {
 
   if (showReport) {
     return (
-      <div className="h-screen bg-[#020617] overflow-hidden">
+      <div className="fixed inset-0 z-[60] bg-[#020617] overflow-hidden">
         <ReportView 
           bills={bills} 
           customOCs={customOCs} 

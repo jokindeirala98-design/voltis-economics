@@ -13,7 +13,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import gsap from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
 import { toast } from 'sonner';
-import { getAssignedMonth } from '@/lib/date-utils';
+import { getAssignedMonth, parseSpanishDate } from '@/lib/date-utils';
 import { MascotaHero } from './MascotaHero';
 import { HeroTitle } from './HeroTitle';
 
@@ -95,7 +95,8 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
   const getMonthYear = (dateStr?: string) => {
     if (!dateStr) return 'S/D';
     try {
-      const date = new Date(dateStr);
+      const date = parseSpanishDate(dateStr);
+      if (!date) return 'S/D';
       return date.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' }).toUpperCase();
     } catch (e) {
       return 'S/D';
@@ -208,7 +209,13 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
       // Hero: smooth parallax on scroll-out
       gsap.to('.hero-content', {
         scale: 0.92, opacity: 0.15, y: -60,
-        scrollTrigger: { trigger: '#scene-1', start: 'top top', end: 'bottom 30%', scrub: 1.5 }
+        scrollTrigger: { 
+          trigger: '#scene-1', 
+          start: 'top top', 
+          end: 'bottom 30%', 
+          scrub: 1.5,
+          scroller: containerRef.current 
+        }
       });
 
       // Scene entrances
@@ -217,7 +224,12 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
           { y: 70, opacity: 0, transformPerspective: 900, rotationX: 8, scale: 0.98 },
           { y: 0, opacity: 1, rotationX: 0, scale: 1, duration: 1.1, ease: 'power3.out',
             immediateRender: false,
-            scrollTrigger: { trigger: id, start: 'top 88%', once: true }
+            scrollTrigger: { 
+              trigger: id, 
+              start: 'top 88%', 
+              once: true,
+              scroller: containerRef.current 
+            }
           }
         );
 
@@ -227,7 +239,12 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
             { rotationY: 0, scale: 1, opacity: 1, y: 0,
               stagger: 0.13, duration: 0.9, ease: 'back.out(1.5)',
               immediateRender: false,
-              scrollTrigger: { trigger: id, start: 'top 82%', once: true }
+              scrollTrigger: { 
+                trigger: id, 
+                start: 'top 82%', 
+                once: true,
+                scroller: containerRef.current 
+              }
             }
           );
         }
@@ -238,6 +255,7 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
         ease: 'none',
         scrollTrigger: {
           trigger: containerRef.current,
+          scroller: containerRef.current,
           start: 'top top',
           end: 'bottom top',
           scrub: 1,
@@ -249,6 +267,7 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
         ease: 'none',
         scrollTrigger: {
           trigger: containerRef.current,
+          scroller: containerRef.current,
           start: 'top top',
           end: 'bottom top',
           scrub: 1.5,
@@ -257,6 +276,14 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
     }, containerRef);
     return () => ctx.revert();
   }, [selectedQuarter]);
+
+  useEffect(() => {
+    // Small timeout to ensure everything is rendered and measured
+    const timer = setTimeout(() => {
+      ScrollTrigger.refresh();
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [bills]); // Watching bills is safer than the yet-to-be-defined filteredValidBills
 
   const filteredValidBills = useMemo(() => {
     const parseDate = (d?: string) => {
@@ -450,8 +477,8 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
     <>
         <div 
         ref={containerRef} 
-        className={`relative w-full bg-[#020617] text-white selection:bg-blue-500/30 scroll-smooth ${isExportMode ? 'is-exporting' : ''} ${(isPreviewMode || isExportMode) ? 'overflow-y-visible' : ''}`}
-        data-report-ready={isExportMode ? (isReportReady ? "true" : "false") : undefined}
+        className={`relative w-full h-screen overflow-y-auto bg-[#020617] text-white selection:bg-blue-500/30 scroll-smooth ${isExportMode ? 'is-exporting' : ''} ${(isPreviewMode || isExportMode) ? 'overflow-y-visible' : ''}`}
+        data-report-ready={isReportReady}
       >
         <div className="fixed inset-0 pointer-events-none z-0 no-print">
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(15,23,42,1)_0%,rgba(2,6,23,1)_80%)]" />

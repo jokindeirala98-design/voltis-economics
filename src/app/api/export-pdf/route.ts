@@ -26,11 +26,54 @@ const VOLTIS_CONTACT = {
   website: 'www.voltis.es'
 };
 
+const parseDate = (d?: string): Date | null => {
+  if (!d) return null;
+  if (d.includes('-')) {
+    const ds = new Date(d);
+    return isNaN(ds.getTime()) ? null : ds;
+  }
+  if (d.includes('/')) {
+    const parts = d.split('/');
+    if (parts.length < 3) return null;
+    const [day, month, year] = parts.map(Number);
+    const ds = new Date(year, month - 1, day);
+    return isNaN(ds.getTime()) ? null : ds;
+  }
+  const ds = new Date(d);
+  return isNaN(ds.getTime()) ? null : ds;
+};
+
 function getAssignedMonth(fechaInicio?: string, fechaFin?: string) {
   if (!fechaInicio && !fechaFin) return { month: 0, year: 2024 };
-  const dateStr = fechaFin || fechaInicio || '';
-  const date = new Date(dateStr.replace(/\//g, '-'));
-  return { month: date.getMonth(), year: date.getFullYear() };
+
+  const start = parseDate(fechaInicio);
+  const end = parseDate(fechaFin);
+  
+  if (!start || !end) {
+    const fallback = end || start;
+    return fallback ? { month: fallback.getMonth(), year: fallback.getFullYear() } : { month: 0, year: 2024 };
+  }
+  
+  const counts: Record<string, number> = {};
+  const current = new Date(start);
+  while (current <= end) {
+    const key = `${current.getFullYear()}-${current.getMonth()}`;
+    counts[key] = (counts[key] || 0) + 1;
+    current.setDate(current.getDate() + 1);
+  }
+  
+  let maxDays = 0;
+  let winner = { month: start.getMonth(), year: start.getFullYear() };
+  
+  Object.keys(counts).sort().forEach(key => {
+    if (counts[key] > maxDays) {
+      maxDays = counts[key];
+      const [y, m] = key.split('-').map(Number);
+      winner = { month: m, year: y };
+    }
+  });
+  
+  return winner;
 }
 
 interface ProcessedData {
@@ -111,7 +154,7 @@ function processProjectData(project: { bills: ExtractedBill[]; customOCs: Record
     const totalF = energia + potencia + imp + others;
     return {
       id: b.id,
-      name: new Date(b.fechaFin || '').toLocaleString('es-ES', { month: 'long' }),
+      name: (parseDate(b.fechaFin) || new Date()).toLocaleString('es-ES', { month: 'long' }),
       totalKwh: b.consumoTotalKwh || 0,
       avgPrice: b.costeMedioKwh || 0,
       totalFactura: totalF,
