@@ -53,7 +53,7 @@ function cleanJson(text: string): string {
 }
 
 export async function extractBillDataWithAI(fileBuffer: Buffer, fileType: string, userInstruction?: string): Promise<ExtractedBill> {
-  const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+  const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' }, { apiVersion: 'v1' });
 
   const parts = [
     { text: SYSTEM_PROMPT },
