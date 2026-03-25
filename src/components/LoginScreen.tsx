@@ -48,9 +48,9 @@ export default function LoginScreen({ onLogin, error }: LoginScreenProps) {
               <motion.span 
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
-                className="mt-2 text-[10px] font-mono font-bold tracking-[0.3em] text-blue-400/80 uppercase"
+                className="mt-2 text-[10px] font-mono font-bold tracking-[0.3em] text-cyan-400 uppercase"
               >
-                System V2.5.2 • Gemini PRO
+                System V2.5.3 • Gemini LATEST (v1beta)
               </motion.span>
             </div>
             <span className="text-2xl font-black tracking-tighter uppercase italic">Voltis</span>
