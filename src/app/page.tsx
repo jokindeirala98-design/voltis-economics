@@ -20,6 +20,15 @@ import { fetchAllProjectsFromDB, syncProjectToDB, deleteProjectFromDB } from '@/
 import { getAssignedMonth } from '@/lib/date-utils';
 import LoginScreen from '@/components/LoginScreen';
 
+const fileToBase64 = (file: File): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = error => reject(error);
+  });
+};
+
 const StatusItem = ({ label, status }: { label: string; status: boolean }) => (
   <div className="flex items-center justify-between p-3 rounded-xl bg-white/5 border border-white/5">
     <span className="text-[10px] font-bold text-slate-400 uppercase tracking-tight">{label}</span>
@@ -52,6 +61,7 @@ function EnergyBillsAppContent() {
   const [refiningBill, setRefiningBill] = useState<ExtractedBill | null>(null);
   const [refineInstruction, setRefineInstruction] = useState('');
   const [isRefining, setIsRefining] = useState(false);
+  const [fileBase64Refs, setFileBase64Refs] = useState<Record<string, { data: string, type: string }>>({});
 
   const parseDate = (d?: string) => {
     if (!d) return 0;
@@ -190,7 +200,14 @@ function EnergyBillsAppContent() {
       const data = await res.json();
       
       if (data.status === 'success') {
-        const newBill = data.bill;
+        const newBill: ExtractedBill = data.bill;
+        const fileData = fileBase64Refs[queueId];
+
+        // Attach original file if available
+        if (fileData) {
+          newBill.originalFileBase64 = fileData.data;
+          newBill.fileMimeType = fileData.type;
+        }
 
         // 1. Update project-keyed bills
         setAllBills(prev => {
@@ -332,6 +349,19 @@ function EnergyBillsAppContent() {
       const next = { ...prev };
       validFiles.forEach((file, i) => { next[newItems[i].id] = file; });
       return next;
+    });
+
+    // Start Base64 conversions in parallel
+    validFiles.forEach(async (file, i) => {
+      try {
+        const b64 = await fileToBase64(file);
+        setFileBase64Refs(prev => ({ 
+          ...prev, 
+          [newItems[i].id]: { data: b64, type: file.type } 
+        }));
+      } catch (e) {
+        console.error('Error converting file to base64:', e);
+      }
     });
 
     setAllExtractionQueues(prev => {
@@ -635,7 +665,68 @@ function EnergyBillsAppContent() {
     exportBillsToExcel(bills, concepts, getVal);
   };
 
-  // Early return for showReport removed to allow embedded layout with sidebar.
+  if (!isAuthenticated) return <LoginScreen onLogin={handleLogin} error={authError} />;
+
+  if (showReport) {
+    return (
+      <div className="h-screen bg-[#020617] overflow-hidden">
+        <ReportView 
+          bills={bills} 
+          customOCs={customOCs} 
+          onBack={() => setShowReport(false)} 
+          projectName={savedProjects.find(p => p.id === currentProjectId)?.name || 'PROYECTO'}
+          projectId={currentProjectId}
+          onPreviewBill={(id) => setPreviewBillId(id)}
+        />
+        
+        {/* MODAL PREVIEW FACTURA ORIGINAL */}
+        <AnimatePresence>
+          {previewBillId && (
+            <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/95 backdrop-blur-md p-8 sm:p-12" onClick={() => setPreviewBillId(null)}>
+              <motion.div 
+                initial={{ opacity: 0, scale: 0.95, y: 20 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95, y: 20 }}
+                className="w-full h-full max-w-6xl bg-[#0a0f1d] rounded-[48px] overflow-hidden border border-white/10 relative shadow-2xl flex flex-col"
+                onClick={e => e.stopPropagation()}
+              >
+                <div className="h-20 border-b border-white/5 bg-slate-900/50 backdrop-blur-xl flex items-center justify-between px-10 shrink-0">
+                  <div>
+                    <h3 className="text-white font-black tracking-tighter italic uppercase">Vista Previa · Factura Original</h3>
+                    <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">
+                      {bills.find(b => b.id === previewBillId)?.fileName}
+                    </p>
+                  </div>
+                  <button onClick={() => setPreviewBillId(null)} className="w-12 h-12 rounded-full bg-white/5 border border-white/10 flex items-center justify-center hover:bg-white/10 transition-all hover:scale-105">
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+                
+                <div className="flex-1 bg-black/40 overflow-hidden">
+                  {(() => {
+                    const bill = bills.find(b => b.id === previewBillId);
+                    if (!bill || !bill.originalFileBase64) return (
+                      <div className="flex flex-col items-center justify-center h-full gap-4 text-slate-500">
+                        <FileText className="w-12 h-12 opacity-20" />
+                        <p className="text-sm font-medium">Documento no disponible (solo disponible para facturas subidas en esta sesión o migradas con persistencia)</p>
+                      </div>
+                    );
+                    return (
+                      <iframe 
+                        src={bill.originalFileBase64} 
+                        className="w-full h-full border-none" 
+                        title="Invoice Preview"
+                      />
+                    );
+                  })()}
+                </div>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
+      </div>
+    );
+  }
 
 
 
@@ -762,15 +853,10 @@ function EnergyBillsAppContent() {
         <div className="absolute top-[-20%] left-[-10%] w-[60%] h-[60%] bg-blue-600/5 rounded-full blur-[140px] pointer-events-none" />
         <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-purple-600/5 rounded-full blur-[120px] pointer-events-none" />
 
-        {showReport ? (
-          <ReportView 
-            bills={bills} 
-            customOCs={customOCs} 
-            onBack={() => setShowReport(false)} 
-            projectName={savedProjects.find(p => p.id === currentProjectId)?.name || 'PROYECTO'}
-            projectId={currentProjectId}
-            onPreviewBill={(id) => setPreviewBillId(id)}
-          />
+        {false ? (
+          <div className="p-20 text-center opacity-50 underline decoration-blue-500 cursor-pointer" onClick={() => setShowReport(false)}>
+            Cargando informe...
+          </div>
         ) : (
           <div className="px-8 md:px-16 py-12 flex flex-col gap-10 max-w-7xl mx-auto w-full relative z-10">
             

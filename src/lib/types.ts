@@ -44,6 +44,8 @@ export interface ExtractedBill {
   costeTotalPotencia?: number;
   
   totalFactura?: number;
+  originalFileBase64?: string;
+  fileMimeType?: string;
 }
 
 export interface QueueItem {

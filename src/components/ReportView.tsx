@@ -8,7 +8,7 @@ import {
   BarChart, Bar, XAxis, YAxis, Tooltip as RechartsTooltip, ResponsiveContainer, 
   PieChart, Pie, Cell, CartesianGrid
 } from 'recharts';
-import { ArrowLeft, Printer, Zap, Activity, TrendingUp, DollarSign, CheckCircle2, ShieldCheck, Cpu, AlertTriangle, Send, Mail, X, FileText, Eye, Layout, Loader } from 'lucide-react';
+import { ArrowLeft, Printer, Zap, Activity, TrendingUp, DollarSign, CheckCircle2, ShieldCheck, Cpu, AlertTriangle, Send, Mail, X, FileText, Eye, Layout, Loader, Copy, Check, Calendar } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import gsap from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
@@ -89,6 +89,33 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
   const [email, setEmail] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [isSent, setIsSent] = useState(false);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [revealedIds, setRevealedIds] = useState<Set<string>>(new Set());
+
+  const getMonthYear = (dateStr?: string) => {
+    if (!dateStr) return 'S/D';
+    try {
+      const date = new Date(dateStr);
+      return date.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' }).toUpperCase();
+    } catch (e) {
+      return 'S/D';
+    }
+  };
+
+  const copyToClipboard = (text: string, id: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedId(id);
+    setTimeout(() => setCopiedId(null), 2000);
+  };
+
+  const toggleReveal = (id: string) => {
+    setRevealedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
   const [isPreviewMode, setIsPreviewMode] = useState(false);
   const [isReportReady, setIsReportReady] = useState(false);
   
@@ -288,7 +315,7 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
         'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 
         'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'
       ];
-      const name = monthNames[monthIdx] || 'S/D';
+      const name = getMonthYear(b.fechaFin);
       
       const energia = b.costeTotalConsumo || 0;
       const potencia = b.costeTotalPotencia || 0;
@@ -346,7 +373,7 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
       });
       const totalF = energia + potencia + imp + others;
       return {
-        name: new Date(b.fechaFin || '').toLocaleString('es-ES', { month: 'long' }),
+        name: getMonthYear(b.fechaFin),
         period: `${b.fechaInicio?.split('-').reverse().slice(0,2).join('/')}-${b.fechaFin?.split('-').reverse().slice(0,2).join('/')}`,
         P1: b.consumo?.find(c => c.periodo === 'P1')?.kwh || 0,
         P2: b.consumo?.find(c => c.periodo === 'P2')?.kwh || 0,
@@ -633,7 +660,7 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
                   decimals={0}
                   isTop3={isTop3}
                   onRowClick={() => {}}
-                  onPreview={(id) => onPreviewBill?.(id)}
+                  onPreviewBill={onPreviewBill}
                 />
               </div>
             </section>
@@ -650,7 +677,7 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
                   decimals={2}
                   isTop3={isTop3}
                   onRowClick={(id) => setSelectedPriceBillId(id)}
-                  onPreview={(id) => onPreviewBill?.(id)}
+                  onPreviewBill={onPreviewBill}
                   isPriceMatrix
                 />
                 <p className="text-center text-[10px] text-slate-600 uppercase tracking-widest">Haz click en una fila para ver el cálculo del precio medio</p>
@@ -669,7 +696,7 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
                   decimals={2}
                   isTop3={isTop3}
                   onRowClick={(id) => setSelectedBillId(id)}
-                  onPreview={(id) => onPreviewBill?.(id)}
+                  onPreviewBill={onPreviewBill}
                 />
                 <p className="text-center text-[10px] text-slate-600 uppercase tracking-widest">Haz click en un mes para ver el desglose de la factura</p>
               </div>
@@ -1000,11 +1027,51 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
             <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }}
               className="glass-card border border-white/10 rounded-[64px] w-full max-w-2xl p-14 relative z-[510]" onClick={e => e.stopPropagation()}>
               <div className="flex justify-between items-start mb-10">
-                <div>
+                <div className="flex-1">
                   <p className="text-[10px] font-black uppercase tracking-widest text-blue-500 mb-1">Desglose · Matriz Económica Integral</p>
-                  <h4 className="text-3xl font-black uppercase italic">{filteredValidBills.find(b => b.id === selectedBillId)?.fileName.split('.')[0]}</h4>
+                  {(() => {
+                    const bill = filteredValidBills.find(b => b.id === selectedBillId);
+                    const month = getMonthYear(bill?.fechaFin);
+                    const isRevealed = revealedIds.has(selectedBillId!);
+                    const isCopied = copiedId === selectedBillId;
+
+                    return (
+                      <div className="flex flex-col gap-1">
+                        <button 
+                          onClick={() => toggleReveal(selectedBillId!)}
+                          className="text-3xl font-black uppercase italic hover:text-blue-400 transition-colors text-left"
+                        >
+                          {month}
+                        </button>
+                        
+                        <AnimatePresence>
+                          {isRevealed && (
+                            <motion.div 
+                              initial={{ opacity: 0, height: 0 }}
+                              animate={{ opacity: 1, height: 'auto' }}
+                              exit={{ opacity: 0, height: 0 }}
+                              className="overflow-hidden"
+                            >
+                              <div className="flex items-center gap-2 py-1">
+                                <span className="text-[10px] text-slate-500 font-bold tracking-wider truncate max-w-[200px]">
+                                  {bill?.fileName}
+                                </span>
+                                <button 
+                                  onClick={() => copyToClipboard(bill?.fileName || '', selectedBillId!)}
+                                  className="p-1 hover:bg-white/10 rounded-md transition-all text-slate-500 hover:text-white"
+                                >
+                                  {isCopied ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
+                                </button>
+                                {isCopied && <span className="text-[8px] text-emerald-500 font-black uppercase">Copiado</span>}
+                              </div>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+                      </div>
+                    );
+                  })()}
                 </div>
-                <button onClick={() => setSelectedBillId(null)} className="w-10 h-10 rounded-full glass border border-white/10 flex items-center justify-center hover:bg-white/10">
+                <button onClick={() => setSelectedBillId(null)} className="w-10 h-10 rounded-full glass border border-white/10 flex items-center justify-center hover:bg-white/10 shrink-0">
                   <X className="w-4 h-4" />
                 </button>
               </div>
@@ -1080,11 +1147,50 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
               <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }}
                 className="glass-card border border-white/10 rounded-[64px] w-full max-w-xl p-14 relative z-[510]" onClick={e => e.stopPropagation()}>
                 <div className="flex justify-between items-start mb-10">
-                  <div>
+                  <div className="flex-1">
                     <p className="text-[10px] font-black uppercase tracking-widest text-cyan-500 mb-1">Cálculo · Precio Medio por Periodo</p>
-                    <h4 className="text-2xl font-black uppercase italic">{(row as any).name}</h4>
+                    {(() => {
+                      const month = getMonthYear(bill.fechaFin);
+                      const isRevealed = revealedIds.has(selectedPriceBillId!);
+                      const isCopied = copiedId === selectedPriceBillId;
+
+                      return (
+                        <div className="flex flex-col gap-1">
+                          <button 
+                            onClick={() => toggleReveal(selectedPriceBillId!)}
+                            className="text-2xl font-black uppercase italic hover:text-cyan-400 transition-colors text-left"
+                          >
+                            {month}
+                          </button>
+                          
+                          <AnimatePresence>
+                            {isRevealed && (
+                              <motion.div 
+                                initial={{ opacity: 0, height: 0 }}
+                                animate={{ opacity: 1, height: 'auto' }}
+                                exit={{ opacity: 0, height: 0 }}
+                                className="overflow-hidden"
+                              >
+                                <div className="flex items-center gap-2 py-1">
+                                  <span className="text-[10px] text-slate-500 font-bold tracking-wider truncate max-w-[180px]">
+                                    {bill.fileName}
+                                  </span>
+                                  <button 
+                                    onClick={() => copyToClipboard(bill.fileName, selectedPriceBillId!)}
+                                    className="p-1 hover:bg-white/10 rounded-md transition-all text-slate-500 hover:text-white"
+                                  >
+                                    {isCopied ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
+                                  </button>
+                                  {isCopied && <span className="text-[8px] text-emerald-500 font-black uppercase">Copiado</span>}
+                                </div>
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
+                        </div>
+                      );
+                    })()}
                   </div>
-                  <button onClick={() => setSelectedPriceBillId(null)} className="w-10 h-10 rounded-full glass border border-white/10 flex items-center justify-center hover:bg-white/10">
+                  <button onClick={() => setSelectedPriceBillId(null)} className="w-10 h-10 rounded-full glass border border-white/10 flex items-center justify-center hover:bg-white/10 shrink-0">
                     <X className="w-4 h-4" />
                   </button>
                 </div>
@@ -1122,9 +1228,9 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
 }
 
 // ── Reusable Matrix Table Component ──
-function MatrixTable({ title, color, tableData, dataKey, unit, decimals, isTop3, onRowClick, onPreview, isPriceMatrix }: {
+function MatrixTable({ title, color, tableData, dataKey, unit, decimals, isTop3, onRowClick, onPreviewBill, isPriceMatrix }: {
   title: string; color: string; tableData: any[]; dataKey: string; unit: string;
-  decimals: number; isTop3: (v: number, arr: number[]) => boolean; onRowClick: (id: string) => void; onPreview?: (id: string) => void; isPriceMatrix?: boolean;
+  decimals: number; isTop3: (v: number, arr: number[]) => boolean; onRowClick: (id: string) => void; onPreviewBill?: (id: string) => void; isPriceMatrix?: boolean;
 }) {
   const top3Indices = new Set(
     [...tableData]
@@ -1174,7 +1280,7 @@ function MatrixTable({ title, color, tableData, dataKey, unit, decimals, isTop3,
                   </td>
                   <td className="px-4 py-4 text-center no-print">
                     <button 
-                      onClick={(e) => { e.stopPropagation(); onPreview?.(row.id); }}
+                      onClick={(e) => { e.stopPropagation(); onPreviewBill?.(row.id); }}
                       className="p-2 rounded-xl bg-white/5 hover:bg-blue-600/20 text-slate-500 hover:text-blue-400 transition-all border border-white/5"
                       title="Ver factura original"
                     >
