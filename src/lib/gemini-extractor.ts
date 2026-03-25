@@ -53,7 +53,7 @@ function cleanJson(text: string): string {
 }
 
 export async function extractBillDataWithAI(fileBuffer: Buffer, fileType: string, userInstruction?: string): Promise<ExtractedBill> {
-  const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' }, { apiVersion: 'v1' });
+  const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash-001' }, { apiVersion: 'v1' });
 
   const parts = [
     { text: SYSTEM_PROMPT },
@@ -106,7 +106,7 @@ export async function extractBillDataWithAI(fileBuffer: Buffer, fileType: string
   } catch (error: any) {
     console.error('Error extracting with Gemini:', error);
     try {
-        console.warn('Reintentando con gemini-1.5-flash (Retry)...');
+        console.warn('Reintentando con gemini-2.0-flash-001 (Retry)...');
         const res = await model.generateContent(parts);
         return { ...JSON.parse(cleanJson(res.response.text())), status: 'success' };
     } catch (e2) {

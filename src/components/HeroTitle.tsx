@@ -126,6 +126,13 @@ export const HeroTitle: React.FC<HeroTitleProps> = ({ children, subtitle }) => {
   return (
     <div ref={containerRef} className="relative flex flex-col items-center">
       <div className="relative">
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 0.5 }}
+          className="absolute -top-12 left-0 text-[10px] font-mono tracking-widest text-cyan-400/50 uppercase"
+        >
+          Build V2.5.2 • Gemini PRO STABLE
+        </motion.div>
         <motion.h1
           initial={{ y: 50, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
