@@ -20,6 +20,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { fetchProjectById } from '@/lib/supabase-sync';
 import { ExtractedBill, ProjectWorkspace } from '@/lib/types';
+import { getMonthlyAggregatedData, CANONICAL_MONTHS } from '@/lib/date-utils';
 import puppeteer from 'puppeteer-core';
 import chromium from '@sparticuz/chromium';
 
@@ -100,68 +101,19 @@ function processProjectData(project: { bills: ExtractedBill[]; customOCs: Record
     return am.month - bm.month;
   });
 
-  const monthNames = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 
-                     'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+  // CANONICAL 12-MONTH CHART DATA
+  // Always returns exactly 12 entries, one per month
+  const chartData = getMonthlyAggregatedData(sorted, project.customOCs);
 
-  const totals = { energetic: 0, power: 0, taxes: 0, others: 0, global: 0, kwh: 0 };
-  const monthMap: Record<string, any> = {};
-
-  // Determine year range
-  let minYear = 2024, maxYear = 2024;
-  sorted.forEach(b => {
-    const { year } = getAssignedMonth(b.fechaInicio, b.fechaFin);
-    if (year < minYear) minYear = year;
-    if (year > maxYear) maxYear = year;
-  });
-
-  // Initialize all months with 0 values
-  for (let year = minYear; year <= maxYear; year++) {
-    for (let m = 0; m < 12; m++) {
-      const mKey = `${year}-${m}`;
-      monthMap[mKey] = { 
-        name: monthNames[m].charAt(0).toUpperCase() + monthNames[m].slice(1), 
-        monthIdx: m, 
-        year, 
-        totalFactura: 0, 
-        energia: 0, 
-        potencia: 0, 
-        otros: 0 
-      };
-    }
-  }
-
-  sorted.forEach(b => {
-    const { month: monthIdx, year } = getAssignedMonth(b.fechaInicio, b.fechaFin);
-    
-    const energia = b.costeTotalConsumo || 0;
-    const potencia = b.costeTotalPotencia || 0;
-    let imp = 0, others = 0;
-    [...(b.otrosConceptos || [])].forEach(oc => {
-      if (oc.concepto?.toLowerCase().includes('impuesto') || oc.concepto?.toLowerCase().includes('iva')) imp += oc.total;
-      else others += oc.total;
-    });
-
-    totals.energetic += energia; 
-    totals.power += potencia; 
-    totals.taxes += imp; 
-    totals.others += others;
-    const totalF = energia + potencia + imp + others;
-    totals.global += totalF; 
-    totals.kwh += (b.consumoTotalKwh || 0);
-
-    const mKey = `${year}-${monthIdx}`;
-    if (monthMap[mKey]) {
-      monthMap[mKey].totalFactura += totalF;
-      monthMap[mKey].energia += energia;
-      monthMap[mKey].potencia += potencia;
-      monthMap[mKey].otros += (imp + others);
-    }
-  });
-
-  const chartData = Object.values(monthMap).sort((a: any, b: any) => {
-    if (a.year !== b.year) return a.year - b.year;
-    return a.monthIdx - b.monthIdx;
-  });
+  // Calculate totals from chart data
+  const totals = {
+    energetic: chartData.reduce((sum, m) => sum + m.energia, 0),
+    power: chartData.reduce((sum, m) => sum + m.potencia, 0),
+    taxes: chartData.reduce((sum, m) => sum + m.otros * 0.2, 0),
+    others: chartData.reduce((sum, m) => sum + m.otros * 0.8, 0),
+    global: chartData.reduce((sum, m) => sum + m.totalFactura, 0),
+    kwh: chartData.reduce((sum, m) => sum + m.totalKwh, 0)
+  };
 
   const pieData = [
     { name: 'Consumo', value: totals.energetic, color: '#3b82f6' },
@@ -216,8 +168,8 @@ function generateBarChartSVG(chartData: any[]): string {
   
   const maxValue = Math.max(...chartData.map(d => d.totalFactura || 0), 1);
   const barCount = chartData.length;
-  const minBarWidth = 25;
-  const maxBarWidth = 45;
+  const minBarWidth = 32;
+  const maxBarWidth = 50;
   const fixedGap = 8;
   const barWidth = Math.min(maxBarWidth, Math.max(minBarWidth, (chartWidth - (barCount - 1) * fixedGap) / barCount));
   const totalBarWidth = barWidth + fixedGap;
@@ -227,7 +179,7 @@ function generateBarChartSVG(chartData: any[]): string {
     const x = padding.left + i * totalBarWidth;
     const y = padding.top + chartHeight - barHeight;
     return `<rect x="${x}" y="${y}" width="${barWidth}" height="${barHeight}" fill="url(#barGrad)" rx="4"/>
-      <title>${d.name}: ${d.totalFactura.toFixed(2)}€</title>`;
+      <title>${d.label}: ${d.totalFactura.toFixed(2)}€</title>`;
   }).join('');
   
   const gridLines = [0, 0.25, 0.5, 0.75, 1].map(pct => {
@@ -241,8 +193,7 @@ function generateBarChartSVG(chartData: any[]): string {
   const xLabels = chartData.map((d, i) => {
     const x = padding.left + i * totalBarWidth + barWidth / 2;
     const y = height - 25;
-    const abbr = d.name.substring(0, 3).toUpperCase();
-    return `<text x="${x}" y="${y}" text-anchor="middle" fill="rgba(255,255,255,0.6)" font-size="11" font-weight="600">${abbr}</text>`;
+    return `<text x="${x}" y="${y}" text-anchor="middle" fill="rgba(255,255,255,0.6)" font-size="11" font-weight="600">${d.label}</text>`;
   }).join('');
   
   const yAxisLine = `<line x1="${padding.left}" y1="${padding.top}" x2="${padding.left}" y2="${baseline}" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>`;

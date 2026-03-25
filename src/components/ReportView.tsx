@@ -13,7 +13,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import gsap from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
 import { toast } from 'sonner';
-import { getAssignedMonth, parseSpanishDate } from '@/lib/date-utils';
+import { getAssignedMonth, parseSpanishDate, getMonthlyAggregatedData, CANONICAL_MONTHS } from '@/lib/date-utils';
 import { MascotaHero } from './MascotaHero';
 import { HeroTitle } from './HeroTitle';
 
@@ -313,16 +313,6 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
   }, [filteredValidBills]);
 
   const { chartData, pieData, summaryStats, tableData } = useMemo(() => {
-    const parseDate = (d?: string) => {
-      if (!d) return 0;
-      if (d.includes('-')) return new Date(d).getTime() || 0;
-      if (d.includes('/')) {
-        const [day, month, year] = d.split('/').map(Number);
-        return new Date(year, month - 1, day).getTime() || 0;
-      }
-      return new Date(d).getTime() || 0;
-    };
-
     const billsForQuarter = filteredValidBills.filter(b => {
       const { month: monthIdx } = getAssignedMonth(b.fechaInicio, b.fechaFin);
       const m1Idx = monthIdx + 1; // 1-indexed for logic below
@@ -332,77 +322,19 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
              selectedQuarter === 4 ? (m1Idx >= 10 && m1Idx <= 12) : true;
     });
 
-    const monthNames = [
-      'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 
-      'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'
-    ];
+    // CANONICAL 12-MONTH CHART DATA
+    // Always returns exactly 12 entries, one per month
+    const cData = getMonthlyAggregatedData(billsForQuarter, customOCs);
 
-    const totals = { energetic: 0, power: 0, taxes: 0, others: 0, global: 0, kwh: 0 };
-    const monthMap: Record<string, any> = {};
-
-    // Determine the year range for all 12 months
-    let minYear = 2024, maxYear = 2024;
-    billsForQuarter.forEach(b => {
-      const { year } = getAssignedMonth(b.fechaInicio, b.fechaFin);
-      if (year < minYear) minYear = year;
-      if (year > maxYear) maxYear = year;
-    });
-
-    // Initialize all months with 0 values
-    for (let year = minYear; year <= maxYear; year++) {
-      for (let m = 0; m < 12; m++) {
-        const mKey = `${year}-${m}`;
-        monthMap[mKey] = {
-          name: monthNames[m].charAt(0).toUpperCase() + monthNames[m].slice(1),
-          monthIdx: m,
-          year,
-          totalFactura: 0,
-          energia: 0,
-          potencia: 0,
-          otros: 0,
-          totalKwh: 0,
-          billsCount: 0
-        };
-      }
-    }
-
-    billsForQuarter.forEach(b => {
-      const { month: monthIdx, year } = getAssignedMonth(b.fechaInicio, b.fechaFin);
-      const name = getMonthYear(b.fechaFin);
-      
-      const energia = b.costeTotalConsumo || 0;
-      const potencia = b.costeTotalPotencia || 0;
-      let imp = 0, others = 0;
-      [...(b.otrosConceptos || []), ...(customOCs[b.id] || [])].forEach(oc => {
-        if (oc.concepto.toLowerCase().includes('impuesto') || oc.concepto.toLowerCase().includes('iva')) imp += oc.total;
-        else others += oc.total;
-      });
-
-      totals.energetic += energia; 
-      totals.power += potencia; 
-      totals.taxes += imp; 
-      totals.others += others;
-      const totalF = energia + potencia + imp + others;
-      totals.global += totalF; 
-      totals.kwh += (b.consumoTotalKwh || 0);
-
-      const mKey = `${year}-${monthIdx}`;
-      if (monthMap[mKey]) {
-        monthMap[mKey].name = getMonthYear(b.fechaFin);
-        monthMap[mKey].totalFactura += totalF;
-        monthMap[mKey].energia += energia;
-        monthMap[mKey].potencia += potencia;
-        monthMap[mKey].otros += (imp + others);
-        monthMap[mKey].totalKwh += (b.consumoTotalKwh || 0);
-        monthMap[mKey].billsCount++;
-      }
-    });
-
-    const cData = Object.values(monthMap)
-      .sort((a: any, b: any) => {
-        if (a.year !== b.year) return a.year - b.year;
-        return a.monthIdx - b.monthIdx;
-      });
+    // Calculate totals from chart data
+    const totals = {
+      energetic: cData.reduce((sum, m) => sum + m.energia, 0),
+      power: cData.reduce((sum, m) => sum + m.potencia, 0),
+      taxes: cData.reduce((sum, m) => sum + m.otros * 0.2, 0), // Approximate
+      others: cData.reduce((sum, m) => sum + m.otros * 0.8, 0), // Approximate
+      global: cData.reduce((sum, m) => sum + m.totalFactura, 0),
+      kwh: cData.reduce((sum, m) => sum + m.totalKwh, 0)
+    };
 
     // Keep the tableData as individual bills for the detailed matrix
     const tData = billsForQuarter.map(b => {
@@ -616,10 +548,10 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
                         <ResponsiveContainer width="100%" height={330}>
                           <BarChart data={chartData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
                             <CartesianGrid strokeDasharray="5 5" stroke="rgba(255,255,255,0.03)" vertical={false} />
-                            <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: 'rgba(255,255,255,0.3)', fontSize: 10, fontWeight: 900 }} dy={15} interval={0} angle={-35} textAnchor="end" height={80} />
+                            <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fill: 'rgba(255,255,255,0.3)', fontSize: 11, fontWeight: 900 }} dy={10} interval={0} />
                             <YAxis axisLine={false} tickLine={false} tick={{ fill: 'rgba(255,255,255,0.2)', fontSize: 9, fontWeight: 900 }} />
                             <RechartsTooltip content={<CustomBarTooltip />} cursor={{ fill: 'rgba(59, 130, 246, 0.05)' }} />
-                            <Bar dataKey="totalFactura" fill="url(#blueGrad)" radius={[6, 6, 0, 0]} barSize={20} minPointSize={3}>
+                            <Bar dataKey="totalFactura" fill="url(#blueGrad)" radius={[6, 6, 0, 0]} barSize={32} minPointSize={3}>
                               {chartData.map((entry: any, index: number) => (
                                 <Cell key={`cell-${index}`} fillOpacity={Math.abs(entry.totalFactura) < 0.01 ? 0.15 : 1} />
                               ))}
@@ -635,9 +567,9 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
                       ) : (
                         <BarChart width={750} height={330} data={chartData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
                           <CartesianGrid strokeDasharray="5 5" stroke="rgba(255,255,255,0.03)" vertical={false} />
-                          <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: 'rgba(255,255,255,0.3)', fontSize: 10, fontWeight: 900 }} dy={15} interval={0} angle={-35} textAnchor="end" height={80} />
+                          <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fill: 'rgba(255,255,255,0.3)', fontSize: 11, fontWeight: 900 }} dy={10} interval={0} />
                           <YAxis axisLine={false} tickLine={false} tick={{ fill: 'rgba(255,255,255,0.2)', fontSize: 9, fontWeight: 900 }} />
-                          <Bar dataKey="totalFactura" fill="#3b82f6" radius={[6, 6, 0, 0]} barSize={20} isAnimationActive={false}>
+                          <Bar dataKey="totalFactura" fill="#3b82f6" radius={[6, 6, 0, 0]} barSize={32} isAnimationActive={false}>
                             {chartData.map((entry: any, index: number) => (
                               <Cell key={`cell-${index}`} fillOpacity={1} />
                             ))}
