@@ -165,11 +165,75 @@ function EnergyBillsAppContent() {
           setCurrentProjectId(lastId);
           setCloudSyncStatus('synced');
         } else {
-          setCloudSyncStatus('synced');
+          // Try to restore from localStorage backups
+          const restoredProjects: ProjectWorkspace[] = [];
+          const billsAcc: Record<string, ExtractedBill[]> = {};
+          const ocsAcc: Record<string, any> = {};
+          
+          for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key?.startsWith('voltis_bills_backup_')) {
+              try {
+                const projectId = key.replace('voltis_bills_backup_', '');
+                const backup = JSON.parse(localStorage.getItem(key) || '{}');
+                if (backup.bills && backup.bills.length > 0) {
+                  billsAcc[projectId] = backup.bills;
+                  ocsAcc[projectId] = backup.customOCs || {};
+                  restoredProjects.push({
+                    id: projectId,
+                    name: `Proyecto Recuperado`,
+                    bills: backup.bills,
+                    customOCs: backup.customOCs || {},
+                    updatedAt: backup.savedAt || Date.now()
+                  });
+                }
+              } catch (e) {
+                console.warn('[Recovery] Could not parse backup:', key, e);
+              }
+            }
+          }
+          
+          if (restoredProjects.length > 0) {
+            setSavedProjects(restoredProjects);
+            setAllBills(billsAcc);
+            setAllCustomOCs(ocsAcc);
+            const lastId = localStorage.getItem(`voltis_last_project`) || restoredProjects[0].id;
+            setCurrentProjectId(lastId);
+            setCloudSyncStatus('local');
+            toast.warning(`Se recuperaron ${restoredProjects.reduce((sum, p) => sum + (p.bills?.length || 0), 0)} facturas desde copia local`);
+          } else {
+            setCloudSyncStatus('synced');
+          }
         }
       } catch (e) {
         console.error('Initial sync error', e);
-        setCloudSyncStatus('error');
+        
+        // Fallback to localStorage on error
+        const billsAcc: Record<string, ExtractedBill[]> = {};
+        const ocsAcc: Record<string, any> = {};
+        
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          if (key?.startsWith('voltis_bills_backup_')) {
+            try {
+              const projectId = key.replace('voltis_bills_backup_', '');
+              const backup = JSON.parse(localStorage.getItem(key) || '{}');
+              if (backup.bills) {
+                billsAcc[projectId] = backup.bills;
+                ocsAcc[projectId] = backup.customOCs || {};
+              }
+            } catch (e2) {}
+          }
+        }
+        
+        if (Object.keys(billsAcc).length > 0) {
+          setAllBills(billsAcc);
+          setAllCustomOCs(ocsAcc);
+          setCloudSyncStatus('local');
+          toast.error('Error de conexión. Mostrando datos locales.');
+        } else {
+          setCloudSyncStatus('error');
+        }
       }
     };
     initStorage();
@@ -198,6 +262,18 @@ function EnergyBillsAppContent() {
     const userId = 'voltis_user_global';
     const projectId = targetProjectId || currentProjectId;
     
+    // Save to localStorage as immediate backup
+    try {
+      const localKey = `voltis_bills_backup_${projectId}`;
+      localStorage.setItem(localKey, JSON.stringify({
+        bills: updatedBills,
+        customOCs: updatedOCs,
+        savedAt: Date.now()
+      }));
+    } catch (e) {
+      console.warn('[Backup] Could not save to localStorage:', e);
+    }
+    
     setSavedProjects(prev => {
       const next = prev.map(p => p.id === projectId ? { 
         ...p, bills: updatedBills, customOCs: updatedOCs, updatedAt: Date.now() 
@@ -207,8 +283,18 @@ function EnergyBillsAppContent() {
       if (activeProject) {
         setCloudSyncStatus('syncing');
         syncProjectToDB(activeProject, userId)
-          .then(() => setCloudSyncStatus('synced'))
-          .catch(() => setCloudSyncStatus('error'));
+          .then((success) => {
+            if (success) {
+              setCloudSyncStatus('synced');
+            } else {
+              setCloudSyncStatus('error');
+              toast.error('Error al guardar en la nube. Datos guardados localmente.');
+            }
+          })
+          .catch(() => {
+            setCloudSyncStatus('error');
+            toast.error('Error de sincronización. Datos guardados localmente.');
+          });
       }
       return next;
     });

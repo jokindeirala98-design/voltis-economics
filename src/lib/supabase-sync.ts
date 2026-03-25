@@ -111,7 +111,8 @@ export async function fetchAllProjectsFromDB(userId: string): Promise<ProjectWor
   }
 }
 
-export async function syncProjectToDB(project: ProjectWorkspace, userId: string): Promise<boolean> {
+export async function syncProjectToDB(project: ProjectWorkspace, userId: string, retryCount = 0): Promise<boolean> {
+  const MAX_RETRIES = 2;
   try {
     console.log(`[DB Sync] Inciando sync para proyecto: ${project.id} (Usuario: ${userId})`);
     
@@ -125,16 +126,18 @@ export async function syncProjectToDB(project: ProjectWorkspace, userId: string)
     
     if (pErr) {
       console.error('[DB Sync] Error en tabla projects:', pErr);
-      return false;
+      throw pErr;
     }
 
     // 2. Sync bills (with deletion of orphans)
     const currentBillIds = (project.bills || []).map(b => b.id);
     
     if (currentBillIds.length > 0) {
+      // First, delete orphans
       const { error: dErr } = await supabase.from('bills').delete().eq('project_id', project.id).not('id', 'in', `(${currentBillIds.map(id => `'${id}'`).join(',')})`);
       if (dErr) console.error('[DB Sync] Error eliminando facturas huérfanas:', dErr);
       
+      // Then upsert current bills
       const billRows = project.bills.map(b => ({
         id: b.id,
         project_id: project.id,
@@ -149,10 +152,11 @@ export async function syncProjectToDB(project: ProjectWorkspace, userId: string)
         storage_path: b.storagePath,
         file_hash: b.fileHash
       }));
+      
       const { error: uErr } = await supabase.from('bills').upsert(billRows);
       if (uErr) {
         console.error('[DB Sync] Error en upsert de bills:', uErr);
-        return false;
+        throw uErr;
       }
     } else {
       await supabase.from('bills').delete().eq('project_id', project.id);
@@ -176,7 +180,15 @@ export async function syncProjectToDB(project: ProjectWorkspace, userId: string)
     console.log('[DB Sync] Sync completado con éxito');
     return true;
   } catch (error) {
-    console.error('[DB Sync] Error fatal de sincronización:', error);
+    console.error(`[DB Sync] Error de sincronización (intento ${retryCount + 1}/${MAX_RETRIES + 1}):`, error);
+    
+    if (retryCount < MAX_RETRIES) {
+      console.log(`[DB Sync] Reintentando en 1 segundo...`);
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      return syncProjectToDB(project, userId, retryCount + 1);
+    }
+    
+    console.error('[DB Sync] Error fatal de sincronización después de reintentos');
     return false;
   }
 }
