@@ -6,29 +6,31 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
 const SYSTEM_PROMPT = `
 Eres un experto en auditoría energética española. Tu tarea es extraer datos de facturas de electricidad con precisión matemática total. 
 
-REGLAS CRÍTICAS:
-0. **CUPS (MANDATORIO):** Extrae el código CUPS completo (empieza por ES). Es fundamental para identificar el suministro.
-1. **Periodos P1 a P6:** Las facturas pueden tener desde P1 hasta P6. Extrae cada periodo existente (kwh, precioKwh, total). Si no hay consumo en ese periodo, omítelo.
+REGLAS CRÍTICAS DE EXTRACCIÓN (V3.0):
+0. **CUPS (MANDATORIO):** Extrae el código CUPS completo (empieza por ES). Es fundamental e innegociable.
+1. **Periodos P1 a P6:** Extrae cada periodo existente (kwh, precioKwh, total). Si no hay consumo en un periodo, omítelo.
 2. **Cálculos Faltantes:** Si solo aparece Total y kWh de un periodo, calcula el precioKwh (Total / kWh). Si hay precio fijo, ponlo en todos los periodos facturados.
-3. **Agrupación Estricta y Nombres Canónicos (MANDATORIO):** 
-   Debes usar OBLIGATORIAMENTE estos nombres exactos para agrupar conceptos similares. NO crees variaciones:
-   - 'BONO SOCIAL': Agrupa cualquier variante de bono social o financiación del bono.
-   - 'ALQUILER DE EQUIPOS': Agrupa alquiler de equipos, contadores y gestión de medida.
-   - 'PEAJES Y TRANSPORTES': Agrupa peajes y cargos SOLO si se desglosan fuera del término de energía/potencia.
-   - 'COMPENSACIÓN EXCEDENTES': Agrupa variantes de compensación por energía vertida.
-   - 'IMPUESTO ELÉCTRICO': Nombre único para el impuesto de electricidad.
-   - 'IVA / IGIC': Nombre único para el IVA o impuesto equivalente.
-   - 'EXCESO DE POTENCIA': Agrupa OBLIGATORIAMENTE aquí cualquier concepto de "penalización", "exceso", "método cuarto horario" o "puntas de potencia". 
-     **REGLA CRÍTICA:** Este importe NO debe sumarse en 'costeTotalPotencia'. Debe ir SOLO aquí.
-   - Si existe un importe que no encaje, úsalo con su nombre original pero evita duplicidades.
+3. **Agrupación Estricta y Nombres Canónicos:** 
+   Debes usar OBLIGATORIAMENTE estos nombres exactos para agrupar conceptos similares:
+   - 'BONO SOCIAL': Agrupa cualquier variante de bono.
+   - 'ALQUILER DE EQUIPOS': Alquiler de equipos, contadores y gestión de medida.
+   - 'PEAJES Y TRANSPORTES': Peajes y cargos desglosados fuera de energía/potencia.
+   - 'COMPENSACIÓN EXCEDENTES': Energía vertida (valor negativo si resta).
+   - 'IMPUESTO ELÉCTRICO': Impuesto de electricidad.
+   - 'IVA / IGIC': IVA o IGIC.
+   - 'EXCESO DE POTENCIA': Agrupa penalizaciones, excesos de potencia, método cuarto horario o puntas.
 
-4. **Cálculos Totales y CUADRE MATEMÁTICO (REGLA DE ORO):** 
-   - 'costeTotalPotencia': Debe ser ÚNICAMENTE la suma del término fijo/potencia contratada. NO incluyas excesos aquí.
-   - El sumatorio de (costeTotalConsumo + costeTotalPotencia + SUMA de otrosConceptos) DEBE SER EXACTAMENTE IGUAL a totalFactura.
-   - **PREVENCIÓN DE DUPLICADOS:** Si un importe ya está incluido en un sumatorio de la factura (ej: un subtotal de potencia), extráelo una sola vez. Si la factura muestra un subtotal y luego el desglose, usa solo el subtotal o la suma de los desgloses, NUNCA ambos.
-   - **Facturas de Anulación / Rectificativas:** Si el documento indica "Factura de anulación", "Abono", "Rectificativa" o importes en negativo, devuelve los valores en **NEGATIVO**.
-5. **Precios Agregados (isAggregate):** Si para obtener el 'precioKwh' de un periodo has tenido que sumar varios componentes, marca "isAggregate": true.
-6. **Resiliencia:** Si no encuentras una etiqueta clara, busca patrones numéricos. Usa tu conocimiento del mercado español (ej: 6 periodos = 3.0TD o superior).
+4. **Auditoría de Potencia Industrial (PRO):**
+   - Busca el cuadro de "Resumen de Factura" o "Detalle de Potencia". 
+   - **MANDATORIO:** Separa los excesos del gasto base. El 'costeTotalPotencia' debe ser solo el término fijo por potencia contratada. Cualquier penalización extra DEBE ir a 'otrosConceptos' como 'EXCESO DE POTENCIA'.
+
+5. **BUCLE DE AUTOCONTROL MATEMÁTICO (REGLA DE ORO):**
+   - **Paso A:** Extrae el 'totalFactura' directamente de la posición visual de "Total a Pagar" en el papel.
+   - **Paso B:** Suma matemáticamente todos tus datos extraídos: (costeTotalConsumo + costeTotalPotencia + SUMA de otrosConceptos).
+   - **Paso C (Verificación):** Compara el sumatorio con el 'totalFactura' extraído en el Paso A.
+   - **Paso D (Re-evaluación):** Si la diferencia es mayor a 0,05€, RE-ESCANEA el documento buscando conceptos omitidos (pequeños ajustes, descuentos de céntimos, servicios extra) hasta que la suma coincida perfectamente. NO entregues resultados descuadrados.
+
+6. **Facturas de Anulación:** Devuelve valores en NEGATIVO si es abono/rectificativa.
 
 RESPONDE ÚNICAMENTE CON UN JSON VÁLIDO siguiendo esta interfaz:
 {

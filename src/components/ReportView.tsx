@@ -745,14 +745,51 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
 
                 {/* GENERAR PDF Button - Centered, Premium */}
                 <button 
-                  onClick={() => {
+                  onClick={async () => {
                     if (!projectId) {
                       toast.error('Selecciona un proyecto para exportar');
                       return;
                     }
-                    const url = `/api/export?projectId=${encodeURIComponent(projectId)}`;
-                    window.open(url, '_blank');
-                    toast.success('PDF descargándose...', { duration: 4000 });
+                    if (!bills || bills.length === 0) {
+                      toast.error('No hay facturas para exportar');
+                      return;
+                    }
+                    
+                    toast.info('Generando PDF...', { duration: 2000 });
+                    
+                    try {
+                      const response = await fetch('/api/export-pdf', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          projectId,
+                          projectName: projectName || 'PROYECTO',
+                          bills,
+                          customOCs: customOCs || {},
+                          format: 'pdf'
+                        })
+                      });
+                      
+                      if (!response.ok) {
+                        const error = await response.json();
+                        throw new Error(error.error || 'Error generando PDF');
+                      }
+                      
+                      const blob = await response.blob();
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement('a');
+                      a.href = url;
+                      a.download = `Voltis_Report_${projectId}.pdf`;
+                      document.body.appendChild(a);
+                      a.click();
+                      document.body.removeChild(a);
+                      URL.revokeObjectURL(url);
+                      
+                      toast.success('PDF descargado', { duration: 3000 });
+                    } catch (err: any) {
+                      console.error('PDF export error:', err);
+                      toast.error(err.message || 'Error al generar PDF');
+                    }
                   }}
                   className="no-print flex items-center gap-3 px-10 py-4 rounded-full bg-blue-600 hover:bg-blue-500 text-white font-black text-sm uppercase tracking-wider shadow-2xl shadow-blue-500/30 transition-all min-w-[300px] justify-center"
                 >

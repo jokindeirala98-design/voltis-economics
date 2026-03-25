@@ -46,6 +46,22 @@ export interface ExtractedBill {
   totalFactura?: number;
   originalFileBase64?: string;
   fileMimeType?: string;
+  
+  // Validación y trazabilidad
+  extractionStatus?: 'pending' | 'success' | 'error' | 'partial';
+  validationStatus?: 'unchecked' | 'pending' | 'validated' | 'discrepancy' | 'failed';
+  mathCheckPassed?: boolean | null;
+  discrepancyAmount?: number;
+  reviewAttempts?: number;
+  validationNotes?: string;
+  lastValidatedAt?: string;
+  
+  // Report inclusion (true = included in annual report, false = excluded but visible)
+  includeInReport?: boolean;
+  
+  // Storage
+  storagePath?: string;
+  fileHash?: string;
 }
 
 export interface QueueItem {
@@ -65,4 +81,27 @@ export interface ProjectWorkspace {
   customOCs: Record<string, any>;
   queueItems?: QueueItem[];
   updatedAt: number;
+}
+
+export interface BillAuditLog {
+  id: string;
+  billId: string;
+  fieldChanged: string;
+  oldValue: string | null;
+  newValue: string | null;
+  changeSource: 'ai_extraction' | 'manual_edit' | 'import_correction' | 'ai_refine';
+  changedAt: string;
+  changedBy?: string;
+}
+
+export interface ConceptNormalization {
+  id: string;
+  original_text: string;
+  normalized_text: string;
+  canonical_group: string;
+  confidence: number;
+  source_scope: 'global' | 'commercial' | 'project';
+  is_system: boolean;
+  created_at: string;
+  created_by?: string;
 }

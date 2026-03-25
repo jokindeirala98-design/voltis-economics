@@ -32,7 +32,21 @@ export async function fetchProjectById(projectId: string): Promise<ProjectWorksp
 
     const pBills = (bills || [])
       .filter(b => b.project_id === projectId)
-      .map(b => b.raw_data as ExtractedBill);
+      .map(b => {
+        const rawData = b.raw_data as ExtractedBill;
+        return {
+          ...rawData,
+          extractionStatus: b.extraction_status,
+          validationStatus: b.validation_status,
+          mathCheckPassed: b.math_check_passed,
+          discrepancyAmount: b.discrepancy_amount,
+          reviewAttempts: b.review_attempts,
+          validationNotes: b.validation_notes,
+          lastValidatedAt: b.last_validated_at,
+          storagePath: b.storage_path,
+          fileHash: b.file_hash
+        } as ExtractedBill;
+      });
     
     const pOCs: Record<string, any> = {};
     pBills.forEach(b => {
@@ -124,7 +138,16 @@ export async function syncProjectToDB(project: ProjectWorkspace, userId: string)
       const billRows = project.bills.map(b => ({
         id: b.id,
         project_id: project.id,
-        raw_data: b
+        raw_data: b,
+        user_id: userId,
+        extraction_status: b.extractionStatus || 'success',
+        validation_status: b.validationStatus || 'unchecked',
+        math_check_passed: b.mathCheckPassed,
+        discrepancy_amount: b.discrepancyAmount || 0,
+        review_attempts: b.reviewAttempts || 0,
+        validation_notes: b.validationNotes,
+        storage_path: b.storagePath,
+        file_hash: b.fileHash
       }));
       const { error: uErr } = await supabase.from('bills').upsert(billRows);
       if (uErr) {
@@ -163,5 +186,47 @@ export async function deleteProjectFromDB(id: string, userId: string) {
     await supabase.from('projects').delete().eq('id', id).eq('user_id', userId);
   } catch (error) {
     console.error('Fatal DB delete error:', error);
+  }
+}
+
+/**
+ * Save audit log entries for corrections
+ */
+export async function saveAuditLog(entries: Array<{
+  bill_id: string;
+  project_id: string;
+  field_changed: string;
+  old_value: string;
+  new_value: string;
+  change_source: string;
+  change_reason?: string;
+}>): Promise<boolean> {
+  try {
+    const records = entries.map(entry => ({
+      bill_id: entry.bill_id,
+      project_id: entry.project_id,
+      field_changed: entry.field_changed,
+      old_value: entry.old_value,
+      new_value: entry.new_value,
+      change_source: entry.change_source,
+      change_reason: entry.change_reason || null,
+      created_at: new Date().toISOString(),
+      created_by: 'system'
+    }));
+
+    const { error } = await supabase
+      .from('bill_audit_log')
+      .insert(records);
+
+    if (error) {
+      console.error('[Audit] Error saving audit log:', error);
+      return false;
+    }
+
+    console.log(`[Audit] Saved ${entries.length} audit log entries`);
+    return true;
+  } catch (error) {
+    console.error('[Audit] Fatal error saving audit log:', error);
+    return false;
   }
 }

@@ -1,29 +1,33 @@
 /**
- * PDF-Safe HTML Generator with REAL DATA
+ * PDF/HTML Report Generator with REAL DATA
  * 
  * ARCHITECTURE:
- * /api/export -> Playwright -> /api/export-pdf -> Pre-rendered HTML with real data
+ * - /api/export-pdf?projectId=xxx -> Returns HTML (for preview/debugging)
+ * - /api/export-pdf?projectId=xxx&format=pdf -> Returns PDF (using puppeteer-core + @sparticuz/chromium)
  * 
  * This route:
  * - Fetches REAL project data from Supabase using projectId
  * - Renders HTML with inline SVG charts (no React, no client JS)
  * - Uses explicit dimensions (no ResponsiveContainer)
- * - Returns pure HTML that Playwright captures as PDF
+ * - For PDF: Uses puppeteer-core with @sparticuz/chromium for serverless-compatible rendering
  * 
  * ERROR HANDLING:
  * - 400: Missing projectId
  * - 404: Project not found
  * - 500: Data fetch error or empty project
+ * - 507: PDF generation failed (temporary - for debugging)
  */
 import { NextRequest, NextResponse } from 'next/server';
 import { fetchProjectById } from '@/lib/supabase-sync';
-import { ExtractedBill } from '@/lib/types';
+import { ExtractedBill, ProjectWorkspace } from '@/lib/types';
+import puppeteer from 'puppeteer-core';
+import chromium from '@sparticuz/chromium';
 
 const VOLTIS_CONTACT = {
   company: 'VOLTIS',
-  email: 'info@voltis.es',
-  phone: '+34 XXX XXX XXX',
-  website: 'www.voltis.es'
+  email: 'admin@voltisenergia.com',
+  phone: '747 47 43 60',
+  website: 'www.voltisenergia.com'
 };
 
 const parseDate = (d?: string): Date | null => {
@@ -152,11 +156,13 @@ function processProjectData(project: { bills: ExtractedBill[]; customOCs: Record
       else others += oc.total;
     });
     const totalF = energia + potencia + imp + others;
+    const totalKwh = b.consumoTotalKwh || 0;
+    const avgPrice = b.costeMedioKwh || (totalKwh > 0 ? energia / totalKwh : 0);
     return {
       id: b.id,
       name: (parseDate(b.fechaFin) || new Date()).toLocaleString('es-ES', { month: 'long' }),
-      totalKwh: b.consumoTotalKwh || 0,
-      avgPrice: b.costeMedioKwh || 0,
+      totalKwh,
+      avgPrice,
       totalFactura: totalF,
       energia, potencia, otros: imp + others,
       consumo: b.consumo || [],
@@ -177,55 +183,58 @@ function processProjectData(project: { bills: ExtractedBill[]; customOCs: Record
 }
 
 function generateBarChartSVG(chartData: any[]): string {
-  if (!chartData || chartData.length === 0) return '<svg width="750" height="280"><text x="375" y="140" text-anchor="middle" fill="rgba(255,255,255,0.3)" font-size="14">Sin datos disponibles</text></svg>';
+  if (!chartData || chartData.length === 0) return '<svg width="750" height="350"><text x="375" y="175" text-anchor="middle" fill="rgba(255,255,255,0.3)" font-size="14">Sin datos disponibles</text></svg>';
   
   const width = 750;
-  const height = 280;
-  const padding = { top: 20, right: 10, left: 55, bottom: 60 };
+  const height = 350;
+  const padding = { top: 30, right: 20, left: 60, bottom: 80 };
   const chartWidth = width - padding.left - padding.right;
   const chartHeight = height - padding.top - padding.bottom;
   
   const maxValue = Math.max(...chartData.map(d => d.totalFactura || 0), 1);
   const barCount = chartData.length;
-  const totalBarSpace = chartWidth / barCount;
-  const barWidth = Math.max(25, Math.min(40, totalBarSpace - 8));
+  const minBarWidth = 25;
+  const maxBarWidth = 45;
+  const fixedGap = 8;
+  const barWidth = Math.min(maxBarWidth, Math.max(minBarWidth, (chartWidth - (barCount - 1) * fixedGap) / barCount));
+  const totalBarWidth = barWidth + fixedGap;
   
   const bars = chartData.map((d, i) => {
-    const barHeight = Math.max(4, (d.totalFactura / maxValue) * chartHeight);
-    const x = padding.left + i * totalBarSpace + (totalBarSpace - barWidth) / 2;
+    const barHeight = Math.max(6, (d.totalFactura / maxValue) * chartHeight);
+    const x = padding.left + i * totalBarWidth;
     const y = padding.top + chartHeight - barHeight;
-    return `<rect x="${x}" y="${y}" width="${barWidth}" height="${barHeight}" fill="url(#barGrad)" rx="10"/>
+    return `<rect x="${x}" y="${y}" width="${barWidth}" height="${barHeight}" fill="url(#barGrad)" rx="4"/>
       <title>${d.name}: ${d.totalFactura.toFixed(2)}€</title>`;
   }).join('');
   
   const gridLines = [0, 0.25, 0.5, 0.75, 1].map(pct => {
     const y = padding.top + chartHeight - (chartHeight * pct);
     const value = (maxValue * pct).toLocaleString('es-ES', { maximumFractionDigits: 0 });
-    return `<line x1="${padding.left}" y1="${y}" x2="${width - padding.right}" y2="${y}" stroke="rgba(255,255,255,0.03)" stroke-width="1"/>
-            <text x="${padding.left - 8}" y="${y + 4}" text-anchor="end" fill="rgba(255,255,255,0.3)" font-size="9" font-weight="700">${value}</text>`;
+    return `<line x1="${padding.left}" y1="${y}" x2="${width - padding.right}" y2="${y}" stroke="rgba(255,255,255,0.05)" stroke-width="1"/>
+            <text x="${padding.left - 10}" y="${y + 5}" text-anchor="end" fill="rgba(255,255,255,0.4)" font-size="10" font-weight="600">${value}€</text>`;
   }).join('');
   
-  const monthAbbr: Record<string, string> = {
-    'enero': 'Ene', 'febrero': 'Feb', 'marzo': 'Mar', 'abril': 'Abr',
-    'mayo': 'May', 'junio': 'Jun', 'julio': 'Jul', 'agosto': 'Ago',
-    'septiembre': 'Sep', 'octubre': 'Oct', 'noviembre': 'Nov', 'diciembre': 'Dic'
-  };
-  
+  const baseline = padding.top + chartHeight;
   const xLabels = chartData.map((d, i) => {
-    const x = padding.left + i * totalBarSpace + totalBarSpace / 2;
-    const y = height - 20;
-    const abbr = monthAbbr[d.name] || d.name.substring(0, 3);
-    return `<text x="${x}" y="${y}" text-anchor="end" fill="rgba(255,255,255,0.5)" font-size="9" font-weight="900" transform="rotate(-45 ${x} ${y})">${abbr}</text>`;
+    const x = padding.left + i * totalBarWidth + barWidth / 2;
+    const y = height - 25;
+    const abbr = d.name.substring(0, 3).toUpperCase();
+    return `<text x="${x}" y="${y}" text-anchor="middle" fill="rgba(255,255,255,0.6)" font-size="11" font-weight="600">${abbr}</text>`;
   }).join('');
+  
+  const yAxisLine = `<line x1="${padding.left}" y1="${padding.top}" x2="${padding.left}" y2="${baseline}" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>`;
+  const xAxisLine = `<line x1="${padding.left}" y1="${baseline}" x2="${width - padding.right}" y2="${baseline}" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>`;
   
   return `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
     <defs>
       <linearGradient id="barGrad" x1="0%" y1="0%" x2="0%" y2="100%">
         <stop offset="0%" style="stop-color:#3b82f6"/>
-        <stop offset="100%" stop-color="#8b5cf6" stop-opacity="0.4"/>
+        <stop offset="100%" stop-color="#6366f1"/>
       </linearGradient>
     </defs>
     ${gridLines}
+    ${yAxisLine}
+    ${xAxisLine}
     ${bars}
     ${xLabels}
   </svg>`;
@@ -280,41 +289,184 @@ function getTop3Indices(values: number[]): Set<number> {
   return top3;
 }
 
-function getMascotImg(baseUrl: string, size: number = 160): string {
-  const mascotUrl = `${baseUrl}/assets/mascota-transparent.png`;
-  return `<img src="${mascotUrl}" alt="Voltis" style="width:${size}px;height:auto;display:block;margin:0 auto;" />`;
+/**
+ * Convert HTML to PDF using puppeteer-core + @sparticuz/chromium
+ * Serverless-compatible Chromium for Vercel
+ */
+async function generatePDF(html: string): Promise<Buffer> {
+  // Configure for Vercel serverless environment
+  if (typeof process !== 'undefined') {
+    process.env.AWS_LAMBDA_JS_RUNTIME = 'nodejs22.x';
+  }
+  
+  // Import chromium with serverless configuration
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sparticuz: any = await import('@sparticuz/chromium');
+  const sparticuzModule = sparticuz.default || sparticuz;
+  
+  // Disable GPU for serverless
+  if (sparticuzModule.setGraphicsMode) {
+    sparticuzModule.setGraphicsMode(false);
+  }
+  
+  // Get executable path and args
+  const executablePath = await sparticuzModule.executablePath();
+  const chromiumArgs = sparticuzModule.args || [];
+  
+  const browser = await puppeteer.launch({
+    executablePath,
+    args: [...chromiumArgs, '--disable-gpu', '--disable-setuid-sandbox', '--no-sandbox'],
+    headless: true,
+  });
+  
+  try {
+    const page = await browser.newPage();
+    await page.setContent(html, { waitUntil: 'networkidle0' });
+    
+    const pdf = await page.pdf({
+      format: 'A4',
+      printBackground: true,
+      margin: { top: '0', right: '0', bottom: '0', left: '0' },
+      displayHeaderFooter: false,
+      preferCSSPageSize: true,
+    });
+    
+    return Buffer.from(pdf);
+  } finally {
+    await browser.close();
+  }
+}
+
+interface PDFExportBody {
+  projectId: string;
+  projectName?: string;
+  bills: ExtractedBill[];
+  customOCs?: Record<string, any>;
+  format?: 'html' | 'pdf';
+}
+
+async function getProjectData(projectId: string, body?: PDFExportBody): Promise<{ project: ProjectWorkspace; format: 'html' | 'pdf' } | { error: string; status: number }> {
+  let format: 'html' | 'pdf' = 'html';
+  
+  if (body) {
+    format = body.format === 'pdf' ? 'pdf' : 'html';
+    
+    if (!body.bills || body.bills.length === 0) {
+      return { error: 'No bills to export', status: 400 };
+    }
+    
+    const project: ProjectWorkspace = {
+      id: body.projectId,
+      name: body.projectName || 'PROYECTO',
+      updatedAt: Date.now(),
+      bills: body.bills,
+      customOCs: body.customOCs || {}
+    };
+    
+    console.log(`[Export-PDF] Using bills from request body: ${body.bills.length} bills`);
+    return { project, format };
+  }
+  
+  const dbProject = await fetchProjectById(projectId);
+
+  if (!dbProject) {
+    return { error: `Project not found: ${projectId}`, status: 404 };
+  }
+
+  if (!dbProject.bills || dbProject.bills.length === 0) {
+    return { error: 'Project has no bills to export', status: 400 };
+  }
+  
+  console.log(`[Export-PDF] Fetching from DB: ${dbProject.bills.length} bills`);
+  return { project: dbProject, format };
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const body: PDFExportBody = await req.json();
+    
+    if (!body.projectId) {
+      return NextResponse.json({ error: 'projectId is required' }, { status: 400 });
+    }
+    
+    if (!body.bills || body.bills.length === 0) {
+      return NextResponse.json({ error: 'bills array is required' }, { status: 400 });
+    }
+    
+    console.log(`[Export-PDF] POST: Processing ${body.bills.length} bills for project: ${body.projectId}`);
+    
+    const result = await getProjectData(body.projectId, body);
+    if ('error' in result) {
+      return NextResponse.json({ error: result.error }, { status: result.status });
+    }
+    
+    const { project, format } = result;
+    
+    if (format === 'html') {
+      return generateHTMLResponse(project);
+    }
+    
+    return generatePDFResponse(project);
+    
+  } catch (e) {
+    console.error('[Export-PDF] POST error:', e);
+    return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
+  }
 }
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const projectId = searchParams.get('projectId');
+  const format = searchParams.get('format');
 
   if (!projectId) {
     return NextResponse.json({ error: 'projectId is required' }, { status: 400 });
   }
 
-  console.log(`[Export-PDF] Fetching project: ${projectId}`);
-  const project = await fetchProjectById(projectId);
+  console.log(`[Export-PDF] GET: Fetching project: ${projectId}`);
 
-  if (!project) {
-    console.log(`[Export-PDF] Project not found: ${projectId}`);
-    return NextResponse.json({ error: `Project not found: ${projectId}` }, { status: 404 });
+  const result = await getProjectData(projectId);
+  if ('error' in result) {
+    return NextResponse.json({ error: result.error }, { status: result.status });
   }
+  
+  return generateHTMLResponse(result.project);
+}
 
-  if (!project.bills || project.bills.length === 0) {
-    console.log(`[Export-PDF] Project has no bills: ${projectId}`);
-    return NextResponse.json({ error: 'Project has no bills to export' }, { status: 400 });
+async function generatePDFResponse(project: ProjectWorkspace): Promise<NextResponse> {
+  console.log(`[Export-PDF] Generating PDF for project: ${project.name}`);
+  const html = generateReportHTML(project);
+  
+  try {
+    const pdfBuffer = await generatePDF(html);
+    console.log(`[Export-PDF] PDF generated: ${pdfBuffer.length} bytes`);
+    return new NextResponse(new Uint8Array(pdfBuffer), {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': `attachment; filename="Voltis_Report_${project.id}.pdf"`,
+      },
+    });
+  } catch (error: any) {
+    console.error('[Export-PDF] PDF generation failed:', error);
+    return NextResponse.json({ error: 'PDF generation failed', details: error.message }, { status: 507 });
   }
+}
 
+async function generateHTMLResponse(project: ProjectWorkspace): Promise<NextResponse> {
+  const html = generateReportHTML(project);
+  return new NextResponse(html, {
+    status: 200,
+    headers: { 'Content-Type': 'text/html' },
+  });
+}
+
+function generateReportHTML(project: ProjectWorkspace): string {
   console.log(`[Export-PDF] Processing ${project.bills.length} bills for project: ${project.name}`);
   const data = processProjectData(project);
 
   const barChartSVG = generateBarChartSVG(data.chartData);
   const pieChartSVG = generatePieChartSVG(data.pieData, data.summaryStats.global);
-
-  const baseUrl = req.headers.get('origin') || 'http://localhost:3000';
-  const mascotCover = getMascotImg(baseUrl, 160);
-  const mascotClosing = getMascotImg(baseUrl, 200);
 
   const kwhValues = data.matrixData.map(r => r.totalKwh);
   const priceValues = data.matrixData.map(r => r.avgPrice);
@@ -483,7 +635,7 @@ export async function GET(req: NextRequest) {
       background: rgba(15, 23, 42, 0.5);
       border: 1px solid rgba(255, 255, 255, 0.08);
       border-radius: 16px;
-      padding: 24px;
+      padding: 20px;
       display: flex;
       align-items: center;
       justify-content: center;
@@ -492,6 +644,7 @@ export async function GET(req: NextRequest) {
     .chart-container svg {
       max-width: 100%;
       height: auto;
+      display: block;
     }
     
     .charts-row {
@@ -622,16 +775,6 @@ export async function GET(req: NextRequest) {
       max-width: 180mm;
     }
     
-    .mascot-cover {
-      margin: 0 auto 32px;
-    }
-    
-    .mascot-cover img {
-      width: 160px;
-      height: auto;
-      display: block;
-    }
-    
     .logo {
       font-size: 64px;
       font-weight: 900;
@@ -711,10 +854,6 @@ export async function GET(req: NextRequest) {
       flex: 1;
     }
     
-    .closing-mascot {
-      margin-bottom: 40px;
-    }
-    
     .closing-company {
       font-size: 48px;
       font-weight: 900;
@@ -749,7 +888,6 @@ export async function GET(req: NextRequest) {
   <!-- PAGE 1: COVER -->
   <div class="page cover">
     <div class="cover-content">
-      <div class="mascot-cover">${mascotCover}</div>
       <div class="logo">VOLTIS</div>
       <div class="logo-sub">ANUAL ECONOMICS</div>
       <div class="divider"></div>
@@ -795,14 +933,12 @@ export async function GET(req: NextRequest) {
 
   <!-- PAGE 3: CHARTS - Stacked Full Width -->
   <div class="page">
-    <div class="section-title">Digital Flow 03</div>
     <div class="section-heading">Evolución Mensual</div>
     <div class="chart-container" style="flex:1;">
       ${barChartSVG}
     </div>
     
-    <div class="chart-section" style="flex:1; display:flex; flex-direction:column;">
-      <div class="section-title" style="margin-top:16px;">Visual 04</div>
+    <div class="chart-section" style="flex:1; display:flex; flex-direction:column; margin-top: 24px;">
       <div class="section-heading">Bio-Estructura Económica</div>
       <div class="bio-section" style="flex:1;">
         <div class="pie-container">
@@ -892,7 +1028,6 @@ export async function GET(req: NextRequest) {
   <!-- PAGE 7: CLOSING -->
   <div class="page closing">
     <div class="closing-content">
-      <div class="closing-mascot">${mascotClosing}</div>
       <div class="closing-company">${VOLTIS_CONTACT.company}</div>
       <div class="closing-contact">
         <div class="contact-item">${VOLTIS_CONTACT.email}</div>
@@ -904,11 +1039,6 @@ export async function GET(req: NextRequest) {
   </div>
 </body>
 </html>`;
-
-  return new NextResponse(html, {
-    status: 200,
-    headers: {
-      'Content-Type': 'text/html',
-    },
-  });
+  
+  return html;
 }

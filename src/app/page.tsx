@@ -7,16 +7,25 @@ import {
   CheckCircle, Plus, FolderOpen, Edit2, 
   BarChart3, LayoutDashboard, Settings, LogOut,
   ChevronRight, Sparkles, Zap, Smartphone, Layers, X,
-  Loader
+  Loader, FileSpreadsheet, Check, AlertCircle
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { ExtractedBill, ProjectWorkspace, QueueItem } from '@/lib/types';
 import FileTable from '@/components/FileTable';
 import { exportBillsToExcel } from '@/lib/export';
 import { importBillsFromExcel } from '@/lib/import-bills';
+import { 
+  exportBillsToCorrectionExcel, 
+  parseCorrectionExcel, 
+  detectCorrectionChanges, 
+  applyCorrectionChanges,
+  formatChangesForDisplay,
+  CorrectionChange,
+  CorrectionResult
+} from '@/lib/excel-correction';
 import ReportView from '@/components/ReportView';
 import { motion, AnimatePresence } from 'framer-motion';
-import { fetchAllProjectsFromDB, syncProjectToDB, deleteProjectFromDB } from '@/lib/supabase-sync';
+import { fetchAllProjectsFromDB, syncProjectToDB, deleteProjectFromDB, saveAuditLog } from '@/lib/supabase-sync';
 import { getAssignedMonth } from '@/lib/date-utils';
 import LoginScreen from '@/components/LoginScreen';
 
@@ -51,6 +60,15 @@ function EnergyBillsAppContent() {
   const [renamingProjectId, setRenamingProjectId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [showNewProjectModal, setShowNewProjectModal] = useState(false);
+  
+  // Debug: log when showNewProjectModal changes to true
+  useEffect(() => {
+    if (showNewProjectModal === true) {
+      console.log('[DEBUG-MODAL-OPEN] showNewProjectModal changed to TRUE');
+      console.trace('[DEBUG-MODAL-OPEN] Stack trace for modal open');
+    }
+  }, [showNewProjectModal]);
+  
   const [newProjectName, setNewProjectName] = useState('');
   const [fileRefs, setFileRefs] = useState<Record<string, File>>({}); 
   const [cloudSyncStatus, setCloudSyncStatus] = useState<'synced' | 'syncing' | 'error' | 'local'>('local');
@@ -62,6 +80,12 @@ function EnergyBillsAppContent() {
   const [refineInstruction, setRefineInstruction] = useState('');
   const [isRefining, setIsRefining] = useState(false);
   const [fileBase64Refs, setFileBase64Refs] = useState<Record<string, { data: string, type: string }>>({});
+  
+  // Excel Correction State
+  const [showCorrectionModal, setShowCorrectionModal] = useState(false);
+  const [correctionFile, setCorrectionFile] = useState<File | null>(null);
+  const [correctionResult, setCorrectionResult] = useState<CorrectionResult | null>(null);
+  const [isProcessingCorrection, setIsProcessingCorrection] = useState(false);
 
   const parseDate = (d?: string) => {
     if (!d) return 0;
@@ -607,72 +631,109 @@ function EnergyBillsAppContent() {
   };
 
   const handleExport = () => {
-    // 1. Unified concepts
-    const allOCNames = new Set<string>();
-    bills.forEach(b => {
-      b.otrosConceptos?.forEach(oc => allOCNames.add(oc.concepto));
-      customOCs[b.id]?.forEach(oc => allOCNames.add(oc.concepto));
-    });
+    // Export with correction format (re-importable)
+    exportBillsToCorrectionExcel(bills, customOCs);
+  };
 
-    const concepts: any[] = [
-      { key: 'fileName', label: 'Nombre Archivo' },
-      { key: 'comercializadora', label: 'Compañía' },
-      { key: 'titular', label: 'Titular' },
-      { key: 'cups', label: 'CUPS' },
-      { key: 'tarifa', label: 'Tarifa' },
-      { key: 'fechaInicio', label: 'Fecha Inicio' },
-      { key: 'fechaFin', label: 'Fecha Fin' },
-      { key: 'divider1', label: 'Energía', isSeparator: true },
-      { key: 'consumoTotalKwh', label: 'TOTAL CONSUMO (kWh)' },
-      ...['P1', 'P2', 'P3', 'P4', 'P5', 'P6'].map(p => ({ key: `cons_${p}`, label: `Consumo ${p} (kWh)` })),
-      { key: 'costeTotalConsumo', label: 'TOTAL COSTE CONSUMO (€)' },
-      { key: 'costeMedioKwh', label: 'COSTE MEDIO (€/kWh)' },
-      { key: 'divider2', label: 'Potencia', isSeparator: true },
-      { key: 'costeTotalPotencia', label: 'TOTAL COSTE POTENCIA (€)' },
-      ...['P1', 'P2', 'P3', 'P4', 'P5', 'P6'].map(p => ({ key: `pot_${p}`, label: `Potencia ${p} (€)` })),
-      { key: 'divider3', label: 'Otros Conceptos', isSeparator: true },
-      ...Array.from(allOCNames).map(name => ({ key: `oc_${name}`, label: name })),
-      { key: 'divider4', label: 'Totales', isSeparator: true },
-      { key: 'totalFactura', label: 'TOTAL FACTURA (€)' },
-    ];
+  // Excel Correction Handlers
+  const handleCorrectionFileSelect = (file: File) => {
+    setCorrectionFile(file);
+    setIsProcessingCorrection(true);
+    
+    parseCorrectionExcel(file)
+      .then(({ rows, billIds }) => {
+        const result = detectCorrectionChanges(rows, bills, customOCs);
+        setCorrectionResult(result);
+        setIsProcessingCorrection(false);
+        setShowCorrectionModal(true);
+      })
+      .catch(err => {
+        toast.error('Error al procesar Excel: ' + err.message);
+        setIsProcessingCorrection(false);
+        setCorrectionFile(null);
+      });
+  };
 
-    const getVal = (bill: ExtractedBill, key: string): string | number => {
-      if (key.startsWith('cons_')) {
-        const p = key.split('_')[1];
-        return bill.consumo?.find(c => c.periodo === p)?.kwh || 0;
-      }
-      if (key.startsWith('pot_')) {
-        const p = key.split('_')[1];
-        return bill.potencia?.find(c => c.periodo === p)?.total || 0;
-      }
-      if (key.startsWith('oc_')) {
-        const name = key.substring(3);
-        const ocVal = bill.otrosConceptos?.find(c => c.concepto === name)?.total || 0;
-        const cVal = customOCs[bill.id]?.find(c => c.concepto === name)?.total || 0;
-        return ocVal + cVal;
-      }
-      if (key === 'totalFactura') {
-        const e = bill.costeTotalConsumo || 0;
-        const p = bill.costeTotalPotencia || 0;
-        let ocs = 0;
-        bill.otrosConceptos?.forEach(oc => ocs += oc.total);
-        customOCs[bill.id]?.forEach(oc => ocs += oc.total);
-        return e + p + ocs;
-      }
-      return (bill as any)[key] || 0;
-    };
+  const handleApplyCorrections = async () => {
+    if (!correctionResult || correctionResult.totalChanges === 0) {
+      toast.warning('No hay cambios para aplicar');
+      return;
+    }
 
-    exportBillsToExcel(bills, concepts, getVal);
+    const { updatedBills, updatedCustomOCs, appliedChanges, skippedChanges } = applyCorrectionChanges(
+      bills, 
+      customOCs, 
+      correctionResult.changes
+    );
+
+    // Update state
+    setAllBills(prev => ({
+      ...prev,
+      [currentProjectId]: updatedBills
+    }));
+    setAllCustomOCs(prev => ({
+      ...prev,
+      [currentProjectId]: updatedCustomOCs
+    }));
+
+    // Persist to Supabase
+    saveToDisk(updatedBills, updatedCustomOCs, currentProjectId);
+
+    // Persist audit logs to Supabase
+    if (appliedChanges.length > 0) {
+      const auditEntries = appliedChanges.map(change => ({
+        bill_id: change.billId,
+        project_id: currentProjectId,
+        field_changed: change.conceptKey,
+        old_value: String(change.oldValue),
+        new_value: String(change.newValue),
+        change_source: 'excel_import' as const,
+        change_reason: `Corrección desde Excel: ${change.conceptName}`
+      }));
+      
+      await saveAuditLog(auditEntries);
+    }
+
+    // Build message
+    let message = '';
+    if (appliedChanges.length > 0) {
+      message += `${appliedChanges.length} cambio${appliedChanges.length > 1 ? 's' : ''} aplicado${appliedChanges.length > 1 ? 's' : ''}`;
+    }
+    if (skippedChanges.length > 0) {
+      if (message) message += ', ';
+      message += `${skippedChanges.length} campo${skippedChanges.length > 1 ? 's' : ''} solo lectura omitido${skippedChanges.length > 1 ? 's' : ''}`;
+    }
+
+    toast.success(message || 'Sin cambios por aplicar');
+    
+    // Close modal
+    setShowCorrectionModal(false);
+    setCorrectionFile(null);
+    setCorrectionResult(null);
+  };
+
+  const handleCancelCorrections = () => {
+    setShowCorrectionModal(false);
+    setCorrectionFile(null);
+    setCorrectionResult(null);
   };
 
   if (!isAuthenticated) return <LoginScreen onLogin={handleLogin} error={authError} />;
 
   if (showReport) {
+    const reportBills = bills.filter(b => b.includeInReport !== false);
+    const reportCustomOCs: Record<string, { concepto: string; total: number }[]> = {};
+    reportBills.forEach(b => {
+      if (customOCs[b.id]) {
+        reportCustomOCs[b.id] = customOCs[b.id];
+      }
+    });
+    
     return (
       <div className="fixed inset-0 z-[60] bg-[#020617] overflow-hidden">
         <ReportView 
-          bills={bills} 
-          customOCs={customOCs} 
+          bills={reportBills} 
+          customOCs={reportCustomOCs} 
           onBack={() => setShowReport(false)} 
           projectName={savedProjects.find(p => p.id === currentProjectId)?.name || 'PROYECTO'}
           projectId={currentProjectId}
@@ -730,6 +791,145 @@ function EnergyBillsAppContent() {
 
 
 
+  // Excel Correction Modal
+  const CorrectionModal = () => (
+    <AnimatePresence>
+      {showCorrectionModal && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 backdrop-blur-sm">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95, y: 20 }}
+            className="glass-card border border-white/20 rounded-3xl p-8 w-full max-w-2xl max-h-[80vh] overflow-hidden flex flex-col"
+          >
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-emerald-500/20 flex items-center justify-center">
+                  <FileSpreadsheet className="w-5 h-5 text-emerald-400" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-white">Correcciones desde Excel</h3>
+                  <p className="text-xs text-slate-400">{correctionFile?.name}</p>
+                </div>
+              </div>
+              <button onClick={handleCancelCorrections} className="p-2 hover:bg-white/10 rounded-full">
+                <X className="w-5 h-5 text-slate-400" />
+              </button>
+            </div>
+
+            {isProcessingCorrection ? (
+              <div className="flex flex-col items-center justify-center py-12">
+                <Loader className="w-8 h-8 text-blue-400 animate-spin mb-4" />
+                <p className="text-sm text-slate-400">Analizando cambios...</p>
+              </div>
+            ) : correctionResult ? (
+              <div className="flex-1 overflow-y-auto">
+                {correctionResult.totalChanges === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-12">
+                    <CheckCircle className="w-12 h-12 text-emerald-400 mb-4" />
+                    <p className="text-white font-bold">No se detectaron cambios</p>
+                    <p className="text-sm text-slate-400 mt-2">El archivo Excel coincide con los datos actuales</p>
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex items-center gap-2 p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20 mb-4">
+                      <AlertCircle className="w-5 h-5 text-emerald-400" />
+                      <span className="text-emerald-400 font-bold">
+                        {correctionResult.totalChanges} cambio{correctionResult.totalChanges > 1 ? 's' : ''} detectado{correctionResult.totalChanges > 1 ? 's' : ''}
+                      </span>
+                      <span className="text-slate-400 text-sm">
+                        en {correctionResult.affectedBills.length} factura{correctionResult.affectedBills.length > 1 ? 's' : ''}
+                      </span>
+                    </div>
+
+                    <div className="space-y-2 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
+                      {formatChangesForDisplay(correctionResult.changes).map((line, idx) => (
+                        <div 
+                          key={idx} 
+                          className={`text-sm font-mono px-3 py-2 rounded-lg ${
+                            line.startsWith('Bill:') 
+                              ? 'bg-white/5 text-blue-400 font-bold' 
+                              : 'text-slate-300'
+                          }`}
+                        >
+                          {line}
+                        </div>
+                      ))}
+                    </div>
+
+                    {correctionResult.errors.length > 0 && (
+                      <div className="mt-4 p-3 rounded-xl bg-amber-500/10 border border-amber-500/20">
+                        <p className="text-amber-400 text-xs font-bold mb-2">Advertencias:</p>
+                        {correctionResult.errors.map((err, idx) => (
+                          <p key={idx} className="text-amber-300 text-xs">{err}</p>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            ) : null}
+
+            {correctionResult && correctionResult.totalChanges > 0 && (
+              <div className="flex gap-3 pt-6 mt-4 border-t border-white/10">
+                <button
+                  onClick={handleCancelCorrections}
+                  className="flex-1 px-4 py-3 rounded-xl border border-white/10 text-slate-400 hover:bg-white/5 transition-colors font-bold text-sm"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={handleApplyCorrections}
+                  className="flex-1 px-4 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white transition-colors font-bold text-sm flex items-center justify-center gap-2"
+                >
+                  <Check className="w-4 h-4" /> Aplicar Cambios
+                </button>
+              </div>
+            )}
+          </motion.div>
+        </div>
+      )}
+    </AnimatePresence>
+  );
+
+  // Excel Correction Dropzone (accepts only .xlsx files)
+  const CorrectionDropzone = ({ onFile }: { onFile: (file: File) => void }) => {
+    const { getRootProps, getInputProps, isDragActive } = useDropzone({
+      accept: {
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
+        'application/vnd.ms-excel': ['.xls']
+      },
+      multiple: false,
+      onDrop: (acceptedFiles) => {
+        if (acceptedFiles.length > 0) {
+          onFile(acceptedFiles[0]);
+        }
+      }
+    });
+
+    return (
+      <div
+        {...getRootProps()}
+        className={`p-4 rounded-xl border-2 border-dashed transition-all cursor-pointer ${
+          isDragActive 
+            ? 'border-emerald-500 bg-emerald-500/10' 
+            : 'border-white/10 hover:border-emerald-500/50 hover:bg-white/5'
+        }`}
+      >
+        <input {...getInputProps()} />
+        <div className="flex items-center gap-3">
+          <FileSpreadsheet className={`w-5 h-5 ${isDragActive ? 'text-emerald-400' : 'text-slate-500'}`} />
+          <div>
+            <p className="text-sm text-slate-400">
+              {isDragActive ? 'Suelta el archivo de correcciones' : 'Arrastra Excel de correcciones'}
+            </p>
+            <p className="text-[10px] text-slate-500">.xlsx, .xls</p>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="flex h-screen bg-[#020617] overflow-hidden font-inter text-slate-100 selection:bg-blue-500/30">
       
@@ -754,7 +954,14 @@ function EnergyBillsAppContent() {
                 <Layers className="w-3 h-3" /> Proyectos Activos
               </h3>
               <button 
-                onClick={() => { setShowNewProjectModal(true); setNewProjectName(''); }}
+                onClick={(e) => { 
+                  console.log('[DEBUG-NEW-PROJECT-BTN] Clicked new project button'); 
+                  console.log('[DEBUG-NEW-PROJECT-BTN] Event target:', e.target); 
+                  console.log('[DEBUG-NEW-PROJECT-BTN] Event currentTarget:', e.currentTarget); 
+                  console.log('[DEBUG-NEW-PROJECT-BTN] About to call setShowNewProjectModal(true)'); 
+                  console.trace('[DEBUG-NEW-PROJECT-BTN] Stack trace');
+                  setShowNewProjectModal(true); setNewProjectName(''); 
+                }}
                 className="p-1.5 hover:bg-white/5 text-blue-500 rounded-lg transition-all"
               >
                 <Plus className="w-4 h-4" />
@@ -894,7 +1101,13 @@ function EnergyBillsAppContent() {
 
               <div className="flex items-center gap-4 no-print">
                 <button 
-                  onClick={() => setShowReport(true)}
+                  onClick={() => { 
+                    console.log('[DEBUG-REPORT-BTN] Clicked report button'); 
+                    console.log('[DEBUG-STATE] showNewProjectModal before:', showNewProjectModal); 
+                    console.log('[DEBUG-STATE] showReport before:', showReport); 
+                    setShowReport(true); 
+                    console.log('[DEBUG-STATE] showReport after setShowReport(true)'); 
+                  }}
                   disabled={bills.length === 0}
                   className="group relative px-8 py-4 bg-white text-black font-black text-xs uppercase tracking-widest rounded-full hover:scale-105 transition-all disabled:opacity-20 flex items-center gap-3 overflow-hidden"
                 >
@@ -910,6 +1123,24 @@ function EnergyBillsAppContent() {
                   <Download className="w-4 h-4 text-emerald-400" />
                   Exportar Excel
                 </button>
+                <label 
+                  className="px-6 py-4 bg-emerald-900/30 border border-emerald-500/20 text-emerald-400 font-black text-xs uppercase tracking-widest rounded-full hover:bg-emerald-900/50 transition-all disabled:opacity-20 flex items-center gap-2 cursor-pointer"
+                  title="Subir correcciones desde Excel"
+                >
+                  <input
+                    type="file"
+                    accept=".xlsx,.xls"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) handleCorrectionFileSelect(file);
+                      e.target.value = '';
+                    }}
+                    disabled={bills.length === 0}
+                  />
+                  <FileSpreadsheet className="w-4 h-4" />
+                  Importar Correcciones
+                </label>
               </div>
             </header>
 
@@ -923,9 +1154,12 @@ function EnergyBillsAppContent() {
             >
               <input {...getInputProps()} />
               <div className={`
-                glass-card p-14 rounded-[40px] border border-white/5 text-center flex flex-col items-center gap-6 overflow-hidden scanner-glow
-                ${isDragActive ? 'border-blue-500/50 bg-blue-500/5' : 'hover:border-white/10'}
+                glass-card p-14 rounded-[40px] border text-center flex flex-col items-center gap-6 overflow-hidden
+                ${isDragActive ? 'border-blue-500/50 bg-blue-500/5' : 'border-white/5 hover:border-white/10'}
               `}>
+                {isDragActive && (
+                  <div className="absolute inset-0 bg-gradient-to-t from-blue-500/10 to-transparent animate-scan pointer-events-none" />
+                )}
                 <div className="w-20 h-20 rounded-3xl bg-blue-600/10 flex items-center justify-center group-hover:scale-110 transition-transform duration-500 mb-2">
                    {isExtracting ? (
                      <Loader className="w-10 h-10 text-blue-400 animate-spin" />
@@ -1344,6 +1578,9 @@ function EnergyBillsAppContent() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Excel Correction Modal */}
+      <CorrectionModal />
 
       <style jsx global>{`
         .custom-scrollbar::-webkit-scrollbar { width: 4px; }

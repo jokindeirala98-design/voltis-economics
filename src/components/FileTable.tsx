@@ -1,9 +1,11 @@
 "use client";
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import { ExtractedBill } from '@/lib/types';
-import { AlertTriangle, GripVertical, Calendar, Sparkles } from 'lucide-react';
+import { AlertTriangle, GripVertical, Calendar, Sparkles, CheckCircle2, XCircle, Edit3, Save, X, Shield, ShieldAlert, ShieldCheck, RefreshCw, Pencil } from 'lucide-react';
 import { getAssignedMonth } from '@/lib/date-utils';
+import { validateBill, getValidationMessage, ValidationResult } from '@/lib/bill-validator';
+import { getOrderedConcepts, getBillCanonicalTotal, getCanonicalName, CANONICAL_GROUPS } from '@/lib/concept-utils';
 
 interface FileTableProps {
   bills: ExtractedBill[];
@@ -13,32 +15,106 @@ interface FileTableProps {
   onRefine: (bill: ExtractedBill) => void;
 }
 
-const normalizeConceptName = (name: string): string => {
-  const n = name.toUpperCase().trim();
-  if (n.includes('EXCESO') && n.includes('POTENCIA')) return 'EXCESO DE POTENCIA';
-  if (n.includes('BONO SOCIAL')) return 'BONO SOCIAL';
-  if (n.includes('ALQUILER') || n.includes('EQUIPO')) return 'ALQUILER DE EQUIPOS';
-  if (n.includes('PEAJE') || n.includes('TRANSPORTE')) return 'PEAJES Y TRANSPORTES';
-  if (n.includes('EXCEDENTE')) return 'COMPENSACIÓN EXCEDENTES';
-  if (n.includes('IMPUESTO') && n.includes('ELÉCTRICO')) return 'IMPUESTO ELÉCTRICO';
-  if (n.includes('IVA') || n.includes('IGIC')) return 'IVA / IGIC';
-  return n;
-};
+const CANONICAL_OPTIONS = [
+  { value: CANONICAL_GROUPS.EXCESOS_POTENCIA, label: 'Exceso de Potencia' },
+  { value: CANONICAL_GROUPS.BONO_SOCIAL, label: 'Bono Social' },
+  { value: CANONICAL_GROUPS.ALQUILER_EQUIPO, label: 'Alquiler de Equipos' },
+  { value: CANONICAL_GROUPS.PEAJES_CARGOS, label: 'Peajes y Cargos' },
+  { value: CANONICAL_GROUPS.COMPENSACION, label: 'Compensación Excedentes' },
+  { value: CANONICAL_GROUPS.IMPUESTO_ELECTRICO, label: 'Impuesto Eléctrico' },
+  { value: CANONICAL_GROUPS.IVA, label: 'IVA' },
+  { value: CANONICAL_GROUPS.DESCUENTO, label: 'Descuento' },
+  { value: CANONICAL_GROUPS.AJUSTES, label: 'Ajustes' },
+  { value: CANONICAL_GROUPS.OTROS, label: 'Otros' },
+];
 
 export default function FileTable({ bills, onUpdateBills, customOCs, onUpdateOCs, onRefine }: FileTableProps) {
   const [editingCell, setEditingCell] = useState<{ billId: string, field: string } | null>(null);
   const [draggedConcept, setDraggedConcept] = useState<string | null>(null);
+  const [validatingBill, setValidatingBill] = useState<string | null>(null);
+  const [validationResults, setValidationResults] = useState<Record<string, ValidationResult>>({});
+  const [editingConcept, setEditingConcept] = useState<{ canonicalName: string; billId?: string } | null>(null);
+  const [editConceptName, setEditConceptName] = useState('');
+  const [editConceptValue, setEditConceptValue] = useState<number>(0);
+  const [editCanonicalGroup, setEditCanonicalGroup] = useState('');
 
-  // Derive a unified list of NORMALIZED "Otros Conceptos" (OCs) names across all bills
-  const orderedConcepts = useMemo(() => {
-    const allNames = new Set<string>();
-    bills.forEach(bill => {
-      bill.otrosConceptos?.forEach(oc => allNames.add(normalizeConceptName(oc.concepto)));
-      if (customOCs[bill.id]) {
-        customOCs[bill.id].forEach(oc => allNames.add(normalizeConceptName(oc.concepto)));
+  const getValidationStatus = useCallback((bill: ExtractedBill) => {
+    if (validationResults[bill.id]) {
+      return validationResults[bill.id];
+    }
+    return validateBill(bill);
+  }, [validationResults]);
+
+  const handleValidate = useCallback((bill: ExtractedBill) => {
+    setValidatingBill(bill.id);
+    const result = validateBill(bill);
+    setValidationResults(prev => ({ ...prev, [bill.id]: result }));
+    
+    const updated = bills.map<ExtractedBill>(b => {
+      if (b.id === bill.id) {
+        return {
+          ...b,
+          totalFactura: result.printedTotal,
+          mathCheckPassed: result.isValid,
+          discrepancyAmount: result.discrepancy,
+          validationStatus: (result.isValid ? 'validated' : 'discrepancy') as 'validated' | 'discrepancy',
+          lastValidatedAt: new Date().toISOString(),
+          reviewAttempts: (b.reviewAttempts || 0) + 1
+        } as ExtractedBill;
       }
+      return b;
     });
-    return Array.from(allNames);
+    onUpdateBills(updated);
+    setValidatingBill(null);
+  }, [bills, onUpdateBills, validationResults]);
+
+  const handleToggleIncludeInReport = useCallback((bill: ExtractedBill) => {
+    const updated = bills.map<ExtractedBill>(b => {
+      if (b.id === bill.id) {
+        return {
+          ...b,
+          includeInReport: !b.includeInReport
+        } as ExtractedBill;
+      }
+      return b;
+    });
+    onUpdateBills(updated);
+  }, [bills, onUpdateBills]);
+
+  const getValidationBadge = (bill: ExtractedBill) => {
+    const result = getValidationStatus(bill);
+    if (result.printedTotal === 0) {
+      return null;
+    }
+    
+    if (result.isValid) {
+      return (
+        <div className="flex items-center gap-1 text-emerald-400" title={getValidationMessage(result)}>
+          <ShieldCheck className="w-3.5 h-3.5" />
+          <span className="text-[9px] font-bold">VALIDADO</span>
+        </div>
+      );
+    }
+    
+    if (result.discrepancyPercent > 5) {
+      return (
+        <div className="flex items-center gap-1 text-red-400" title={getValidationMessage(result)}>
+          <ShieldAlert className="w-3.5 h-3.5" />
+          <span className="text-[9px] font-bold">{result.discrepancy.toFixed(2)}€</span>
+        </div>
+      );
+    }
+    
+    return (
+      <div className="flex items-center gap-1 text-amber-400" title={getValidationMessage(result)}>
+        <Shield className="w-3.5 h-3.5" />
+        <span className="text-[9px] font-bold">{result.discrepancy.toFixed(2)}€</span>
+      </div>
+    );
+  };
+
+  const orderedGroups = useMemo(() => {
+    return getOrderedConcepts(bills, customOCs);
   }, [bills, customOCs]);
 
   const handleEdit = (billId: string, field: string, value: string | number) => {
@@ -63,33 +139,81 @@ export default function FileTable({ bills, onUpdateBills, customOCs, onUpdateOCs
         let currentOCs = [...(bill.otrosConceptos || [])];
         let currentCustom = [...(customOCs[bill.id] || [])];
         
-        // Find values
         const srcVal = currentOCs.find(c => c.concepto === sourceConcept)?.total || 
                        currentCustom.find(c => c.concepto === sourceConcept)?.total || 0;
                        
         const tgtVal = currentOCs.find(c => c.concepto === targetConcept)?.total || 
                        currentCustom.find(c => c.concepto === targetConcept)?.total || 0;
                        
-        // Remove both
         currentOCs = currentOCs.filter(c => c.concepto !== sourceConcept && c.concepto !== targetConcept);
         currentCustom = currentCustom.filter(c => c.concepto !== sourceConcept && c.concepto !== targetConcept);
         
-        // Add merged
         if (srcVal + tgtVal > 0) {
           currentCustom.push({ concepto: newName, total: srcVal + tgtVal });
         }
         
         onUpdateOCs(bill.id, currentCustom);
       });
-      
-      // Note: Manual reordering via Drag & Drop is temporarily disabled to ensure data integrity
-      // If we need D&D persistence, we should implement a server-side concept order.
     }
     setDraggedConcept(null);
   };
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
+  };
+
+  const startEditConcept = (canonicalName: string, billId?: string) => {
+    setEditingConcept({ canonicalName, billId });
+    setEditConceptName(canonicalName);
+    
+    if (billId) {
+      const bill = bills.find(b => b.id === billId);
+      const ocs = customOCs[billId] || [];
+      const total = getBillCanonicalTotal(bill!, ocs, canonicalName);
+      setEditConceptValue(total);
+    } else {
+      setEditConceptValue(0);
+    }
+    setEditCanonicalGroup(canonicalName);
+  };
+
+  const saveEditConcept = () => {
+    if (!editingConcept) return;
+
+    const { canonicalName, billId } = editingConcept;
+    
+    if (billId) {
+      const bill = bills.find(b => b.id === billId);
+      if (!bill) return;
+
+      let currentOCs = [...(customOCs[billId] || [])];
+      
+      currentOCs = currentOCs.filter(c => getCanonicalName(c.concepto) !== getCanonicalName(canonicalName));
+      
+      if (editConceptValue !== 0) {
+        currentOCs.push({ concepto: editConceptName, total: editConceptValue });
+      }
+      
+      onUpdateOCs(billId, currentOCs);
+    } else {
+      bills.forEach(bill => {
+        let currentOCs = [...(customOCs[bill.id] || [])];
+        
+        currentOCs = currentOCs.filter(c => getCanonicalName(c.concepto) !== getCanonicalName(canonicalName));
+        
+        if (editConceptValue !== 0) {
+          currentOCs.push({ concepto: editConceptName, total: editConceptValue });
+        }
+        
+        onUpdateOCs(bill.id, currentOCs);
+      });
+    }
+
+    setEditingConcept(null);
+  };
+
+  const cancelEditConcept = () => {
+    setEditingConcept(null);
   };
 
   const renderRow = (label: string, field: keyof ExtractedBill, isNumber = false) => (
@@ -162,20 +286,104 @@ export default function FileTable({ bills, onUpdateBills, customOCs, onUpdateOCs
     </tr>
   );
 
+  const isEditingThisConcept = (canonicalName: string) => editingConcept?.canonicalName === canonicalName;
+
   return (
     <div className="w-full overflow-x-auto relative z-0 custom-scrollbar pb-6 text-slate-200">
+      {editingConcept && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 backdrop-blur-sm">
+          <div className="glass-card border border-white/20 rounded-3xl p-8 w-full max-w-lg">
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-lg font-bold text-white">Editar Concepto</h3>
+              <button onClick={cancelEditConcept} className="p-2 hover:bg-white/10 rounded-full">
+                <X className="w-5 h-5 text-slate-400" />
+              </button>
+            </div>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">
+                  Nombre del Concepto
+                </label>
+                <input
+                  type="text"
+                  value={editConceptName}
+                  onChange={(e) => setEditConceptName(e.target.value)}
+                  className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white outline-none focus:border-blue-500 transition-colors"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">
+                  Grupo Canónico
+                </label>
+                <select
+                  value={editCanonicalGroup}
+                  onChange={(e) => setEditCanonicalGroup(e.target.value)}
+                  className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white outline-none focus:border-blue-500 transition-colors"
+                >
+                  {CANONICAL_OPTIONS.map(opt => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
+              </div>
+              
+              <div>
+                <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">
+                  Valor (€)
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={editConceptValue}
+                  onChange={(e) => setEditConceptValue(Number(e.target.value))}
+                  className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white outline-none focus:border-blue-500 transition-colors"
+                />
+              </div>
+              
+              <div className="flex gap-3 pt-4">
+                <button
+                  onClick={cancelEditConcept}
+                  className="flex-1 px-4 py-3 rounded-xl border border-white/10 text-slate-400 hover:bg-white/5 transition-colors font-bold text-sm"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={saveEditConcept}
+                  className="flex-1 px-4 py-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white transition-colors font-bold text-sm flex items-center justify-center gap-2"
+                >
+                  <Save className="w-4 h-4" /> Guardar
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      
       <table className="w-full min-w-max text-left border-collapse">
          <thead>
            <tr>
              <th className="p-4 w-64 bg-[#0a0f1c] text-blue-500 font-black text-xs uppercase tracking-[0.2em] sticky left-0 z-20 border-b border-white/10 shadow-[4px_0_24px_-10px_rgba(0,0,0,0.5)]">
                Concepto / Periodo
              </th>
-             {bills.map((bill, idx) => (
-               <th key={bill.id} className="p-4 bg-[#0a0f1c] border-b border-white/10 border-l border-white/5 w-64">
+              {bills.map((bill, idx) => (
+                <th key={bill.id} className={`p-4 bg-[#0a0f1c] border-b border-white/10 border-l border-white/5 w-64 ${bill.includeInReport === false ? 'opacity-40' : ''}`}>
                  <div className="flex flex-col gap-1">
                    <div className="flex items-center justify-between">
                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Factura {idx + 1}</span>
                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => handleValidate(bill)}
+                          disabled={validatingBill === bill.id}
+                          className="p-1 rounded-lg hover:bg-emerald-500/20 text-slate-600 hover:text-emerald-400 transition-all disabled:opacity-50"
+                          title="Validar matemáticamente"
+                        >
+                          {validatingBill === bill.id ? (
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <Shield className="w-3.5 h-3.5" />
+                          )}
+                        </button>
                         <button
                           onClick={() => onRefine(bill)}
                           className="p-1 rounded-lg hover:bg-blue-500/20 text-slate-500 hover:text-blue-400 transition-all"
@@ -197,11 +405,26 @@ export default function FileTable({ bills, onUpdateBills, customOCs, onUpdateOCs
                      </div>
                    </div>
                    <span className="text-sm font-bold text-white truncate" title={bill.fileName}>{bill.fileName}</span>
-                   {bill.status !== 'error' ? (
-                     <span className="text-[10px] text-emerald-400 flex items-center gap-1 mt-1"><div className="w-1.5 h-1.5 rounded-full bg-emerald-400" /> Extraído</span>
-                   ) : (
-                     <span className="text-[10px] text-red-400 flex items-center gap-1 mt-1"><AlertTriangle className="w-3 h-3" /> Error</span>
-                   )}
+                    {bill.status !== 'error' ? (
+                      <div className="flex items-center gap-2 mt-1">
+                        <span className="text-[10px] text-emerald-400 flex items-center gap-1"><div className="w-1.5 h-1.5 rounded-full bg-emerald-400" /> Extraído</span>
+                        <button
+                          onClick={() => handleToggleIncludeInReport(bill)}
+                          className={`p-0.5 rounded transition-all ${bill.includeInReport !== false ? 'text-emerald-400 hover:text-emerald-300' : 'text-slate-600 hover:text-slate-400'}`}
+                          title={bill.includeInReport !== false ? "Incluido en informe (clic para excluir)" : "Excluido del informe (clic para incluir)"}
+                        >
+                          <div className={`w-4 h-4 rounded border-2 flex items-center justify-center transition-all ${bill.includeInReport !== false ? 'bg-emerald-500 border-emerald-500' : 'border-slate-500'}`}>
+                            {bill.includeInReport !== false && (
+                              <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                              </svg>
+                            )}
+                          </div>
+                        </button>
+                      </div>
+                    ) : (
+                      <span className="text-[10px] text-red-400 flex items-center gap-1 mt-1"><AlertTriangle className="w-3 h-3" /> Error</span>
+                    )}
                  </div>
                </th>
              ))}
@@ -242,34 +465,44 @@ export default function FileTable({ bills, onUpdateBills, customOCs, onUpdateOCs
            
            <tr className="bg-white/5 border-b border-white/10"><td colSpan={bills.length + 1} className="h-4"></td></tr>
            
-           {/* Otros Conceptos (DnD) */}
-           {orderedConcepts.map((conceptName) => (
+           {/* Otros Conceptos with inline editing */}
+           {orderedGroups.map((group) => (
               <tr 
-                key={conceptName}
-                draggable
-                onDragStart={(e) => handleDragStart(e, conceptName)}
-                onDrop={(e) => handleDrop(e, conceptName)}
-                onDragOver={handleDragOver}
-                className={`border-b border-white/5 hover:bg-white/5 transition-colors cursor-grab active:cursor-grabbing group ${draggedConcept === conceptName ? 'opacity-50' : ''}`}
+                key={group.canonicalName}
+                className={`border-b border-white/5 hover:bg-white/5 transition-colors group ${isEditingThisConcept(group.canonicalName) ? 'bg-blue-900/20' : ''}`}
               >
-                <td className="p-3 font-semibold text-xs text-slate-400 uppercase tracking-widest sticky left-0 bg-[#0f172a] group-hover:bg-[#15203b] z-10 shadow-[4px_0_24px_-10px_rgba(0,0,0,0.5)] flex items-center gap-2">
-                  <GripVertical className="w-4 h-4 opacity-30 group-hover:opacity-100 transition-opacity" />
-                  {conceptName}
+                <td className="p-3 sticky left-0 bg-[#0f172a] group-hover:bg-[#15203b] z-10 shadow-[4px_0_24px_-10px_rgba(0,0,0,0.5)]">
+                  <div className="flex items-center gap-2">
+                    <GripVertical className="w-4 h-4 text-slate-600 opacity-30 group-hover:opacity-100 transition-opacity cursor-grab" />
+                    <span className="font-semibold text-xs text-slate-400 uppercase tracking-widest">
+                      {group.displayName}
+                    </span>
+                    <button
+                      onClick={() => startEditConcept(group.canonicalName)}
+                      className="p-1 rounded hover:bg-white/10 text-slate-600 hover:text-blue-400 transition-all opacity-0 group-hover:opacity-100"
+                      title="Editar concepto"
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 </td>
                 {bills.map(bill => {
-                  // Sum all original concepts that map to this normalized conceptName
-                  const ocVal = (bill.otrosConceptos || [])
-                    .filter(c => normalizeConceptName(c.concepto) === conceptName)
-                    .reduce((sum, c) => sum + (c.total || 0), 0);
-                    
-                  const cVal = (customOCs[bill.id] || [])
-                    .filter(c => normalizeConceptName(c.concepto) === conceptName)
-                    .reduce((sum, c) => sum + (c.total || 0), 0);
-                    
-                  const val = ocVal + cVal;
+                  const billOC = customOCs[bill.id] || [];
+                  const val = getBillCanonicalTotal(bill, billOC, group.canonicalName);
                   return (
-                    <td key={bill.id} className="p-3 text-sm border-l border-white/5 whitespace-nowrap text-slate-300">
-                      {val.toLocaleString('es-ES', { maximumFractionDigits: 2 })} €
+                    <td key={bill.id} className="p-3 text-sm border-l border-white/5 whitespace-nowrap">
+                      <div className="flex items-center justify-between group/value">
+                        <span className="text-slate-300">
+                          {val.toLocaleString('es-ES', { maximumFractionDigits: 2 })} €
+                        </span>
+                        <button
+                          onClick={() => startEditConcept(group.canonicalName, bill.id)}
+                          className="p-1 rounded hover:bg-blue-500/20 text-slate-600 hover:text-blue-400 transition-all opacity-0 group-hover/value:opacity-100"
+                          title="Editar valor"
+                        >
+                          <Pencil className="w-3 h-3" />
+                        </button>
+                      </div>
                     </td>
                   );
                 })}
@@ -288,7 +521,7 @@ export default function FileTable({ bills, onUpdateBills, customOCs, onUpdateOCs
                 const potencia = bill.costeTotalPotencia || 0;
                 let ocs = 0;
                 bill.otrosConceptos?.forEach(oc => ocs += oc.total);
-                customOCs[bill.id]?.forEach(oc => ocs += oc.total);
+                (customOCs[bill.id] || []).forEach(oc => ocs += oc.total);
                 const calcTotal = energia + potencia + ocs;
                 return (
                   <td key={bill.id} className="p-4 text-lg font-black text-white border-l border-white/5 whitespace-nowrap">
@@ -298,7 +531,7 @@ export default function FileTable({ bills, onUpdateBills, customOCs, onUpdateOCs
              })}
            </tr>
          </tbody>
-      </table>
-    </div>
-  );
+       </table>
+     </div>
+   );
 }
