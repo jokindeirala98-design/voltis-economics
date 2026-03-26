@@ -85,6 +85,7 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
   const contentRef = useRef<HTMLDivElement>(null);
   const [selectedBillId, setSelectedBillId] = useState<string | null>(null); // For matrix 3
   const [selectedPriceBillId, setSelectedPriceBillId] = useState<string | null>(null); // For matrix 2
+  const [showAvgPriceModal, setShowAvgPriceModal] = useState(false); // For average price breakdown modal
   const [selectedMonths, setSelectedMonths] = useState<Set<number>>(new Set([0,1,2,3,4,5,6,7,8,9,10,11])); // All months selected by default
   const [email, setEmail] = useState('');
   const [isSending, setIsSending] = useState(false);
@@ -332,7 +333,8 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
     return validCups[0] || filteredValidBills[0]?.cups || 'CUPS NO DETECTADO';
   }, [filteredValidBills]);
 
-  const { chartData, pieData, summaryStats, tableData } = useMemo(() => {
+  const { chartData, pieData, summaryStats, tableData, periodData, averagePriceStats } = useMemo(() => {
+    const periods = ['P1', 'P2', 'P3', 'P4', 'P5', 'P6'];
     const billsForSelectedMonths = filteredValidBills.filter(b => {
       const { month: monthIdx } = getAssignedMonth(b.fechaInicio, b.fechaFin);
       return selectedMonths.has(monthIdx);
@@ -352,6 +354,40 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
       kwh: cData.reduce((sum, m) => sum + m.totalKwh, 0)
     };
 
+    // Calculate period € spend and averages
+    const periodTotals = periods.map(period => {
+      let totalEur = 0;
+      let totalKwh = 0;
+      billsForSelectedMonths.forEach(b => {
+        const consumoItem = b.consumo?.find(c => c.periodo === period);
+        if (consumoItem) {
+          totalKwh += consumoItem.kwh || 0;
+          // Check if explicit cost exists, otherwise estimate
+          if (consumoItem.total !== undefined && consumoItem.total > 0) {
+            totalEur += consumoItem.total;
+          } else if (consumoItem.precioKwh !== undefined && consumoItem.precioKwh > 0 && consumoItem.kwh > 0) {
+            // Use explicit price * kWh
+            totalEur += consumoItem.kwh * consumoItem.precioKwh;
+          }
+        }
+      });
+      return { period, totalEur, totalKwh };
+    });
+
+    // Calculate period averages (€/kWh)
+    const periodAverages = periodTotals.map(p => ({
+      period: p.period,
+      avgPrice: p.totalKwh > 0 ? p.totalEur / p.totalKwh : 0,
+      totalEur: p.totalEur,
+      totalKwh: p.totalKwh
+    }));
+
+    // New precioPromedio = average of period averages (excluding periods with 0 kWh)
+    const validPeriods = periodAverages.filter(p => p.totalKwh > 0);
+    const newPrecioPromedio = validPeriods.length > 0
+      ? validPeriods.reduce((sum, p) => sum + p.avgPrice, 0) / validPeriods.length
+      : 0;
+
     // Keep the tableData as individual bills for the detailed matrix
     const tData = billsForSelectedMonths.map(b => {
       const energia = b.costeTotalConsumo || 0;
@@ -364,6 +400,28 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
       const totalF = energia + potencia + imp + others;
       const totalKwh = b.consumoTotalKwh || 0;
       const avgPrice = b.costeMedioKwh || (totalKwh > 0 ? energia / totalKwh : 0);
+
+      // Calculate € spend per period for each bill
+      const avgEnergyPrice = totalKwh > 0 ? energia / totalKwh : 0;
+      const periodSpend = periods.map(period => {
+        const consumoItem = b.consumo?.find(c => c.periodo === period);
+        const kwh = consumoItem?.kwh || 0;
+        let eur = 0;
+        let isEstimated = false;
+        if (consumoItem) {
+          if (consumoItem.total !== undefined && consumoItem.total > 0) {
+            eur = consumoItem.total;
+          } else if (consumoItem.precioKwh !== undefined && consumoItem.precioKwh > 0 && kwh > 0) {
+            eur = kwh * consumoItem.precioKwh;
+          } else if (kwh > 0 && avgEnergyPrice > 0) {
+            // Fallback: estimate using average energy price
+            eur = kwh * avgEnergyPrice;
+            isEstimated = true;
+          }
+        }
+        return { eur, isEstimated, kwh };
+      });
+
       return {
         name: getMonthYear(b.fechaFin),
         period: `${b.fechaInicio?.split('-').reverse().slice(0,2).join('/')}-${b.fechaFin?.split('-').reverse().slice(0,2).join('/')}`,
@@ -390,19 +448,44 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
           P4_agg: b.consumo?.find(c => c.periodo === 'P4')?.isAggregate,
           P5_agg: b.consumo?.find(c => c.periodo === 'P5')?.isAggregate,
           P6_agg: b.consumo?.find(c => c.periodo === 'P6')?.isAggregate,
+        },
+        // New: period € spend with estimated flag
+        periodSpend: {
+          P1: { eur: periodSpend[0].eur, isEstimated: periodSpend[0].isEstimated },
+          P2: { eur: periodSpend[1].eur, isEstimated: periodSpend[1].isEstimated },
+          P3: { eur: periodSpend[2].eur, isEstimated: periodSpend[2].isEstimated },
+          P4: { eur: periodSpend[3].eur, isEstimated: periodSpend[3].isEstimated },
+          P5: { eur: periodSpend[4].eur, isEstimated: periodSpend[4].isEstimated },
+          P6: { eur: periodSpend[5].eur, isEstimated: periodSpend[5].isEstimated },
+          totalEur: periodSpend.reduce((sum, p) => sum + p.eur, 0)
         }
       };
     });
+
+    // Period totals for the economic matrix
+    const periodTotalsEur = periods.map((period, idx) => ({
+      period,
+      totalEur: periodTotals[idx].totalEur,
+      totalKwh: periodTotals[idx].totalKwh,
+      avgPrice: periodAverages[idx].avgPrice
+    }));
+
     const pData = [
       { name: 'Consumo Energía', value: totals.energetic, color: '#3b82f6' },
       { name: 'Potencia Contratada', value: totals.power, color: '#8b5cf6' },
       { name: 'Impuestos y Tasas', value: totals.taxes, color: '#10b981' },
       { name: 'Otros Conceptos', value: totals.others, color: '#f59e0b' }
     ].filter(i => i.value > 0);
-    return { chartData: cData, pieData: pData, summaryStats: totals, tableData: tData };
+
+    return {
+      chartData: cData,
+      pieData: pData,
+      summaryStats: { ...totals, precioPromedio: newPrecioPromedio },
+      tableData: tData,
+      periodData: periodTotalsEur,
+      averagePriceStats: periodAverages
+    };
   }, [filteredValidBills, customOCs, selectedMonths]);
-
-
 
   const isTop3 = (val: number, array: number[]) => {
     const sorted = [...new Set(array)].sort((a, b) => b - a);
@@ -542,22 +625,31 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
                   </div>
                   <div className="grid grid-cols-2 lg:grid-cols-4 gap-6">
                     {[
-                      { label: 'Facturación Global', value: summaryStats.global, unit: '€', icon: DollarSign, color: 'text-blue-500', dec: 2 },
-                      { label: 'Energía Absoluta', value: summaryStats.kwh, unit: 'kWh', icon: Zap, color: 'text-sky-400', dec: 0 },
-                      { label: 'Precio Promedio', value: summaryStats.global / (summaryStats.kwh || 1), unit: '€/kWh', icon: TrendingUp, color: 'text-teal-400', dec: 2 },
-                      { label: 'Docs Procesados', value: filteredValidBills.length, unit: 'IA', icon: CheckCircle2, color: 'text-indigo-400', dec: 0 },
+                      { label: 'Facturación Global', value: summaryStats.global, unit: '€', icon: DollarSign, color: 'text-blue-500', dec: 2, clickable: false },
+                      { label: 'Energía Absoluta', value: summaryStats.kwh, unit: 'kWh', icon: Zap, color: 'text-sky-400', dec: 0, clickable: false },
+                      { label: 'Precio Promedio', value: summaryStats.precioPromedio, unit: '€/kWh', icon: TrendingUp, color: 'text-teal-400', dec: 4, clickable: true, onClick: () => setShowAvgPriceModal(true) },
+                      { label: 'Docs Procesados', value: filteredValidBills.length, unit: 'IA', icon: CheckCircle2, color: 'text-indigo-400', dec: 0, clickable: false },
                     ].map((kpi, i) => (
-                      <div key={i} className="kpi-card kpi-glass-premium p-8 rounded-[40px] border relative overflow-hidden group">
+                      <div
+                        key={i}
+                        className={`kpi-card kpi-glass-premium p-8 rounded-[40px] border relative overflow-hidden group ${kpi.clickable ? 'cursor-pointer hover:border-teal-500/40 hover:bg-teal-500/5 transition-all' : ''}`}
+                        onClick={kpi.clickable ? kpi.onClick : undefined}
+                      >
                         <div className={`w-14 h-14 rounded-2xl flex items-center justify-center mb-8 bg-white/10 border border-white/10 ${kpi.color} kpi-icon-glow`}>
                           <kpi.icon className="w-7 h-7" />
                         </div>
                         <span className="text-[11px] font-black uppercase tracking-widest text-slate-400 block mb-2">{kpi.label}</span>
                         <div className="flex items-baseline gap-2">
-                          <p className="text-4xl font-black tracking-tighter tabular-nums text-white group-hover:text-blue-400 transition-colors">
+                          <p className={`text-4xl font-black tracking-tighter tabular-nums ${kpi.clickable ? 'text-teal-400 group-hover:text-teal-300' : 'text-white'} transition-colors`}>
                             <CountUp value={kpi.value} decimals={kpi.dec} />
                           </p>
                           <span className="text-xs font-bold text-slate-500 uppercase">{kpi.unit}</span>
                         </div>
+                        {kpi.clickable && (
+                          <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <TrendingUp className="w-4 h-4 text-teal-400" />
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -663,11 +755,12 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
                   color="text-blue-400"
                   tableData={tableData}
                   dataKey="totalKwh"
-                  unit=""
+                  unit="kWh"
                   decimals={0}
                   isTop3={isTop3}
                   onRowClick={() => {}}
                   onPreviewBill={onPreviewBill}
+                  showTotals
                 />
               </div>
             </section>
@@ -694,18 +787,77 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
             {/* ── PAGE 6: MATRIZ ECONÓMICA INTEGRAL ── */}
             <section id="scene-6" className={`report-page flex flex-col justify-start px-10 ${isExportMode ? 'pt-10' : 'pt-20'}`}>
               <div className="max-w-6xl w-full mx-auto space-y-8">
-                <MatrixTable
-                  title="Matriz Económica Integral (€)"
-                  color="text-indigo-400"
-                  tableData={tableData}
-                  dataKey="totalFactura"
-                  unit="€"
-                  decimals={2}
-                  isTop3={isTop3}
-                  onRowClick={(id) => setSelectedBillId(id)}
-                  onPreviewBill={onPreviewBill}
-                />
-                <p className="text-center text-[10px] text-slate-600 uppercase tracking-widest">Haz click en un mes para ver el desglose de la factura</p>
+                <div className="space-y-4 w-full">
+                  <h4 className="text-[11px] font-black uppercase tracking-[0.6em] text-indigo-400 flex items-center justify-between px-4">
+                    <div className="flex items-center gap-3">
+                      <Activity className="w-4 h-4" /> Matriz Económica Integral (€ por Periodo)
+                    </div>
+                    <span className="text-[8px] opacity-30 lowercase tracking-normal font-medium no-print">Gasto en euros por periodo</span>
+                  </h4>
+                  <div className="glass p-2 rounded-[40px] border border-white/5 overflow-visible bg-slate-900/10">
+                    <table className="w-full text-left border-collapse text-[10px]">
+                      <thead className="bg-slate-900/30 font-black uppercase tracking-widest text-slate-500">
+                        <tr>
+                          <th className="px-6 py-5">Mes</th>
+                          {['P1','P2','P3','P4','P5','P6'].map(p => <th key={p} className="px-3 py-5 text-center">{p}</th>)}
+                          <th className="px-6 py-5 text-right">Total €</th>
+                          <th className="px-4 py-5 text-center no-print"></th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-white/[0.03]">
+                        {tableData.map((row: any, idx: number) => (
+                          <tr key={idx} className="hover:bg-white/[0.02] transition-all group cursor-pointer" onClick={() => setSelectedBillId(row.id)}>
+                            <td className="px-6 py-4 font-black text-white italic uppercase text-[11px]">{row.name}</td>
+                            {(['P1', 'P2', 'P3', 'P4', 'P5', 'P6'] as const).map(period => {
+                              const ps = row.periodSpend?.[period];
+                              const value = ps?.eur || 0;
+                              const isEstimated = ps?.isEstimated || false;
+                              return (
+                                <td key={period} className="px-3 py-4 text-center group-hover:text-slate-300 text-[9px]">
+                                  {value > 0 ? (
+                                    <span className={`font-bold ${isEstimated ? 'text-yellow-400' : 'text-slate-500'}`}>
+                                      {value.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                      {isEstimated && <span className="block text-[7px] text-yellow-500/60 mt-0.5">est.</span>}
+                                    </span>
+                                  ) : '-'}
+                                </td>
+                              );
+                            })}
+                            <td className="px-6 py-4 text-right font-black text-indigo-400 text-[13px]">
+                              {row.periodSpend?.totalEur?.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                            </td>
+                            <td className="px-4 py-4 text-center no-print">
+                              <button
+                                onClick={(e) => { e.stopPropagation(); onPreviewBill?.(row.id); }}
+                                className="p-2 rounded-xl bg-white/5 hover:bg-blue-600/20 text-slate-500 hover:text-blue-400 transition-all border border-white/5"
+                                title="Ver factura original"
+                              >
+                                <FileText className="w-3.5 h-3.5" />
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                      {periodData && periodData.length > 0 && (
+                        <tfoot>
+                          <tr className="bg-indigo-500/10 border-t-2 border-indigo-500/40">
+                            <td className="px-6 py-4 font-black text-indigo-400 uppercase text-[11px]">TOTAL</td>
+                            {(['P1', 'P2', 'P3', 'P4', 'P5', 'P6'] as const).map((period, idx) => (
+                              <td key={period} className="px-3 py-4 text-center font-black text-indigo-400 text-[10px]">
+                                {periodData[idx]?.totalEur > 0 ? periodData[idx]?.totalEur.toLocaleString('es-ES', { maximumFractionDigits: 2 }) : '-'}
+                              </td>
+                            ))}
+                            <td className="px-6 py-4 text-right font-black text-indigo-400 text-[14px]">
+                              {periodData.reduce((sum, p) => sum + p.totalEur, 0).toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                            </td>
+                            <td className="px-4 py-4 text-center no-print"></td>
+                          </tr>
+                        </tfoot>
+                      )}
+                    </table>
+                  </div>
+                  <p className="text-center text-[10px] text-yellow-500/60 uppercase tracking-widest">Los valores en amarillo son estimados (fallback: kWh × precio medio energia)</p>
+                </div>
               </div>
             </section>
 
@@ -1267,14 +1419,76 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
           );
         })()}
       </AnimatePresence>
+
+      {/* MODAL: Average Price Breakdown */}
+      <AnimatePresence>
+        {showAvgPriceModal && (
+          <div className="fixed inset-0 z-[500] flex items-center justify-center p-4 bg-black/95 backdrop-blur-2xl no-print" onClick={() => setShowAvgPriceModal(false)}>
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="glass-card border border-white/10 rounded-[48px] w-full max-w-lg p-10 relative z-[510]"
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="flex justify-between items-start mb-8">
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-widest text-teal-500 mb-1">Precio Promedio</p>
+                  <h3 className="text-2xl font-black uppercase italic">Media por Periodo</h3>
+                  {selectedMonths.size > 0 && (
+                    <p className="text-[10px] text-slate-500 mt-1">
+                      {selectedMonths.size === 12 ? 'Últimos 12 meses' : `${selectedMonths.size} meses seleccionados`}
+                    </p>
+                  )}
+                </div>
+                <button onClick={() => setShowAvgPriceModal(false)} className="w-10 h-10 rounded-full glass border border-white/10 flex items-center justify-center hover:bg-white/10 shrink-0">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="space-y-3">
+                {averagePriceStats?.map(stat => (
+                  <div key={stat.period} className="flex items-center justify-between py-3 px-4 rounded-2xl bg-white/5 border border-white/5 hover:bg-white/10 transition-colors">
+                    <div className="flex items-center gap-3">
+                      <span className="text-sm font-black text-teal-400 w-8">{stat.period}</span>
+                      <span className="text-xs text-slate-500">
+                        {stat.totalKwh > 0 ? `${stat.totalKwh.toLocaleString('es-ES', { maximumFractionDigits: 1 })} kWh` : 'Sin consumo'}
+                      </span>
+                    </div>
+                    <div className="text-right">
+                      {stat.totalKwh > 0 ? (
+                        <span className="text-lg font-black text-white">{stat.avgPrice.toFixed(4)} €/kWh</span>
+                      ) : (
+                        <span className="text-sm text-slate-600">-</span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="mt-6 pt-6 border-t border-white/10">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Precio Promedio Total</p>
+                    <p className="text-[10px] text-slate-600 mt-0.5">Media de periodo{`(P${averagePriceStats?.filter(p => p.totalKwh > 0).length})`}</p>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-2xl font-black text-teal-400">{summaryStats.precioPromedio.toFixed(4)} €/kWh</span>
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </>
   );
 }
 
 // ── Reusable Matrix Table Component ──
-function MatrixTable({ title, color, tableData, dataKey, unit, decimals, isTop3, onRowClick, onPreviewBill, isPriceMatrix }: {
+function MatrixTable({ title, color, tableData, dataKey, unit, decimals, isTop3, onRowClick, onPreviewBill, isPriceMatrix, showTotals }: {
   title: string; color: string; tableData: any[]; dataKey: string; unit: string;
-  decimals: number; isTop3: (v: number, arr: number[]) => boolean; onRowClick: (id: string) => void; onPreviewBill?: (id: string) => void; isPriceMatrix?: boolean;
+  decimals: number; isTop3: (v: number, arr: number[]) => boolean; onRowClick: (id: string) => void; onPreviewBill?: (id: string) => void; isPriceMatrix?: boolean; showTotals?: boolean;
 }) {
   const top3Indices = new Set(
     [...tableData]
@@ -1283,6 +1497,18 @@ function MatrixTable({ title, color, tableData, dataKey, unit, decimals, isTop3,
       .slice(0, 3)
       .map((x: any) => x.i)
   );
+
+  // Calculate totals for the energy matrix (kWh) table
+  type TotalsType = { P1: number; P2: number; P3: number; P4: number; P5: number; P6: number; totalKwh: number };
+  const totals: TotalsType | null = showTotals && tableData.length > 0 ? {
+    P1: tableData.reduce((sum, row) => sum + (Number(row.P1) || 0), 0),
+    P2: tableData.reduce((sum, row) => sum + (Number(row.P2) || 0), 0),
+    P3: tableData.reduce((sum, row) => sum + (Number(row.P3) || 0), 0),
+    P4: tableData.reduce((sum, row) => sum + (Number(row.P4) || 0), 0),
+    P5: tableData.reduce((sum, row) => sum + (Number(row.P5) || 0), 0),
+    P6: tableData.reduce((sum, row) => sum + (Number(row.P6) || 0), 0),
+    totalKwh: tableData.reduce((sum, row) => sum + (Number(row.totalKwh) || 0), 0),
+  } : null;
 
   return (
     <div className="space-y-4 w-full">
@@ -1335,6 +1561,22 @@ function MatrixTable({ title, color, tableData, dataKey, unit, decimals, isTop3,
               );
             })}
           </tbody>
+          {showTotals && totals && (
+            <tfoot>
+              <tr className="bg-blue-500/10 border-t-2 border-blue-500/40">
+                <td className="px-6 py-4 font-black text-blue-400 uppercase text-[11px]">TOTAL</td>
+                {(['P1', 'P2', 'P3', 'P4', 'P5', 'P6'] as const).map(key => (
+                  <td key={key} className="px-3 py-4 text-center font-black text-blue-400 text-[10px]">
+                    {totals[key].toLocaleString('es-ES', { maximumFractionDigits: 2 })}
+                  </td>
+                ))}
+                <td className="px-6 py-4 text-right font-black text-blue-400 text-[14px]">
+                  {totals.totalKwh.toLocaleString('es-ES', { maximumFractionDigits: 2 })} {unit}
+                </td>
+                <td className="px-4 py-4 text-center no-print"></td>
+              </tr>
+            </tfoot>
+          )}
         </table>
       </div>
     </div>
