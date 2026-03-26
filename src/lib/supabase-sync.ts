@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import { ProjectWorkspace, ExtractedBill } from './types';
+import { ProjectWorkspace, ExtractedBill, ProjectFolder } from './types';
 
 /**
  * Fetch a single project by ID (server-side safe)
@@ -59,6 +59,7 @@ export async function fetchProjectById(projectId: string): Promise<ProjectWorksp
     return {
       id: project.id,
       name: project.name,
+      folderId: project.folder_id, // NEW
       updatedAt: new Date(project.updated_at).getTime(),
       bills: pBills,
       customOCs: pOCs,
@@ -100,6 +101,7 @@ export async function fetchAllProjectsFromDB(userId: string): Promise<ProjectWor
       return {
         id: p.id,
         name: p.name,
+        folderId: p.folder_id, // NEW
         updatedAt: new Date(p.updated_at).getTime(),
         bills: pBills,
         customOCs: pOCs,
@@ -123,6 +125,7 @@ export async function syncProjectToDB(project: ProjectWorkspace, userId: string,
     const { error: pErr } = await supabase.from('projects').upsert({
       id: project.id,
       name: project.name,
+      folder_id: project.folderId, // NEW
       user_id: userId,
       updated_at: new Date(project.updatedAt || Date.now()).toISOString()
     });
@@ -224,6 +227,67 @@ export async function deleteProjectFromDB(id: string, userId: string) {
     await supabase.from('projects').delete().eq('id', id).eq('user_id', userId);
   } catch (error) {
     console.error('Fatal DB delete error:', error);
+  }
+}
+
+// ============================================
+// FOLDER SYNC FUNCTIONS
+// ============================================
+
+export async function fetchAllFoldersFromDB(userId: string): Promise<ProjectFolder[]> {
+  try {
+    const { data: folders, error: fErr } = await supabase
+      .from('folders')
+      .select('*')
+      .eq('user_id', userId)
+      .order('updated_at', { ascending: false });
+    
+    if (fErr) { console.error('Error fetching folders:', fErr); return []; }
+    if (!folders) return [];
+
+    // In a real app, we might join projects to get IDs, but for now we'll 
+    // rely on the project table's folder_id and aggregate client-side 
+    // to keep it simple and consistent with how projects are loaded.
+    return folders.map((f: any) => ({
+      id: f.id,
+      name: f.name,
+      user_id: f.user_id,
+      projectIds: [], // Will be populated by the frontend state manager
+      updatedAt: new Date(f.updated_at).getTime()
+    }));
+  } catch (error) {
+    console.error('Fatal folder fetch error:', error);
+    return [];
+  }
+}
+
+export async function syncFolderToDB(folder: ProjectFolder, userId: string): Promise<boolean> {
+  try {
+    console.log(`[FOLDER_SAVE] Syncing folder ${folder.name}...`);
+    const { error } = await supabase.from('folders').upsert({
+      id: folder.id,
+      name: folder.name,
+      user_id: userId,
+      updated_at: new Date(folder.updatedAt || Date.now()).toISOString()
+    });
+
+    if (error) {
+      console.error('[FOLDER_SAVE] Error upserting folder:', error.message);
+      return false;
+    }
+    return true;
+  } catch (error) {
+    console.error('[FOLDER_SAVE] Fatal error:', error);
+    return false;
+  }
+}
+
+export async function deleteFolderFromDB(id: string, userId: string) {
+  try {
+    // Note: Due to ON DELETE SET NULL, projects will remain but folderless
+    await supabase.from('folders').delete().eq('id', id).eq('user_id', userId);
+  } catch (error) {
+    console.error('Fatal folder delete error:', error);
   }
 }
 

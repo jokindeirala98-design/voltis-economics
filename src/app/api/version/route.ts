@@ -16,8 +16,8 @@ export async function GET() {
 
   return NextResponse.json({
     description: 'Voltis Economics Versioning & Environment Diagnostic',
-    version: '1.2.1-debug',
-    build_date: buildDate,
+    version: '1.3.0-folders',
+    build_date: '2026-03-26T19:25:00Z',
     deploy_trace: `[DEPLOY_TRACE][${deployTraceId}]`,
     env_status: envStatus,
     status: 'operational'

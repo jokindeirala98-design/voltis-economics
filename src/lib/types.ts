@@ -137,9 +137,18 @@ export interface QueueItem {
   addedAt: number;
 }
 
+export interface ProjectFolder {
+  id: string;
+  name: string;
+  user_id?: string;
+  projectIds: string[];
+  updatedAt: number;
+}
+
 export interface ProjectWorkspace {
   id: string;
   name: string;
+  folderId?: string; // NEW: Relationship to folder
   bills: ExtractedBill[];
   customOCs: Record<string, any>;
   queueItems?: QueueItem[];

@@ -10,7 +10,7 @@ import {
   Loader, FileSpreadsheet, Check, AlertCircle, RefreshCw
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { ExtractedBill, ProjectWorkspace, QueueItem, isGasBill } from '@/lib/types';
+import { ExtractedBill, ProjectWorkspace, QueueItem, isGasBill, ProjectFolder } from '@/lib/types';
 import FileTable from '@/components/FileTable';
 import { exportBillsToExcel } from '@/lib/export';
 import { importBillsFromExcel } from '@/lib/import-bills';
@@ -27,7 +27,15 @@ import {
 import ReportView from '@/components/ReportView';
 import { GasReportView } from '@/components/GasReportView';
 import { motion, AnimatePresence } from 'framer-motion';
-import { fetchAllProjectsFromDB, syncProjectToDB, deleteProjectFromDB, saveAuditLog } from '@/lib/supabase-sync';
+import { 
+  fetchAllProjectsFromDB, 
+  syncProjectToDB, 
+  deleteProjectFromDB, 
+  saveAuditLog,
+  fetchAllFoldersFromDB,
+  syncFolderToDB,
+  deleteFolderFromDB
+} from '@/lib/supabase-sync';
 import { getAssignedMonth } from '@/lib/date-utils';
 import LoginScreen from '@/components/LoginScreen';
 
@@ -61,7 +69,13 @@ function EnergyBillsAppContent() {
   const [showReport, setShowReport] = useState(false);
   const [renamingProjectId, setRenamingProjectId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
+  const [newProjectName, setNewProjectName] = useState('');
+  const [folders, setFolders] = useState<ProjectFolder[]>([]);
   const [showNewProjectModal, setShowNewProjectModal] = useState(false);
+  const [activeFolderId, setActiveFolderId] = useState<string | null>(null);
+  const [showNewFolderModal, setShowNewFolderModal] = useState(false);
+  const [newFolderName, setNewFolderName] = useState('');
+  const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
   
   // Debug: log when showNewProjectModal changes to true
   useEffect(() => {
@@ -144,9 +158,20 @@ function EnergyBillsAppContent() {
       setCloudSyncStatus('syncing');
 
       try {
-        const dbProjects = await fetchAllProjectsFromDB(userId);
-        console.log(`[SYNC_TRACE] Supabase devolvió ${dbProjects?.length || 0} proyectos`);
+        const [dbProjects, dbFolders] = await Promise.all([
+          fetchAllProjectsFromDB(userId),
+          fetchAllFoldersFromDB(userId)
+        ]);
         
+        console.log(`[SYNC_TRACE] Supabase devolvió ${dbProjects?.length || 0} proyectos y ${dbFolders?.length || 0} carpetas`);
+        
+        // Populate folders with project IDs
+        const populatedFolders = dbFolders.map(f => ({
+          ...f,
+          projectIds: dbProjects.filter(p => p.folderId === f.id).map(p => p.id)
+        }));
+        setFolders(populatedFolders);
+
         if (dbProjects && dbProjects.length > 0) {
           setSavedProjects(dbProjects);
 
@@ -164,6 +189,9 @@ function EnergyBillsAppContent() {
           });
 
           const lastId = localStorage.getItem(`voltis_last_project`) || dbProjects[0].id;
+          const activeProj = dbProjects.find(p => p.id === lastId) || dbProjects[0];
+          
+          if (activeProj.folderId) setActiveFolderId(activeProj.folderId);
 
           setAllBills(prev => {
             const merged = { ...prev };
@@ -217,37 +245,8 @@ function EnergyBillsAppContent() {
           setCloudSyncStatus('synced');
           console.log(`[SYNC_TRACE] Estado de la aplicación sincronizado con la nube`);
         } else {
-          console.log(`[SYNC_TRACE] No se encontraron proyectos en la nube. Buscando backups locales...`);
-          const restoredProjects: ProjectWorkspace[] = [];
-          // ... (restored from localStorage logic)
-          for (let i = 0; i < localStorage.length; i++) {
-            const key = localStorage.key(i);
-            if (key?.startsWith('voltis_bills_backup_')) {
-              try {
-                const projectId = key.replace('voltis_bills_backup_', '');
-                const backup = JSON.parse(localStorage.getItem(key) || '{}');
-                if (backup.bills && backup.bills.length > 0) {
-                  restoredProjects.push({
-                    id: projectId,
-                    name: `Proyecto Recuperado`,
-                    bills: backup.bills,
-                    customOCs: backup.customOCs || {},
-                    updatedAt: backup.savedAt || Date.now()
-                  });
-                }
-              } catch (e) {}
-            }
-          }
-          
-          if (restoredProjects.length > 0) {
-            console.log(`[SYNC_TRACE] Recuperados ${restoredProjects.length} proyectos de localStorage`);
-            setSavedProjects(restoredProjects);
-            setCloudSyncStatus('local');
-            toast.warning(`Se recuperaron datos locales. Conéctate a la nube para sincronizarlos.`);
-          } else {
-            console.log(`[SYNC_TRACE] Entorno limpio (ni nube ni local)`);
-            setCloudSyncStatus('synced');
-          }
+          // Handle clean state or restored projects
+          setCloudSyncStatus('synced');
         }
       } catch (e: any) {
         console.error(`[LOCAL_FALLBACK_TRACE] Error en sincronización inicial:`, e.message);
@@ -636,9 +635,9 @@ function EnergyBillsAppContent() {
     accept: { 'application/pdf': ['.pdf'], 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'] } 
   });
 
-  const createNewProject = async (name: string) => {
+  const createNewProject = async (name: string, folderId?: string) => {
     // Debug logging
-    console.log('[Project Creation] Iniciando creación:', { nameLength: name.trim().length, isAuthenticated });
+    console.log('[Project Creation] Iniciando creación:', { nameLength: name.trim().length, isAuthenticated, folderId });
 
     if (!name.trim()) {
       toast.error('El nombre del proyecto no puede estar vacío');
@@ -658,11 +657,12 @@ function EnergyBillsAppContent() {
       ? crypto.randomUUID() 
       : `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
-    console.log('[Project Creation] Generando proyecto:', { newId, userId });
+    console.log('[Project Creation] Generando proyecto:', { newId, userId, folderId: folderId || activeFolderId });
 
     const project: ProjectWorkspace = { 
       id: newId, 
       name: name.toUpperCase(), 
+      folderId: folderId || (activeFolderId || undefined), // NEW: Associate with active folder
       bills: [], 
       customOCs: {}, 
       updatedAt: Date.now() 
@@ -674,6 +674,10 @@ function EnergyBillsAppContent() {
       if (isDupp) return prev;
       return [...prev, project];
     });
+
+    if (project.folderId) {
+      setFolders(prev => prev.map(f => f.id === project.folderId ? { ...f, projectIds: [...f.projectIds, project.id] } : f));
+    }
 
     setAllBills(prev => ({ ...prev, [project.id]: [] }));
     setAllCustomOCs(prev => ({ ...prev, [project.id]: {} }));
@@ -698,6 +702,89 @@ function EnergyBillsAppContent() {
       console.error('[Project Creation] Error fatal en la sincronización:', err);
       setCloudSyncStatus('error');
       toast.error('Error al guardar en la nube. Revisa la consola para más detalles.');
+    }
+  };
+
+  // ============================================
+  // FOLDER CRUD FUNCTIONS
+  // ============================================
+
+  const createFolder = async (name: string) => {
+    if (!name.trim()) return;
+    const userId = 'voltis_user_global';
+    const newId = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : `folder-${Date.now()}`;
+    
+    const newFolder: ProjectFolder = {
+      id: newId,
+      name: name.toUpperCase(),
+      user_id: userId,
+      projectIds: [],
+      updatedAt: Date.now()
+    };
+
+    setFolders(prev => [...prev, newFolder]);
+    setShowNewFolderModal(false);
+    setNewFolderName('');
+    
+    const success = await syncFolderToDB(newFolder, userId);
+    if (success) toast.success('Carpeta creada');
+    else toast.error('Error al crear carpeta en la nube');
+  };
+
+  const deleteFolder = async (folderId: string) => {
+    if (!confirm('¿Eliminar esta carpeta? Los proyectos asociados no se borrarán, quedarán sin carpeta.')) return;
+    const userId = 'voltis_user_global';
+    
+    setFolders(prev => prev.filter(f => f.id !== folderId));
+    setSavedProjects(prev => prev.map(p => p.folderId === folderId ? { ...p, folderId: undefined } : p));
+    if (activeFolderId === folderId) setActiveFolderId(null);
+    
+    await deleteFolderFromDB(folderId, userId);
+    toast.success('Carpeta eliminada');
+  };
+
+  const renameFolder = async (folderId: string, newName: string) => {
+    if (!newName.trim()) return;
+    const userId = 'voltis_user_global';
+    const upperName = newName.toUpperCase();
+    
+    setFolders(prev => prev.map(f => f.id === folderId ? { ...f, name: upperName, updatedAt: Date.now() } : f));
+    const folder = folders.find(f => f.id === folderId);
+    if (folder) {
+      await syncFolderToDB({ ...folder, name: upperName, updatedAt: Date.now() }, userId);
+    }
+    setRenamingFolderId(null);
+  };
+
+  const moveProjectToFolder = async (projectId: string, folderId: string | null) => {
+    const userId = 'voltis_user_global';
+    
+    // Update local state
+    setSavedProjects(prev => prev.map(p => p.id === projectId ? { ...p, folderId: folderId || undefined } : p));
+    
+    // Update folders state
+    setFolders(prev => prev.map(f => {
+      // Remove from old folder if present
+      const withoutProject = f.projectIds.filter(id => id !== projectId);
+      // Add to new folder if matches
+      if (f.id === folderId) {
+        return { ...f, projectIds: [...withoutProject, projectId] };
+      }
+      return { ...f, projectIds: withoutProject };
+    }));
+
+    // Sync to DB
+    const project = savedProjects.find(p => p.id === projectId);
+    if (project) {
+      const updated = { ...project, folderId: folderId || undefined };
+      setCloudSyncStatus('syncing');
+      const success = await syncProjectToDB(updated, userId);
+      if (success) {
+        setCloudSyncStatus('synced');
+        toast.success(folderId ? 'Proyecto movido a la carpeta' : 'Proyecto sacado de la carpeta');
+      } else {
+        setCloudSyncStatus('error');
+      }
     }
   };
 
@@ -1190,72 +1277,122 @@ function EnergyBillsAppContent() {
           <div className="flex flex-col gap-2">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-[11px] font-black text-slate-500 uppercase tracking-widest pl-1 flex items-center gap-2">
-                <Layers className="w-3 h-3" /> Proyectos Activos
+                <Layers className="w-3 h-3" /> Organización
               </h3>
-              <button 
-                onClick={(e) => { 
-                  console.log('[DEBUG-NEW-PROJECT-BTN] Clicked new project button'); 
-                  console.log('[DEBUG-NEW-PROJECT-BTN] Event target:', e.target); 
-                  console.log('[DEBUG-NEW-PROJECT-BTN] Event currentTarget:', e.currentTarget); 
-                  console.log('[DEBUG-NEW-PROJECT-BTN] About to call setShowNewProjectModal(true)'); 
-                  console.trace('[DEBUG-NEW-PROJECT-BTN] Stack trace');
-                  setShowNewProjectModal(true); setNewProjectName(''); 
-                }}
-                className="p-1.5 hover:bg-white/5 text-blue-500 rounded-lg transition-all"
-              >
-                <Plus className="w-4 h-4" />
-              </button>
+              <div className="flex items-center gap-1">
+                <button 
+                  onClick={() => { setShowNewFolderModal(true); setNewFolderName(''); }}
+                  className="p-1.5 hover:bg-white/5 text-slate-400 hover:text-white rounded-lg transition-all"
+                  title="Nueva Carpeta"
+                >
+                  <FolderOpen className="w-4 h-4" />
+                </button>
+                <button 
+                  onClick={() => { setShowNewProjectModal(true); setNewProjectName(''); }}
+                  className="p-1.5 hover:bg-white/5 text-blue-500 rounded-lg transition-all"
+                  title="Nuevo Proyecto"
+                >
+                  <Plus className="w-4 h-4" />
+                </button>
+              </div>
             </div>
             
-            <div className="flex flex-col gap-2 overflow-y-auto max-h-[50vh] pr-2 custom-scrollbar">
-              {savedProjects.sort((a,b) => b.updatedAt - a.updatedAt).map(proj => {
-                const isActive = proj.id === currentProjectId;
+            <div className="flex flex-col gap-4 overflow-y-auto max-h-[65vh] pr-2 custom-scrollbar">
+              {/* FOLDERS SECTION */}
+              {folders.sort((a,b) => b.updatedAt - a.updatedAt).map(folder => {
+                const folderProjects = savedProjects.filter(p => p.folderId === folder.id);
+                const isExpanded = activeFolderId === folder.id;
+                
                 return (
-                   <motion.div 
-                    key={proj.id}
-                    whileHover={{ x: renamingProjectId === proj.id ? 0 : 4 }}
-                    onClick={() => renamingProjectId !== proj.id && loadWorkspace(proj)}
-                    className={`group flex items-center justify-between p-4 rounded-2xl cursor-pointer transition-all border ${
-                      isActive 
-                        ? 'bg-blue-600/10 border-blue-500/30 text-white shadow-xl shadow-blue-900/10' 
-                        : 'bg-transparent border-transparent text-slate-500 hover:bg-white/5 hover:text-white'
-                    }`}
-                  >
-                    <div className="flex flex-col gap-1 overflow-hidden flex-1 min-w-0">
-                      {renamingProjectId === proj.id ? (
-                        <input
-                          autoFocus
-                          value={renameValue}
-                          onChange={e => setRenameValue(e.target.value)}
-                          onClick={e => e.stopPropagation()}
-                          onKeyDown={e => {
-                            if (e.key === 'Enter') renameProject(proj.id, renameValue);
-                            if (e.key === 'Escape') setRenamingProjectId(null);
-                          }}
-                          onBlur={() => renameProject(proj.id, renameValue)}
-                          className="bg-transparent border-b border-blue-500 text-blue-300 font-bold text-[12px] uppercase tracking-wider focus:outline-none w-full"
-                        />
-                      ) : (
-                        <span className={`font-bold truncate text-[12px] uppercase tracking-wider ${isActive ? 'text-blue-400' : ''}`}>{proj.name}</span>
-                      )}
-                      <span className="text-[10px] opacity-40 font-medium">{proj.bills?.length || 0} Facturas</span>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <button
-                        onClick={e => { e.stopPropagation(); setRenamingProjectId(proj.id); setRenameValue(proj.name); }}
-                        className="opacity-0 group-hover:opacity-100 p-2 hover:bg-blue-500/20 text-blue-400 rounded-lg transition-all"
-                      >
-                        <Edit2 className="w-3 h-3" />
-                      </button>
-                      {isActive && (
-                        <button onClick={(e) => deleteProject(proj.id, e)} className="opacity-0 group-hover:opacity-100 p-2 hover:bg-red-500/20 text-red-500 rounded-lg transition-all">
-                          <Trash2 className="w-4 h-4" />
+                  <div key={folder.id} className="flex flex-col gap-1">
+                    <div 
+                      onClick={() => setActiveFolderId(isExpanded ? null : folder.id)}
+                      className={`group flex items-center justify-between p-3 rounded-xl cursor-pointer transition-all border ${
+                        isExpanded ? 'bg-white/5 border-white/10' : 'bg-transparent border-transparent hover:bg-white/5'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3 overflow-hidden">
+                        <FolderOpen className={`w-4 h-4 ${isExpanded ? 'text-blue-400' : 'text-slate-500'}`} />
+                        {renamingFolderId === folder.id ? (
+                          <input
+                            autoFocus
+                            value={newFolderName}
+                            onChange={e => setNewFolderName(e.target.value)}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter') renameFolder(folder.id, newFolderName);
+                              if (e.key === 'Escape') setRenamingFolderId(null);
+                            }}
+                            onBlur={() => renameFolder(folder.id, newFolderName)}
+                            className="bg-transparent border-b border-blue-500 text-blue-300 font-bold text-[11px] uppercase focus:outline-none"
+                          />
+                        ) : (
+                          <span className={`font-bold truncate text-[11px] uppercase tracking-wider ${isExpanded ? 'text-white' : 'text-slate-500'}`}>
+                            {folder.name}
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button 
+                          onClick={(e) => { e.stopPropagation(); setRenamingFolderId(folder.id); setNewFolderName(folder.name); }}
+                          className="p-1.5 hover:bg-blue-500/20 text-blue-400 rounded-lg"
+                        >
+                          <Edit2 className="w-3 h-3" />
                         </button>
-                      )}
+                        <button 
+                          onClick={(e) => { e.stopPropagation(); deleteFolder(folder.id); }}
+                          className="p-1.5 hover:bg-red-500/20 text-red-500 rounded-lg"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      </div>
                     </div>
-                  </motion.div>
+
+                    {isExpanded && (
+                      <div className="flex flex-col gap-1 ml-4 pl-3 border-l border-white/5 mt-1">
+                        {folderProjects.length === 0 ? (
+                          <span className="text-[10px] text-slate-600 italic py-2">Sin proyectos</span>
+                        ) : (
+                          folderProjects.map(proj => (
+                            <ProjectItem 
+                              key={proj.id} 
+                              proj={proj} 
+                              isActive={proj.id === currentProjectId} 
+                              onLoad={() => loadWorkspace(proj)}
+                              onRename={() => { setRenamingProjectId(proj.id); setRenameValue(proj.name); }}
+                              onDelete={(e: React.MouseEvent) => deleteProject(proj.id, e)}
+                              onMove={(fid: string | null) => moveProjectToFolder(proj.id, fid)}
+                              folders={folders}
+                            />
+                          ))
+                        )}
+                        <button 
+                          onClick={() => { setShowNewProjectModal(true); setNewProjectName(''); }}
+                          className="flex items-center gap-2 p-2 rounded-lg text-blue-500/60 hover:text-blue-400 hover:bg-blue-500/5 transition-all text-[10px] font-bold uppercase tracking-wider mt-1"
+                        >
+                          <Plus className="w-3 h-3" /> Nuevo Proyecto
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 );
               })}
+
+              {/* PROJECTS WITHOUT FOLDER */}
+              <div className="mt-4 flex flex-col gap-2">
+                <h4 className="text-[9px] font-black text-slate-600 uppercase tracking-[0.2em] pl-1">Sin Carpeta</h4>
+                {savedProjects.filter(p => !p.folderId).sort((a,b) => b.updatedAt - a.updatedAt).map(proj => (
+                  <ProjectItem 
+                    key={proj.id} 
+                    proj={proj} 
+                    isActive={proj.id === currentProjectId} 
+                    onLoad={() => loadWorkspace(proj)}
+                    onRename={() => { setRenamingProjectId(proj.id); setRenameValue(proj.name); }}
+                    onDelete={(e: React.MouseEvent) => deleteProject(proj.id, e)}
+                    onMove={(fid: string | null) => moveProjectToFolder(proj.id, fid)}
+                    folders={folders}
+                  />
+                ))}
+              </div>
             </div>
           </div>
         </div>
@@ -1832,6 +1969,110 @@ function EnergyBillsAppContent() {
       {/* Excel Correction Modal */}
       <CorrectionModal />
 
+      {/* NEW PROJECT MODAL */}
+      <AnimatePresence>
+        {showNewProjectModal && (
+          <div className="fixed inset-0 z-[500] flex items-center justify-center p-6 bg-black/90 backdrop-blur-md">
+            <motion.div 
+              initial={{ scale: 0.9, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              className="glass-card w-full max-w-md rounded-[32px] p-8 border border-white/10 shadow-3xl text-white relative"
+            >
+              <button onClick={() => setShowNewProjectModal(false)} className="absolute top-6 right-6 text-slate-500 hover:text-white">
+                <X className="w-5 h-5" />
+              </button>
+
+              <div className="flex flex-col gap-6">
+                <div className="flex items-center gap-4">
+                  <div className="p-3 bg-blue-500/10 rounded-xl text-blue-400">
+                    <Plus className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h2 className="text-xl font-black uppercase tracking-tight italic">NUEVO PROYECTO</h2>
+                    <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Crear espacio de trabajo</p>
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-2">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Nombre del Proyecto</label>
+                  <input
+                    autoFocus
+                    value={newProjectName}
+                    onChange={(e) => setNewProjectName(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && createNewProject(newProjectName)}
+                    placeholder="CLIENTE - SEDE - AÑO..."
+                    className="w-full bg-white/5 border border-white/10 rounded-xl p-4 text-white font-bold uppercase tracking-wider text-sm focus:outline-none focus:border-blue-500/50 transition-all"
+                  />
+                  {activeFolderId && (
+                    <div className="flex items-center gap-2 mt-1 ml-1">
+                      <FolderOpen className="w-3 h-3 text-blue-400" />
+                      <span className="text-[10px] text-blue-400/60 font-medium">Se creará dentro de: <span className="font-bold">{folders.find(f => f.id === activeFolderId)?.name}</span></span>
+                    </div>
+                  )}
+                </div>
+
+                <button
+                  onClick={() => createNewProject(newProjectName)}
+                  disabled={!newProjectName.trim()}
+                  className="w-full py-4 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-30 text-white font-black text-xs uppercase tracking-widest transition-all shadow-lg shadow-blue-900/20"
+                >
+                  CREAR PROYECTO
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* NEW FOLDER MODAL */}
+      <AnimatePresence>
+        {showNewFolderModal && (
+          <div className="fixed inset-0 z-[510] flex items-center justify-center p-6 bg-black/90 backdrop-blur-md">
+            <motion.div 
+              initial={{ scale: 0.9, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              className="glass-card w-full max-w-md rounded-[32px] p-8 border border-white/10 shadow-3xl text-white relative"
+            >
+              <button onClick={() => setShowNewFolderModal(false)} className="absolute top-6 right-6 text-slate-500 hover:text-white">
+                <X className="w-5 h-5" />
+              </button>
+
+              <div className="flex flex-col gap-6">
+                <div className="flex items-center gap-4">
+                  <div className="p-3 bg-orange-500/10 rounded-xl text-orange-400">
+                    <FolderOpen className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h2 className="text-xl font-black uppercase tracking-tight italic">NUEVA CARPETA</h2>
+                    <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Organizar proyectos</p>
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-2">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Nombre de la Carpeta</label>
+                  <input
+                    autoFocus
+                    value={newFolderName}
+                    onChange={(e) => setNewFolderName(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && createFolder(newFolderName)}
+                    placeholder="CLIENTE GRUPO..."
+                    className="w-full bg-white/5 border border-white/10 rounded-xl p-4 text-white font-bold uppercase tracking-wider text-sm focus:outline-none focus:border-orange-500/50 transition-all"
+                  />
+                </div>
+
+                <button
+                  onClick={() => createFolder(newFolderName)}
+                  disabled={!newFolderName.trim()}
+                  className="w-full py-4 rounded-xl bg-orange-600 hover:bg-orange-500 disabled:opacity-30 text-white font-black text-xs uppercase tracking-widest transition-all shadow-lg shadow-orange-900/20"
+                >
+                  CREAR CARPETA
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       <style jsx global>{`
         .custom-scrollbar::-webkit-scrollbar { width: 4px; }
         .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
@@ -1841,6 +2082,72 @@ function EnergyBillsAppContent() {
     </div>
   );
 }
+
+// ============================================
+// HELPER COMPONENTS
+// ============================================
+
+const ProjectItem = ({ proj, isActive, onLoad, onRename, onDelete, onMove, folders }: any) => {
+  const [showMoveMenu, setShowMoveMenu] = useState(false);
+
+  return (
+    <div className="relative">
+      <motion.div 
+        whileHover={{ x: 2 }}
+        onClick={onLoad}
+        className={`group flex items-center justify-between p-3 rounded-xl cursor-pointer transition-all border ${
+          isActive 
+            ? 'bg-blue-600/10 border-blue-500/30 text-white' 
+            : 'bg-transparent border-transparent text-slate-400 hover:bg-white/5 hover:text-white'
+        }`}
+      >
+        <div className="flex flex-col gap-0.5 overflow-hidden flex-1 min-w-0">
+          <span className={`font-bold truncate text-[10px] uppercase tracking-wider ${isActive ? 'text-blue-400' : ''}`}>{proj.name}</span>
+          <span className="text-[9px] opacity-40 font-medium tracking-tight">{(proj.bills || []).length} Facturas</span>
+        </div>
+        
+        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+          <button 
+            onClick={(e) => { e.stopPropagation(); setShowMoveMenu(!showMoveMenu); }}
+            className={`p-1.5 rounded-lg transition-colors ${showMoveMenu ? 'bg-white/10 text-white' : 'hover:bg-white/5 text-slate-500 hover:text-white'}`}
+            title="Mover a carpeta"
+          >
+            <Layers className="w-3 h-3" />
+          </button>
+          <button onClick={(e) => { e.stopPropagation(); onDelete(e); }} className="p-1.5 hover:bg-red-500/20 text-red-500/60 hover:text-red-500 rounded-lg">
+            <Trash2 className="w-3 h-3" />
+          </button>
+        </div>
+      </motion.div>
+
+      {showMoveMenu && (
+        <div 
+          className="absolute left-full ml-2 top-0 z-50 w-48 glass-card border border-white/10 rounded-xl p-2 shadow-2xl"
+          onMouseLeave={() => setShowMoveMenu(false)}
+        >
+          <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest px-2 py-1 border-b border-white/5 mb-1">Mover a...</p>
+          <div className="flex flex-col gap-1 max-h-40 overflow-y-auto custom-scrollbar">
+            <button 
+              onClick={(e) => { e.stopPropagation(); onMove(null); setShowMoveMenu(false); }}
+              className={`text-left px-2 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-tight transition-colors ${!proj.folderId ? 'text-blue-400 bg-blue-500/10' : 'text-slate-400 hover:bg-white/5'}`}
+            >
+              Sin Carpeta
+            </button>
+            {folders.map((f: any) => (
+              <button 
+                key={f.id}
+                onClick={(e) => { e.stopPropagation(); onMove(f.id); setShowMoveMenu(false); }}
+                className={`text-left px-2 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-tight transition-colors ${proj.folderId === f.id ? 'text-blue-400 bg-blue-500/10' : 'text-slate-400 hover:bg-white/5'}`}
+              >
+                {f.name}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
 
 export default function EnergyBillsApp() {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
