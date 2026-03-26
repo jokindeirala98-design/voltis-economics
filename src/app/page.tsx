@@ -85,7 +85,6 @@ function EnergyBillsAppContent() {
     }
   }, [showNewProjectModal]);
   
-  const [newProjectName, setNewProjectName] = useState('');
   const [fileRefs, setFileRefs] = useState<Record<string, File>>({}); 
   const [cloudSyncStatus, setCloudSyncStatus] = useState<'synced' | 'syncing' | 'error' | 'local'>('local');
   const [showDiag, setShowDiag] = useState(false);
