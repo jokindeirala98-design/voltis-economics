@@ -20,6 +20,43 @@ export interface OtroConcepto {
   total: number;
 }
 
+// ============================================================
+// GAS BILL INTERFACES
+// ============================================================
+
+export interface GasConsumption {
+  kwh: number;
+  m3?: number;
+  factorConversion?: number;
+  tipoLectura?: 'real' | 'estimada' | 'media';
+  lecturaAnterior?: number;
+  lecturaActual?: number;
+}
+
+export interface GasAdjustment {
+  concepto: string;
+  kwh: number;
+  euros: number;
+}
+
+export interface GasPricing {
+  precioKwh: number;
+  precioKwhEstimated?: boolean;
+  terminoFijoDiario: number;
+  diasFacturados: number;
+  terminoFijoTotal: number;
+  impuestoHidrocarbTotal: number;
+  alquilerTotal: number;
+  ivaPorcentaje: number;
+  ivaTotal: number;
+}
+
+// ============================================================
+// UNIFIED BILL TYPE
+// ============================================================
+
+export type EnergyType = 'electricity' | 'gas';
+
 export interface ExtractedBill {
   id: string;
   projectId?: string;
@@ -27,22 +64,33 @@ export interface ExtractedBill {
   status: 'pending' | 'success' | 'error';
   error?: string;
   
+  // Energy type discriminator (NEW)
+  energyType: EnergyType;
+  
+  // Common fields
   comercializadora?: string;
   titular?: string;
   cups?: string;
   fechaInicio?: string;
   fechaFin?: string;
-  tarifa?: string;
   
+  // Electricity-specific fields
+  tarifa?: string;
   consumo?: ConsumoItem[];
   potencia?: PotenciaItem[];
   otrosConceptos?: OtroConcepto[];
-  
   consumoTotalKwh?: number;
   costeTotalConsumo?: number;
   costeMedioKwh?: number;
   costeTotalPotencia?: number;
   
+  // Gas-specific fields (NEW)
+  tarifaRL?: string;
+  gasConsumption?: GasConsumption;
+  gasPricing?: GasPricing;
+  gasAdjustments?: GasAdjustment[];
+  
+  // Common totals
   totalFactura?: number;
   originalFileBase64?: string;
   fileMimeType?: string;
@@ -56,13 +104,28 @@ export interface ExtractedBill {
   validationNotes?: string;
   lastValidatedAt?: string;
   
-  // Report inclusion (true = included in annual report, false = excluded but visible)
+  // Report inclusion
   includeInReport?: boolean;
   
   // Storage
   storagePath?: string;
   fileHash?: string;
+  
+  // Extraction warnings (NEW)
+  extractionWarnings?: string[];
 }
+
+// Helper type guards
+export function isGasBill(bill: ExtractedBill): bill is ExtractedBill & { energyType: 'gas' } {
+  return bill.energyType === 'gas';
+}
+
+export function isElectricityBill(bill: ExtractedBill): bill is ExtractedBill & { energyType: 'electricity' } {
+  return bill.energyType === 'electricity';
+}
+
+// Default values for backwards compatibility
+export const DEFAULT_BILL_ENERGY_TYPE: EnergyType = 'electricity';
 
 export interface QueueItem {
   id: string;

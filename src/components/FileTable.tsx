@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useMemo, useCallback } from 'react';
-import { ExtractedBill } from '@/lib/types';
+import { ExtractedBill, isGasBill } from '@/lib/types';
 import { AlertTriangle, GripVertical, Calendar, Sparkles, CheckCircle2, XCircle, Edit3, Save, X, Shield, ShieldAlert, ShieldCheck, RefreshCw, Pencil } from 'lucide-react';
 import { getAssignedMonth } from '@/lib/date-utils';
 import { validateBill, getValidationMessage, ValidationResult } from '@/lib/bill-validator';
@@ -216,6 +216,20 @@ export default function FileTable({ bills, onUpdateBills, customOCs, onUpdateOCs
     setEditingConcept(null);
   };
 
+  const cellValue = (bill: ExtractedBill, field: keyof ExtractedBill): string => {
+    if (isGasBill(bill)) {
+      if (field === 'tarifa') return bill.tarifaRL || '-';
+      const val = bill[field];
+      if (val === undefined || val === null) return '-';
+      if (typeof val === 'number') return val.toLocaleString('es-ES', { maximumFractionDigits: 2 });
+      return String(val);
+    }
+    const val = bill[field];
+    if (val === undefined || val === null) return '-';
+    if (typeof val === 'number') return val.toLocaleString('es-ES', { maximumFractionDigits: 2 });
+    return String(val);
+  };
+
   const renderRow = (label: string, field: keyof ExtractedBill, isNumber = false) => (
     <tr className="border-b border-white/5 hover:bg-white/5 transition-colors group">
       <td className="p-3 font-semibold text-xs text-slate-400 uppercase tracking-widest sticky left-0 bg-[#0f172a] group-hover:bg-[#15203b] z-10 shadow-[4px_0_24px_-10px_rgba(0,0,0,0.5)]">
@@ -235,11 +249,11 @@ export default function FileTable({ bills, onUpdateBills, customOCs, onUpdateOCs
               onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
             />
           ) : (
-            <div 
+            <div
               className="cursor-pointer hover:text-blue-400 transition-colors flex items-center justify-between"
               onClick={() => setEditingCell({ billId: bill.id, field: field as string })}
             >
-              <span>{isNumber ? Number(bill[field] || 0).toLocaleString('es-ES', { maximumFractionDigits: 2 }) : (bill[field] as string || '-')}</span>
+              <span>{cellValue(bill, field)}</span>
             </div>
           )}
         </td>
@@ -253,6 +267,7 @@ export default function FileTable({ bills, onUpdateBills, customOCs, onUpdateOCs
         <div className="w-1.5 h-1.5 rounded-full bg-slate-700" /> Consumo {periodo}
       </td>
       {bills.map(bill => {
+        if (isGasBill(bill)) return <td key={bill.id} className="p-3 text-xs border-l border-white/5 text-slate-600">—</td>;
         const item = bill.consumo?.find(c => c.periodo === periodo);
         return (
           <td key={bill.id} className="p-3 text-xs border-l border-white/5 whitespace-nowrap opacity-70">
@@ -276,6 +291,7 @@ export default function FileTable({ bills, onUpdateBills, customOCs, onUpdateOCs
         <div className="w-1.5 h-1.5 rounded-full bg-slate-700" /> Potencia {periodo}
       </td>
       {bills.map(bill => {
+        if (isGasBill(bill)) return <td key={bill.id} className="p-3 text-xs border-l border-white/5 text-slate-600">—</td>;
         const item = bill.potencia?.find(c => c.periodo === periodo);
         return (
           <td key={bill.id} className="p-3 text-xs border-l border-white/5 whitespace-nowrap opacity-70">
@@ -511,25 +527,186 @@ export default function FileTable({ bills, onUpdateBills, customOCs, onUpdateOCs
            
            <tr className="bg-white/5 border-y border-white/10"><td colSpan={bills.length + 1} className="h-4"></td></tr>
            
-           {/* Total Factura */}
-           <tr className="bg-blue-900/10 border-b border-blue-500/20 group">
-             <td className="p-4 font-black text-sm text-blue-400 uppercase tracking-widest sticky left-0 bg-[#0a1122] z-10 shadow-[4px_0_24px_-10px_rgba(0,0,0,0.5)]">
-               TOTAL FACTURA (€)
-             </td>
-             {bills.map(bill => {
-                const energia = bill.costeTotalConsumo || 0;
-                const potencia = bill.costeTotalPotencia || 0;
-                let ocs = 0;
-                bill.otrosConceptos?.forEach(oc => ocs += oc.total);
-                (customOCs[bill.id] || []).forEach(oc => ocs += oc.total);
-                const calcTotal = energia + potencia + ocs;
-                return (
-                  <td key={bill.id} className="p-4 text-lg font-black text-white border-l border-white/5 whitespace-nowrap">
-                    {calcTotal.toLocaleString('es-ES', { maximumFractionDigits: 2 })} €
+            {/* Total Factura */}
+            <tr className="bg-blue-900/10 border-b border-blue-500/20 group">
+              <td className="p-4 font-black text-sm text-blue-400 uppercase tracking-widest sticky left-0 bg-[#0a1122] z-10 shadow-[4px_0_24px_-10px_rgba(0,0,0,0.5)]">
+                TOTAL FACTURA (€)
+              </td>
+              {bills.map(bill => {
+                 if (isGasBill(bill)) {
+                   return (
+                     <td key={bill.id} className="p-4 text-lg font-black text-orange-400 border-l border-white/5 whitespace-nowrap">
+                       {(bill.totalFactura || 0).toLocaleString('es-ES', { maximumFractionDigits: 2 })} €
+                     </td>
+                   );
+                 }
+                 const energia = bill.costeTotalConsumo || 0;
+                 const potencia = bill.costeTotalPotencia || 0;
+                 let ocs = 0;
+                 bill.otrosConceptos?.forEach(oc => ocs += oc.total);
+                 (customOCs[bill.id] || []).forEach(oc => ocs += oc.total);
+                 const calcTotal = energia + potencia + ocs;
+                 return (
+                   <td key={bill.id} className="p-4 text-lg font-black text-white border-l border-white/5 whitespace-nowrap">
+                     {calcTotal.toLocaleString('es-ES', { maximumFractionDigits: 2 })} €
+                   </td>
+                 );
+              })}
+            </tr>
+
+            {/* GAS-SPECIFIC ROWS — shown for gas bills after the electricity total */}
+            <tr className="border-b border-white/5">
+              <td colSpan={bills.length + 1} className="p-2 bg-orange-500/10">
+                <span className="text-[9px] font-black text-orange-400 uppercase tracking-widest">⚡ Datos de Gas</span>
+              </td>
+            </tr>
+
+            {/* Tarifa RL */}
+            <tr className="border-b border-white/5 hover:bg-white/5 transition-colors group">
+              <td className="p-3 font-semibold text-xs text-slate-400 uppercase tracking-widest sticky left-0 bg-[#0f172a] group-hover:bg-[#15203b] z-10 shadow-[4px_0_24px_-10px_rgba(0,0,0,0.5)]">
+                Tarifa RL
+              </td>
+              {bills.map(bill => (
+                <td key={bill.id} className="p-3 text-sm border-l border-white/5">
+                  {isGasBill(bill) ? (
+                    <span className="text-orange-400 font-bold">{bill.tarifaRL || '-'}</span>
+                  ) : '—'}
+                </td>
+              ))}
+            </tr>
+
+            {/* Consumo kWh */}
+            <tr className="border-b border-white/5 hover:bg-white/5 transition-colors group">
+              <td className="p-3 font-semibold text-xs text-slate-400 uppercase tracking-widest sticky left-0 bg-[#0f172a] group-hover:bg-[#15203b] z-10 shadow-[4px_0_24px_-10px_rgba(0,0,0,0.5)]">
+                Consumo kWh
+              </td>
+              {bills.map(bill => (
+                <td key={bill.id} className="p-3 text-sm border-l border-white/5">
+                  {isGasBill(bill) ? (
+                    <span>{(bill.gasConsumption?.kwh || 0).toLocaleString('es-ES', { maximumFractionDigits: 0 })} kWh</span>
+                  ) : '—'}
+                </td>
+              ))}
+            </tr>
+
+            {/* m³ */}
+            <tr className="border-b border-white/5 hover:bg-white/5 transition-colors group text-slate-500">
+              <td className="p-3 text-xs uppercase tracking-widest sticky left-0 bg-[#0f172a] group-hover:bg-[#15203b] z-10 shadow-[4px_0_24px_-10px_rgba(0,0,0,0.5)]">
+                Volumen (m³)
+              </td>
+              {bills.map(bill => (
+                <td key={bill.id} className="p-3 text-xs border-l border-white/5">
+                  {isGasBill(bill) ? (
+                    bill.gasConsumption?.m3 ? `${bill.gasConsumption.m3.toLocaleString('es-ES')} m³` : '-'
+                  ) : '—'}
+                </td>
+              ))}
+            </tr>
+
+            {/* €/kWh */}
+            <tr className="border-b border-white/5 hover:bg-white/5 transition-colors group">
+              <td className="p-3 font-semibold text-xs text-slate-400 uppercase tracking-widest sticky left-0 bg-[#0f172a] group-hover:bg-[#15203b] z-10 shadow-[4px_0_24px_-10px_rgba(0,0,0,0.5)]">
+                Precio €/kWh
+              </td>
+              {bills.map(bill => (
+                <td key={bill.id} className="p-3 text-sm border-l border-white/5">
+                  {isGasBill(bill) ? (
+                    <span className={bill.gasPricing?.precioKwhEstimated ? 'text-yellow-400' : 'text-slate-300'}>
+                      {bill.gasPricing?.precioKwh ? bill.gasPricing.precioKwh.toFixed(4) : '-'} €/kWh
+                      {bill.gasPricing?.precioKwhEstimated && <span className="ml-1 text-[9px] text-yellow-500">(est.)</span>}
+                    </span>
+                  ) : '—'}
+                </td>
+              ))}
+            </tr>
+
+            {/* Término Fijo */}
+            <tr className="border-b border-white/5 hover:bg-white/5 transition-colors group">
+              <td className="p-3 font-semibold text-xs text-slate-400 uppercase tracking-widest sticky left-0 bg-[#0f172a] group-hover:bg-[#15203b] z-10 shadow-[4px_0_24px_-10px_rgba(0,0,0,0.5)]">
+                Término Fijo
+              </td>
+              {bills.map(bill => (
+                <td key={bill.id} className="p-3 text-sm border-l border-white/5">
+                  {isGasBill(bill) ? (
+                    (bill.gasPricing?.terminoFijoTotal || 0) > 0
+                      ? `${bill.gasPricing!.terminoFijoTotal.toLocaleString('es-ES', { maximumFractionDigits: 2 })} €`
+                      : '-'
+                  ) : '—'}
+                </td>
+              ))}
+            </tr>
+
+            {/* Impuesto Hidrocarburos */}
+            <tr className="border-b border-white/5 hover:bg-white/5 transition-colors group">
+              <td className="p-3 font-semibold text-xs text-slate-400 uppercase tracking-widest sticky left-0 bg-[#0f172a] group-hover:bg-[#15203b] z-10 shadow-[4px_0_24px_-10px_rgba(0,0,0,0.5)]">
+                Impuesto Hidrocarb.
+              </td>
+              {bills.map(bill => (
+                <td key={bill.id} className="p-3 text-sm border-l border-white/5">
+                  {isGasBill(bill) ? (
+                    (bill.gasPricing?.impuestoHidrocarbTotal || 0) > 0
+                      ? `${bill.gasPricing!.impuestoHidrocarbTotal.toLocaleString('es-ES', { maximumFractionDigits: 2 })} €`
+                      : '-'
+                  ) : '—'}
+                </td>
+              ))}
+            </tr>
+
+            {/* Alquiler */}
+            <tr className="border-b border-white/5 hover:bg-white/5 transition-colors group">
+              <td className="p-3 font-semibold text-xs text-slate-400 uppercase tracking-widest sticky left-0 bg-[#0f172a] group-hover:bg-[#15203b] z-10 shadow-[4px_0_24px_-10px_rgba(0,0,0,0.5)]">
+                Alquiler Contador
+              </td>
+              {bills.map(bill => (
+                <td key={bill.id} className="p-3 text-sm border-l border-white/5">
+                  {isGasBill(bill) ? (
+                    (bill.gasPricing?.alquilerTotal || 0) > 0
+                      ? `${bill.gasPricing!.alquilerTotal.toLocaleString('es-ES', { maximumFractionDigits: 2 })} €`
+                      : '-'
+                  ) : '—'}
+                </td>
+              ))}
+            </tr>
+
+            {/* IVA */}
+            <tr className="border-b border-white/5 hover:bg-white/5 transition-colors group">
+              <td className="p-3 font-semibold text-xs text-slate-400 uppercase tracking-widest sticky left-0 bg-[#0f172a] group-hover:bg-[#15203b] z-10 shadow-[4px_0_24px_-10px_rgba(0,0,0,0.5)]">
+                IVA
+              </td>
+              {bills.map(bill => (
+                <td key={bill.id} className="p-3 text-sm border-l border-white/5">
+                  {isGasBill(bill) ? (
+                    (bill.gasPricing?.ivaTotal || 0) > 0
+                      ? `${bill.gasPricing!.ivaTotal.toLocaleString('es-ES', { maximumFractionDigits: 2 })} €`
+                      : '-'
+                  ) : '—'}
+                </td>
+              ))}
+            </tr>
+
+            {/* Ajustes */}
+            {bills.some(b => isGasBill(b) && (b.gasAdjustments?.length || 0) > 0) && (
+              <tr className="border-b border-white/5 hover:bg-white/5 transition-colors group">
+                <td className="p-3 font-semibold text-xs text-yellow-400 uppercase tracking-widest sticky left-0 bg-[#0f172a] group-hover:bg-[#15203b] z-10 shadow-[4px_0_24px_-10px_rgba(0,0,0,0.5)]">
+                  ⚠️ Ajustes
+                </td>
+                {bills.map(bill => (
+                  <td key={bill.id} className="p-3 text-xs border-l border-white/5">
+                    {isGasBill(bill) ? (
+                      bill.gasAdjustments && bill.gasAdjustments.length > 0 ? (
+                        <div className="flex flex-col gap-0.5">
+                          {bill.gasAdjustments.map((adj, i) => (
+                            <span key={i} className="text-yellow-400">
+                              {adj.concepto}: {adj.kwh} kWh / {adj.euros.toLocaleString('es-ES', { maximumFractionDigits: 2 })} €
+                            </span>
+                          ))}
+                        </div>
+                      ) : '-'
+                    ) : '—'}
                   </td>
-                );
-             })}
-           </tr>
+                ))}
+              </tr>
+            )}
          </tbody>
        </table>
      </div>

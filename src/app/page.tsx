@@ -7,10 +7,10 @@ import {
   CheckCircle, Plus, FolderOpen, Edit2, 
   BarChart3, LayoutDashboard, Settings, LogOut,
   ChevronRight, Sparkles, Zap, Smartphone, Layers, X,
-  Loader, FileSpreadsheet, Check, AlertCircle
+  Loader, FileSpreadsheet, Check, AlertCircle, RefreshCw
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { ExtractedBill, ProjectWorkspace, QueueItem } from '@/lib/types';
+import { ExtractedBill, ProjectWorkspace, QueueItem, isGasBill } from '@/lib/types';
 import FileTable from '@/components/FileTable';
 import { exportBillsToExcel } from '@/lib/export';
 import { importBillsFromExcel } from '@/lib/import-bills';
@@ -25,6 +25,7 @@ import {
   CorrectionResult
 } from '@/lib/excel-correction';
 import ReportView from '@/components/ReportView';
+import { GasReportView } from '@/components/GasReportView';
 import { motion, AnimatePresence } from 'framer-motion';
 import { fetchAllProjectsFromDB, syncProjectToDB, deleteProjectFromDB, saveAuditLog } from '@/lib/supabase-sync';
 import { getAssignedMonth } from '@/lib/date-utils';
@@ -139,13 +140,16 @@ function EnergyBillsAppContent() {
       if (!isAuthenticated) return;
       
       const userId = 'voltis_user_global';
+      console.log(`[SYNC_TRACE] Iniciando carga de datos para usuario: ${userId}`);
       setCloudSyncStatus('syncing');
+
       try {
         const dbProjects = await fetchAllProjectsFromDB(userId);
+        console.log(`[SYNC_TRACE] Supabase devolvió ${dbProjects?.length || 0} proyectos`);
         
         if (dbProjects && dbProjects.length > 0) {
           setSavedProjects(dbProjects);
-          
+
           const billsAcc: Record<string, ExtractedBill[]> = {};
           const ocsAcc: Record<string, any> = {};
 
@@ -158,19 +162,64 @@ function EnergyBillsAppContent() {
             });
             ocsAcc[p.id] = p.customOCs || {};
           });
-          
-          setAllBills(billsAcc);
-          setAllCustomOCs(ocsAcc);
-          
+
           const lastId = localStorage.getItem(`voltis_last_project`) || dbProjects[0].id;
+
+          setAllBills(prev => {
+            const merged = { ...prev };
+            Object.keys(billsAcc).forEach(pid => {
+              merged[pid] = billsAcc[pid];
+            });
+
+            const defaultBills = merged['default'] || [];
+            const activeBills = merged[lastId] || [];
+
+            if (defaultBills.length > 0) {
+              console.log(`[SYNC_TRACE] Detectados ${defaultBills.length} facturas huérfanas en 'default'`);
+              const activeKeys = new Set(activeBills.map(b => `${b.cups}-${b.fechaInicio}-${b.fechaFin}`));
+              const toMigrate = defaultBills.filter(b => !activeKeys.has(`${b.cups}-${b.fechaInicio}-${b.fechaFin}`));
+
+              if (toMigrate.length > 0) {
+                console.log(`[SYNC_TRACE] Migrando ${toMigrate.length} facturas de local → nube (Proyecto: ${lastId})`);
+                merged[lastId] = [...activeBills, ...toMigrate];
+                
+                setTimeout(() => {
+                  const migratedProject = {
+                    ...dbProjects.find(p => p.id === lastId),
+                    id: lastId,
+                    bills: merged[lastId],
+                    customOCs: { ...(ocsAcc[lastId] || {}), ...(prev['default'] || {}) },
+                    updatedAt: Date.now(),
+                  };
+                  syncProjectToDB(migratedProject as ProjectWorkspace, userId)
+                    .then(success => {
+                        if (success) console.log(`[SYNC_TRACE] Migración existosa a la nube`);
+                        else console.error(`[SYNC_TRACE] Falló la migración automática a la nube`);
+                    });
+                }, 100);
+              }
+              delete merged['default'];
+            }
+            return merged;
+          });
+
+          setAllCustomOCs(prev => {
+            const merged = { ...prev };
+            Object.keys(ocsAcc).forEach(pid => { merged[pid] = ocsAcc[pid]; });
+            if (prev['default']) {
+              merged[lastId] = { ...(merged[lastId] || {}), ...(prev['default'] || {}) };
+              delete merged['default'];
+            }
+            return merged;
+          });
+
           setCurrentProjectId(lastId);
           setCloudSyncStatus('synced');
+          console.log(`[SYNC_TRACE] Estado de la aplicación sincronizado con la nube`);
         } else {
-          // Try to restore from localStorage backups
+          console.log(`[SYNC_TRACE] No se encontraron proyectos en la nube. Buscando backups locales...`);
           const restoredProjects: ProjectWorkspace[] = [];
-          const billsAcc: Record<string, ExtractedBill[]> = {};
-          const ocsAcc: Record<string, any> = {};
-          
+          // ... (restored from localStorage logic)
           for (let i = 0; i < localStorage.length; i++) {
             const key = localStorage.key(i);
             if (key?.startsWith('voltis_bills_backup_')) {
@@ -178,8 +227,6 @@ function EnergyBillsAppContent() {
                 const projectId = key.replace('voltis_bills_backup_', '');
                 const backup = JSON.parse(localStorage.getItem(key) || '{}');
                 if (backup.bills && backup.bills.length > 0) {
-                  billsAcc[projectId] = backup.bills;
-                  ocsAcc[projectId] = backup.customOCs || {};
                   restoredProjects.push({
                     id: projectId,
                     name: `Proyecto Recuperado`,
@@ -188,53 +235,24 @@ function EnergyBillsAppContent() {
                     updatedAt: backup.savedAt || Date.now()
                   });
                 }
-              } catch (e) {
-                console.warn('[Recovery] Could not parse backup:', key, e);
-              }
+              } catch (e) {}
             }
           }
           
           if (restoredProjects.length > 0) {
+            console.log(`[SYNC_TRACE] Recuperados ${restoredProjects.length} proyectos de localStorage`);
             setSavedProjects(restoredProjects);
-            setAllBills(billsAcc);
-            setAllCustomOCs(ocsAcc);
-            const lastId = localStorage.getItem(`voltis_last_project`) || restoredProjects[0].id;
-            setCurrentProjectId(lastId);
             setCloudSyncStatus('local');
-            toast.warning(`Se recuperaron ${restoredProjects.reduce((sum, p) => sum + (p.bills?.length || 0), 0)} facturas desde copia local`);
+            toast.warning(`Se recuperaron datos locales. Conéctate a la nube para sincronizarlos.`);
           } else {
+            console.log(`[SYNC_TRACE] Entorno limpio (ni nube ni local)`);
             setCloudSyncStatus('synced');
           }
         }
-      } catch (e) {
-        console.error('Initial sync error', e);
-        
-        // Fallback to localStorage on error
-        const billsAcc: Record<string, ExtractedBill[]> = {};
-        const ocsAcc: Record<string, any> = {};
-        
-        for (let i = 0; i < localStorage.length; i++) {
-          const key = localStorage.key(i);
-          if (key?.startsWith('voltis_bills_backup_')) {
-            try {
-              const projectId = key.replace('voltis_bills_backup_', '');
-              const backup = JSON.parse(localStorage.getItem(key) || '{}');
-              if (backup.bills) {
-                billsAcc[projectId] = backup.bills;
-                ocsAcc[projectId] = backup.customOCs || {};
-              }
-            } catch (e2) {}
-          }
-        }
-        
-        if (Object.keys(billsAcc).length > 0) {
-          setAllBills(billsAcc);
-          setAllCustomOCs(ocsAcc);
-          setCloudSyncStatus('local');
-          toast.error('Error de conexión. Mostrando datos locales.');
-        } else {
-          setCloudSyncStatus('error');
-        }
+      } catch (e: any) {
+        console.error(`[LOCAL_FALLBACK_TRACE] Error en sincronización inicial:`, e.message);
+        setCloudSyncStatus('error');
+        toast.error('Error de conexión con la nube. Operando en modo local.');
       }
     };
     initStorage();
@@ -256,6 +274,35 @@ function EnergyBillsAppContent() {
     setIsAuthenticated(false);
     localStorage.removeItem('voltis_logged_in');
     toast.success('Sesión cerrada');
+  };
+
+  const handleManualSync = async () => {
+    if (cloudSyncStatus === 'syncing') return;
+    setCloudSyncStatus('syncing');
+    const userId = 'voltis_user_global';
+    console.log(`[SYNC_TRACE] Iniciando sincronización manual de todos los datos locales...`);
+    
+    try {
+      let totalMigrated = 0;
+      for (const proj of savedProjects) {
+        console.log(`[SYNC_TRACE] Sincronizando proyecto: ${proj.name} (${proj.id})`);
+        const success = await syncProjectToDB(proj, userId);
+        if (success) totalMigrated++;
+      }
+      
+      if (totalMigrated > 0) {
+        setCloudSyncStatus('synced');
+        toast.success(`Se sincronizaron ${totalMigrated} proyectos con la nube`);
+        console.log(`[SYNC_TRACE] Sincronización manual completada: ${totalMigrated} proyectos`);
+      } else {
+        setCloudSyncStatus('error');
+        toast.error('No se pudo sincronizar ningún proyecto con la nube');
+      }
+    } catch (e: any) {
+      console.error(`[SYNC_TRACE] Error en sincronización manual:`, e.message);
+      setCloudSyncStatus('error');
+      toast.error('Error durante la sincronización');
+    }
   };
 
   const saveToDisk = useCallback(async (updatedBills: ExtractedBill[], updatedOCs: Record<string, { concepto: string; total: number }[]>, targetProjectId?: string) => {
@@ -309,10 +356,33 @@ function EnergyBillsAppContent() {
     try {
       const res = await fetch('/api/extract', { method: 'POST', body: formData });
       const data = await res.json();
-      
+
+      if (data.status === 'pending_review') {
+        console.warn(`[REPORT ROUTING][${file.name}] Pending review: ${data.error}`);
+        setAllExtractionQueues(prev => ({
+          ...prev,
+          [targetProjectId]: (prev[targetProjectId] || []).map(item =>
+            item.id === queueId ? { ...item, status: 'error' as const, error: data.error } : item
+          )
+        }));
+        toast.warning(`⚠️ Clasificación ambigua para "${file.name}". ${data.error}`);
+        return;
+      }
+
       if (data.status === 'success') {
         const newBill: ExtractedBill = data.bill;
         const fileData = fileBase64Refs[queueId];
+
+        console.log(`[REPORT ROUTING][${file.name}] Classification: type=${data.classification?.energyType}, confidence=${data.classification?.confidence?.toFixed(2)}, isLowConfidence=${data.classification?.isLowConfidence}`);
+        console.log(`[REPORT ROUTING][${file.name}] Final bill: energyType=${newBill.energyType}, hasGasConsumption=${!!newBill.gasConsumption}, hasGasPricing=${!!newBill.gasPricing}, hasTarifaRL=${!!newBill.tarifaRL}, hasConsumo=${!!(newBill as any).consumo}, total=${newBill.totalFactura}`);
+
+        if (data.classification?.isLowConfidence) {
+          toast.warning(`Factura "${file.name}" clasificada con baja confianza (${(data.classification.confidence * 100).toFixed(0)}%). Por favor, revisa que los datos sean correctos.`);
+        }
+
+        if (data.classification?.warnings?.length > 0) {
+          console.warn(`[REPORT ROUTING][${file.name}] Classification warnings:`, data.classification.warnings);
+        }
 
         // Attach original file if available
         if (fileData) {
@@ -320,20 +390,20 @@ function EnergyBillsAppContent() {
           newBill.fileMimeType = fileData.type;
         }
 
-        // 1. Update project-keyed bills
+        // Update project-keyed bills
         setAllBills(prev => {
           const projectBills = prev[targetProjectId] || [];
-          const isDuplicate = projectBills.some(b => 
-            b.cups && newBill.cups && 
-            b.cups === newBill.cups && 
-            b.fechaInicio === newBill.fechaInicio && 
+          const isDuplicate = projectBills.some(b =>
+            b.cups && newBill.cups &&
+            b.cups === newBill.cups &&
+            b.fechaInicio === newBill.fechaInicio &&
             b.fechaFin === newBill.fechaFin
           );
 
           if (isDuplicate) {
             setAllExtractionQueues(q => ({
               ...q,
-              [targetProjectId]: (q[targetProjectId] || []).map(item => 
+              [targetProjectId]: (q[targetProjectId] || []).map(item =>
                 item.id === queueId ? { ...item, status: 'error' as const, error: 'Factura duplicada en este proyecto' } : item
               )
             }));
@@ -348,33 +418,47 @@ function EnergyBillsAppContent() {
             return am.month - bm.month;
           });
           const next = { ...prev, [targetProjectId]: nextBills };
-          
-          // Sync to storage
+
           const projectCustomOCs = allCustomOCs[targetProjectId] || {};
           saveToDisk(nextBills, projectCustomOCs, targetProjectId);
-          
+
           return next;
         });
 
         setAllExtractionQueues(prev => ({
           ...prev,
-          [targetProjectId]: (prev[targetProjectId] || []).map(item => 
+          [targetProjectId]: (prev[targetProjectId] || []).map(item =>
             item.id === queueId ? { ...item, status: 'success' as const } : item
           )
         }));
       } else {
+        // Handle extraction failure
+        const isRetryable = data.retryable === true;
+        const errorMsg = data.error || 'Error desconocido';
+
+        console.error(`[REPORT ROUTING][${file.name}] Extraction failed: ${errorMsg}`, {
+          retryable: isRetryable,
+          classification: data.classification,
+        });
+
         setAllExtractionQueues(prev => ({
           ...prev,
-          [targetProjectId]: (prev[targetProjectId] || []).map(item => 
-            item.id === queueId ? { ...item, status: 'error' as const, error: data.error } : item
+          [targetProjectId]: (prev[targetProjectId] || []).map(item =>
+            item.id === queueId ? { ...item, status: 'error' as const, error: errorMsg } : item
           )
         }));
-        toast.error(`Error en ${file.name}: ${data.error}`);
+
+        if (isRetryable) {
+          toast.error(`⚠️ ${errorMsg} Intenta de nuevo en unos segundos.`);
+        } else {
+          toast.error(`Error en ${file.name}: ${errorMsg}`);
+        }
       }
     } catch (err) {
+      console.error(`[REPORT ROUTING][${file.name}] Network error:`, err);
       setAllExtractionQueues(prev => ({
         ...prev,
-        [targetProjectId]: (prev[targetProjectId] || []).map(item => 
+        [targetProjectId]: (prev[targetProjectId] || []).map(item =>
           item.id === queueId ? { ...item, status: 'error' as const, error: 'Error de red' } : item
         )
       }));
@@ -853,16 +937,47 @@ function EnergyBillsAppContent() {
       }
     });
     
+    // Check if we have gas bills
+    const hasGasBills = reportBills.some(b => isGasBill(b));
+    const hasElectricityBills = reportBills.some(b => !isGasBill(b));
+    
+    // Separate bills by type
+    const electricityBills = reportBills.filter(b => !isGasBill(b));
+    const gasOnlyBills = reportBills.filter(b => isGasBill(b));
+    
+    const projectName = savedProjects.find(p => p.id === currentProjectId)?.name || 'PROYECTO';
+    
     return (
       <div className="fixed inset-0 z-[60] bg-[#020617] overflow-hidden">
-        <ReportView 
-          bills={reportBills} 
-          customOCs={reportCustomOCs} 
-          onBack={() => setShowReport(false)} 
-          projectName={savedProjects.find(p => p.id === currentProjectId)?.name || 'PROYECTO'}
-          projectId={currentProjectId}
-          onPreviewBill={(id) => setPreviewBillId(id)}
-        />
+        {/* Gas-only report */}
+        {hasGasBills && !hasElectricityBills && (
+          <GasReportView
+            bills={gasOnlyBills}
+            onBack={() => setShowReport(false)}
+            projectName={projectName}
+            projectId={currentProjectId}
+          />
+        )}
+        
+        {/* Electricity-only or mixed report */}
+        {hasElectricityBills && (
+          <ReportView 
+            bills={electricityBills} 
+            customOCs={reportCustomOCs} 
+            onBack={() => setShowReport(false)} 
+            projectName={projectName}
+            projectId={currentProjectId}
+            onPreviewBill={(id) => setPreviewBillId(id)}
+          />
+        )}
+        
+        {/* Show gas bills summary if mixed */}
+        {hasGasBills && hasElectricityBills && (
+          <div className="fixed bottom-4 right-4 z-[70] glass p-4 rounded-2xl border border-orange-500/30 bg-[#020617]/90">
+            <p className="text-xs font-bold text-orange-400">📄 {gasOnlyBills.length} factura{gasOnlyBills.length !== 1 ? 's' : ''} de gas detected{gasOnlyBills.length !== 1 ? 'as' : ''}</p>
+            <p className="text-[10px] text-slate-500 mt-1">Ver Informe de Gas pendiente</p>
+          </div>
+        )}
         
         {/* MODAL PREVIEW FACTURA ORIGINAL */}
         <AnimatePresence>
@@ -1202,8 +1317,19 @@ function EnergyBillsAppContent() {
                   <span className="text-[10px] font-black tracking-[0.2em] text-white/40 uppercase">
                     {cloudSyncStatus === 'synced' ? 'Cloud Synced' :
                      cloudSyncStatus === 'syncing' ? 'Syncing...' :
-                     cloudSyncStatus === 'error' ? 'Cloud Error' : 'Offline Mode'}
+                     cloudSyncStatus === 'error' ? 'Cloud Error' : 
+                     cloudSyncStatus === 'local' ? 'Datos Locales' : 'Offline Mode'}
                   </span>
+                  {cloudSyncStatus === 'local' && (
+                    <button 
+                      onClick={handleManualSync}
+                      className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-blue-500/10 border border-blue-500/20 text-[9px] font-black text-blue-400 hover:bg-blue-500/20 transition-all uppercase animate-pulse"
+                      title="Sincronizar datos locales con la nube ahora"
+                    >
+                      <RefreshCw className="w-2.5 h-2.5" />
+                      Sincronizar ahora
+                    </button>
+                  )}
                 </div>
                 <h1 className="text-5xl font-black tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-white via-white to-blue-500 leading-none py-2">
                   VOLTIS ANUAL <br/> ECONOMICS

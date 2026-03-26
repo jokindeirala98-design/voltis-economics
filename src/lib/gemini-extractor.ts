@@ -1,5 +1,5 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { ExtractedBill } from './types';
+import { ExtractedBill, EnergyType } from './types';
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
 
@@ -68,9 +68,15 @@ export async function extractBillDataWithAI(fileBuffer: Buffer, fileType: string
     }
   ];
 
+  const keySuffix = process.env.GEMINI_API_KEY ? `...${process.env.GEMINI_API_KEY.slice(-4)}` : 'missing';
+  console.log(`[GEMINI_REQUEST][ELECTRICITY] Model: gemini-flash-latest, Key: ${keySuffix}, PromptLength: ${SYSTEM_PROMPT.length}`);
+
   try {
     const result = await model.generateContent(parts);
-    const text = cleanJson(result.response.text());
+    const responseText = result.response.text();
+    console.log(`[GEMINI_RESPONSE][ELECTRICITY] Response Length: ${responseText.length}`);
+    
+    const text = cleanJson(responseText);
     let data: ExtractedBill = JSON.parse(text);
 
     // --- Deduplication & Normalization Step ---
@@ -104,15 +110,22 @@ export async function extractBillDataWithAI(fileBuffer: Buffer, fileType: string
       });
     }
 
-    return { ...data, status: 'success' };
+    return { ...data, status: 'success', energyType: 'electricity' as EnergyType };
   } catch (error: any) {
-    console.error('Error extracting with Gemini:', error);
+    console.error(`[GEMINI_RESPONSE][ELECTRICITY] CRITICAL ERROR:`, error.message);
+    if (error.message?.includes('403')) {
+      console.error(`[DEPLOY_TRACE] Error 403 Detectado en ELECTRICITY. Verifique que la clave ${keySuffix} esté activa.`);
+    }
+
     try {
         console.warn('Reintentando con gemini-flash-latest (Retry)...');
         const res = await model.generateContent(parts);
-        return { ...JSON.parse(cleanJson(res.response.text())), status: 'success' };
-    } catch (e2) {
-        throw new Error(`Error crítico en Gemini: ${error.message}. Verifica tu API Key.`);
+        const resText = cleanJson(res.response.text());
+        console.log(`[GEMINI_RESPONSE][ELECTRICITY][RETRY] Success. Length: ${resText.length}`);
+        return { ...JSON.parse(resText), status: 'success', energyType: 'electricity' as EnergyType };
+    } catch (e2: any) {
+        console.error(`[GEMINI_RESPONSE][ELECTRICITY][RETRY] Failed:`, e2.message);
+        throw new Error(`Error crítico en Gemini (Electricity): ${error.message}. Verifica tu API Key.`);
     }
   }
 }

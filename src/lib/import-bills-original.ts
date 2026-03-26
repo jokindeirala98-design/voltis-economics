@@ -80,6 +80,7 @@ export const importBillsFromExcel = async (file: File): Promise<{ bills: Extract
             id: Math.random().toString(36).substring(7),
             fileName,
             status: 'success',
+            energyType: 'electricity',
             comercializadora: getCellString('Compañía', invKey),
             titular: getCellString('Titular', invKey),
             cups: getCellString('CUPS', invKey),

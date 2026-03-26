@@ -19,7 +19,7 @@
  */
 import { NextRequest, NextResponse } from 'next/server';
 import { fetchProjectById } from '@/lib/supabase-sync';
-import { ExtractedBill, ProjectWorkspace } from '@/lib/types';
+import { ExtractedBill, ProjectWorkspace, isGasBill } from '@/lib/types';
 import { getMonthlyAggregatedData, CANONICAL_MONTHS } from '@/lib/date-utils';
 import puppeteer from 'puppeteer-core';
 import chromium from '@sparticuz/chromium';
@@ -431,7 +431,7 @@ async function generatePDF(html: string): Promise<Buffer> {
 
   try {
     const page = await browser.newPage();
-    await page.setContent(html, { waitUntil: 'networkidle0' });
+    await page.setContent(html, { waitUntil: 'domcontentloaded' });
     
     const pdf = await page.pdf({
       format: 'A4',
@@ -453,6 +453,7 @@ interface PDFExportBody {
   bills: ExtractedBill[];
   customOCs?: Record<string, any>;
   format?: 'html' | 'pdf';
+  energyType?: 'electricity' | 'gas'; // Optional filter for specific energy type
 }
 
 async function getProjectData(projectId: string, body?: PDFExportBody): Promise<{ project: ProjectWorkspace; format: 'html' | 'pdf' } | { error: string; status: number }> {
@@ -503,20 +504,41 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'bills array is required' }, { status: 400 });
     }
     
-    console.log(`[Export-PDF] POST: Processing ${body.bills.length} bills for project: ${body.projectId}`);
-    
-    const result = await getProjectData(body.projectId, body);
-    if ('error' in result) {
-      return NextResponse.json({ error: result.error }, { status: result.status });
+    // Filter bills by energyType if specified
+    let filteredBills = body.bills;
+    if (body.energyType) {
+      filteredBills = body.bills.filter(b => 
+        body.energyType === 'gas' ? isGasBill(b) : !isGasBill(b)
+      );
+      console.log(`[Export-PDF] Filtered to ${filteredBills.length} ${body.energyType} bills`);
     }
     
-    const { project, format } = result;
+    if (filteredBills.length === 0) {
+      return NextResponse.json({ error: `No ${body.energyType || 'energy'} bills found` }, { status: 400 });
+    }
+    
+    console.log(`[Export-PDF] POST: Processing ${filteredBills.length} bills for project: ${body.projectId}`);
+    
+    // Check if we have gas bills and route accordingly
+    const hasGasBills = filteredBills.some(b => isGasBill(b));
+    const isElectricity = !hasGasBills;
+    
+    const project: ProjectWorkspace = {
+      id: body.projectId,
+      name: body.projectName || 'PROYECTO',
+      updatedAt: Date.now(),
+      bills: filteredBills,
+      customOCs: body.customOCs || {}
+    };
+    
+    const format = body.format === 'pdf' ? 'pdf' : 'html';
+    const isGas = hasGasBills;
     
     if (format === 'html') {
-      return generateHTMLResponse(project);
+      return generateHTMLResponse(project, isGas);
     }
     
-    return generatePDFResponse(project);
+    return generatePDFResponse(project, isGas);
     
   } catch (e) {
     console.error('[Export-PDF] POST error:', e);
@@ -528,33 +550,49 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const projectId = searchParams.get('projectId');
   const format = searchParams.get('format');
+  const energyType = searchParams.get('energyType');
 
   if (!projectId) {
     return NextResponse.json({ error: 'projectId is required' }, { status: 400 });
   }
 
-  console.log(`[Export-PDF] GET: Fetching project: ${projectId}`);
+  console.log(`[Export-PDF] GET: Fetching project: ${projectId}, energyType: ${energyType || 'all'}`);
 
   const result = await getProjectData(projectId);
   if ('error' in result) {
     return NextResponse.json({ error: result.error }, { status: result.status });
   }
-  
-  return generateHTMLResponse(result.project);
+
+  let filteredBills = result.project.bills;
+  if (energyType === 'gas') {
+    filteredBills = filteredBills.filter(b => isGasBill(b));
+  } else if (energyType === 'electricity') {
+    filteredBills = filteredBills.filter(b => !isGasBill(b));
+  }
+
+  if (filteredBills.length === 0) {
+    return NextResponse.json({ error: `No ${energyType || 'energy'} bills found` }, { status: 400 });
+  }
+
+  const filteredProject = { ...result.project, bills: filteredBills };
+  const isGas = energyType === 'gas' || (filteredBills.length > 0 && filteredBills.every(b => isGasBill(b)));
+
+  return generateHTMLResponse(filteredProject, isGas);
 }
 
-async function generatePDFResponse(project: ProjectWorkspace): Promise<NextResponse> {
-  console.log(`[Export-PDF] Generating PDF for project: ${project.name}`);
-  const html = generateReportHTML(project);
+async function generatePDFResponse(project: ProjectWorkspace, isGas: boolean = false): Promise<NextResponse> {
+  console.log(`[Export-PDF] Generating ${isGas ? 'GAS' : 'ELECTRICITY'} PDF for project: ${project.name}`);
+  const html = isGas ? generateGasReportHTML(project) : generateReportHTML(project);
   
   try {
     const pdfBuffer = await generatePDF(html);
     console.log(`[Export-PDF] PDF generated: ${pdfBuffer.length} bytes`);
+    const filename = isGas ? `Voltis_Gas_Report_${project.id}.pdf` : `Voltis_Report_${project.id}.pdf`;
     return new NextResponse(new Uint8Array(pdfBuffer), {
       status: 200,
       headers: {
         'Content-Type': 'application/pdf',
-        'Content-Disposition': `attachment; filename="Voltis_Report_${project.id}.pdf"`,
+        'Content-Disposition': `attachment; filename="${filename}"`,
       },
     });
   } catch (error: any) {
@@ -563,8 +601,8 @@ async function generatePDFResponse(project: ProjectWorkspace): Promise<NextRespo
   }
 }
 
-async function generateHTMLResponse(project: ProjectWorkspace): Promise<NextResponse> {
-  const html = generateReportHTML(project);
+async function generateHTMLResponse(project: ProjectWorkspace, isGas: boolean = false): Promise<NextResponse> {
+  const html = isGas ? generateGasReportHTML(project) : generateReportHTML(project);
   return new NextResponse(html, {
     status: 200,
     headers: { 'Content-Type': 'text/html' },
@@ -1269,5 +1307,683 @@ function generateReportHTML(project: ProjectWorkspace): string {
 </body>
 </html>`;
   
+  return html;
+}
+
+function generateGasReportHTML(project: ProjectWorkspace): string {
+  console.log(`[Export-PDF] Processing ${project.bills.length} GAS bills for project: ${project.name}`);
+  
+  const validBills = project.bills.filter(b => b.status !== 'error' && isGasBill(b));
+  const sorted = [...validBills].sort((a, b) => {
+    const am = getAssignedMonth(a.fechaInicio, a.fechaFin);
+    const bm = getAssignedMonth(b.fechaInicio, b.fechaFin);
+    if (am.year !== bm.year) return am.year - bm.year;
+    return am.month - bm.month;
+  });
+
+  const months = CANONICAL_MONTHS.map((label, i) => ({
+    monthIndex: i,
+    label,
+    kwh: 0,
+    eur: 0,
+    year: 0,
+  }));
+
+  let totalKwh = 0;
+  let totalEur = 0;
+  let totalTerminoFijo = 0;
+  let totalImpuesto = 0;
+  let totalAlquiler = 0;
+  let totalIva = 0;
+  let adjustedCount = 0;
+
+  sorted.forEach(b => {
+    const { month, year } = getAssignedMonth(b.fechaInicio, b.fechaFin);
+    if (month < 0 || month > 11) return;
+
+    const kwh = b.gasConsumption?.kwh || 0;
+    const eur = b.totalFactura || 0;
+    const terminoFijo = b.gasPricing?.terminoFijoTotal || 0;
+    const impuesto = b.gasPricing?.impuestoHidrocarbTotal || 0;
+    const alquiler = b.gasPricing?.alquilerTotal || 0;
+    const iva = b.gasPricing?.ivaTotal || 0;
+
+    months[month].kwh += kwh;
+    months[month].eur += eur;
+    months[month].year = year;
+
+    totalKwh += kwh;
+    totalEur += eur;
+    totalTerminoFijo += terminoFijo;
+    totalImpuesto += impuesto;
+    totalAlquiler += alquiler;
+    totalIva += iva;
+
+    if (b.gasAdjustments && b.gasAdjustments.length > 0) {
+      adjustedCount++;
+    }
+  });
+
+  const avgPrice = totalKwh > 0 ? totalEur / totalKwh : 0;
+  const cups = sorted[0]?.cups || 'N/A';
+  const tarifa = sorted[0]?.tarifaRL || 'RL.1';
+
+  const pieData = [
+    { name: 'Consumo Gas', value: Math.max(0, totalEur - totalTerminoFijo - totalImpuesto - totalAlquiler - totalIva), color: '#f97316' },
+    { name: 'Término Fijo', value: totalTerminoFijo, color: '#fb923c' },
+    { name: 'Impuesto Hidrocarb.', value: totalImpuesto, color: '#fbbf24' },
+    { name: 'IVA', value: totalIva, color: '#a78bfa' },
+    { name: 'Alquiler', value: totalAlquiler, color: '#facc15' },
+  ].filter(i => i.value > 0);
+
+  const tableRows = sorted.map(b => {
+    const { month, year } = getAssignedMonth(b.fechaInicio, b.fechaFin);
+    const kwh = b.gasConsumption?.kwh || 0;
+    const precioKwh = b.gasPricing?.precioKwh;
+    const precioEstimated = b.gasPricing?.precioKwhEstimated;
+    const terminoFijo = b.gasPricing?.terminoFijoTotal || 0;
+    const impuesto = b.gasPricing?.impuestoHidrocarbTotal || 0;
+    const alquiler = b.gasPricing?.alquilerTotal || 0;
+    const iva = b.gasPricing?.ivaTotal || 0;
+    const total = b.totalFactura || 0;
+    const hasAdjustments = (b.gasAdjustments?.length || 0) > 0;
+
+    const SHORT_MONTHS: Record<number, string> = {
+      0: 'Ene', 1: 'Feb', 2: 'Mar', 3: 'Abr', 4: 'May', 5: 'Jun',
+      6: 'Jul', 7: 'Ago', 8: 'Sep', 9: 'Oct', 10: 'Nov', 11: 'Dic'
+    };
+
+    return {
+      name: `${SHORT_MONTHS[month]} ${year}`,
+      kwh,
+      m3: b.gasConsumption?.m3,
+      factor: b.gasConsumption?.factorConversion,
+      precioKwh,
+      precioEstimated,
+      terminoFijo,
+      impuesto,
+      alquiler,
+      iva,
+      total,
+      hasAdjustments,
+      tarifaRL: b.tarifaRL || '-',
+    };
+  });
+
+  const tableTotals = {
+    kwh: tableRows.reduce((sum, r) => sum + r.kwh, 0),
+    terminoFijo: tableRows.reduce((sum, r) => sum + r.terminoFijo, 0),
+    impuesto: tableRows.reduce((sum, r) => sum + r.impuesto, 0),
+    alquiler: tableRows.reduce((sum, r) => sum + r.alquiler, 0),
+    iva: tableRows.reduce((sum, r) => sum + r.iva, 0),
+    total: tableRows.reduce((sum, r) => sum + r.total, 0),
+  };
+
+  const pieChartSVG = generatePieChartSVG(pieData, totalEur);
+  const barChartSVG = generateBarChartSVG(months.map(m => ({ label: m.label, totalFactura: m.eur, totalKwh: m.kwh })));
+
+  const pieLegend = pieData.map(item => `
+    <div class="legend-item">
+      <div style="display:flex;align-items:center">
+        <div class="legend-dot" style="background:${item.color}"></div>
+        <span class="legend-text">${item.name}</span>
+      </div>
+      <span class="legend-value">${((item.value / totalEur) * 100).toFixed(1)}%</span>
+    </div>
+  `).join('');
+
+  const tableRowsHTML = tableRows.map(row => `
+    <tr>
+      <td style="text-align:left">
+        ${row.name}
+        ${row.hasAdjustments ? '<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#facc15;margin-left:6px;vertical-align:middle;" title="Factura con ajustes/regularizaciones"></span>' : ''}
+      </td>
+      <td style="text-align:center">${row.tarifaRL}</td>
+      <td>${row.kwh > 0 ? row.kwh.toLocaleString('es-ES', { maximumFractionDigits: 0 }) : '-'}</td>
+      <td>${row.m3 ? row.m3.toLocaleString('es-ES') : '-'}</td>
+      <td>${row.factor ? row.factor.toFixed(4) : '-'}</td>
+      <td style="${row.precioEstimated ? 'color: #facc15;' : ''}">${row.precioKwh ? row.precioKwh.toFixed(4) : '-'}</td>
+      <td>${row.terminoFijo > 0 ? row.terminoFijo.toFixed(2) : '-'}</td>
+      <td>${row.impuesto > 0 ? row.impuesto.toFixed(2) : '-'}</td>
+      <td>${row.alquiler > 0 ? row.alquiler.toFixed(2) : '-'}</td>
+      <td>${row.iva > 0 ? row.iva.toFixed(2) : '-'}</td>
+      <td style="font-weight: 800; color: #f97316;">${row.total.toFixed(2)}</td>
+    </tr>
+  `).join('');
+
+  const tableTotalsHTML = `
+    <tr style="background: rgba(249, 115, 22, 0.15); border-top: 2px solid rgba(249, 115, 22, 0.5);">
+      <td style="text-align:left; font-weight: 900; color: #f97316;">TOTAL</td>
+      <td></td>
+      <td style="font-weight: 900; color: #f97316;">${tableTotals.kwh.toLocaleString('es-ES', { maximumFractionDigits: 0 })}</td>
+      <td></td>
+      <td></td>
+      <td></td>
+      <td style="font-weight: 900; color: #f97316;">${tableTotals.terminoFijo > 0 ? tableTotals.terminoFijo.toFixed(2) : '-'}</td>
+      <td style="font-weight: 900; color: #f97316;">${tableTotals.impuesto > 0 ? tableTotals.impuesto.toFixed(2) : '-'}</td>
+      <td style="font-weight: 900; color: #f97316;">${tableTotals.alquiler > 0 ? tableTotals.alquiler.toFixed(2) : '-'}</td>
+      <td style="font-weight: 900; color: #f97316;">${tableTotals.iva > 0 ? tableTotals.iva.toFixed(2) : '-'}</td>
+      <td style="font-weight: 900; color: #f97316;">${tableTotals.total.toFixed(2)}</td>
+    </tr>
+  `;
+
+  const html = `<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Voltis - ${project.name} (Gas)</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #020617; font-family: system-ui, -apple-system, sans-serif; color: white; }
+    
+    .page {
+      width: 210mm;
+      min-height: 297mm;
+      background: #020617;
+      padding: 15mm;
+      box-sizing: border-box;
+      page-break-after: always;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    
+    .page:last-child { page-break-after: auto; }
+    
+    .glass {
+      background: rgba(15, 23, 42, 0.55);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 16px;
+      padding: 20px;
+    }
+    
+    .section-title {
+      font-size: 11px;
+      font-weight: 700;
+      color: #f97316;
+      text-transform: uppercase;
+      letter-spacing: 0.15em;
+      margin-bottom: 6px;
+    }
+    
+    .section-heading {
+      font-size: 22px;
+      font-weight: 800;
+      color: white;
+      text-transform: uppercase;
+      letter-spacing: 0.01em;
+      margin-bottom: 16px;
+    }
+    
+    .kpi-dashboard {
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+      flex: 1;
+      justify-content: center;
+      max-width: 400px;
+      margin: 0 auto;
+      width: 100%;
+    }
+    
+    .kpi-block {
+      background: rgba(15, 23, 42, 0.6);
+      border: 1px solid rgba(249, 115, 22, 0.3);
+      border-radius: 24px;
+      padding: 32px 40px;
+      text-align: center;
+    }
+    
+    .kpi-block-label {
+      font-size: 11px;
+      font-weight: 600;
+      color: rgba(255,255,255,0.5);
+      text-transform: uppercase;
+      letter-spacing: 0.15em;
+      margin-bottom: 12px;
+    }
+    
+    .kpi-block-value {
+      font-size: 48px;
+      font-weight: 900;
+      color: white;
+      line-height: 1;
+    }
+    
+    .kpi-block-unit {
+      font-size: 14px;
+      font-weight: 500;
+      color: #f97316;
+      margin-top: 8px;
+    }
+    
+    .kpi-grid-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+    }
+    
+    .kpi-block-sm {
+      background: rgba(15, 23, 42, 0.6);
+      border: 1px solid rgba(249, 115, 22, 0.2);
+      border-radius: 20px;
+      padding: 24px 32px;
+      text-align: center;
+    }
+    
+    .kpi-block-sm .kpi-block-value {
+      font-size: 36px;
+    }
+    
+    .chart-section {
+      margin-bottom: 32px;
+    }
+    
+    .chart-container {
+      background: rgba(15, 23, 42, 0.5);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 16px;
+      padding: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    
+    .chart-container svg {
+      max-width: 100%;
+      height: auto;
+      display: block;
+    }
+    
+    .charts-row {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 24px;
+      flex: 1;
+    }
+    
+    .bio-section {
+      display: flex;
+      gap: 32px;
+      align-items: stretch;
+      background: rgba(15, 23, 42, 0.5);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 16px;
+      padding: 24px;
+    }
+    
+    .pie-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-width: 200px;
+    }
+    
+    .pie-center {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+    
+    .pie-total {
+      font-size: 20px;
+      font-weight: 800;
+      margin-top: 12px;
+      color: white;
+    }
+    
+    .pie-legend {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+    
+    .legend-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px 0;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+    
+    .legend-dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+    }
+    
+    .legend-text {
+      font-size: 13px;
+      font-weight: 500;
+      color: rgba(255,255,255,0.8);
+      margin-left: 12px;
+    }
+    
+    .legend-value {
+      font-size: 14px;
+      font-weight: 700;
+      color: #f97316;
+    }
+    
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 12px;
+      font-size: 10px;
+    }
+    
+    th {
+      padding: 10px 8px;
+      font-size: 8px;
+      font-weight: 700;
+      color: rgba(255,255,255,0.5);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      border-bottom: 2px solid rgba(249, 115, 22, 0.3);
+      text-align: right;
+      background: rgba(15, 23, 42, 0.3);
+    }
+    
+    th:first-child { text-align: left; }
+    th:nth-child(2) { text-align: center; }
+    
+    td {
+      padding: 8px 8px;
+      font-size: 10px;
+      font-weight: 500;
+      color: rgba(255,255,255,0.7);
+      border-bottom: 1px solid rgba(255,255,255,0.04);
+      text-align: right;
+    }
+    
+    td:first-child { 
+      text-align: left; 
+      color: rgba(255,255,255,0.9);
+      font-weight: 600;
+    }
+    
+    td:nth-child(2) { text-align: center; }
+    
+    .cover {
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      min-height: 297mm;
+    }
+    
+    .cover-content {
+      max-width: 180mm;
+    }
+    
+    .logo {
+      font-size: 64px;
+      font-weight: 900;
+      letter-spacing: 0.04em;
+      color: #f97316;
+      text-shadow: 0 0 80px rgba(249, 115, 22, 0.5);
+      margin-bottom: 8px;
+    }
+    
+    .logo-sub {
+      font-size: 16px;
+      font-weight: 600;
+      color: rgba(255,255,255,0.5);
+      letter-spacing: 0.15em;
+      margin-bottom: 48px;
+    }
+    
+    .divider {
+      height: 3px;
+      width: 80px;
+      background: linear-gradient(90deg, #f97316, #fbbf24);
+      margin: 0 auto 40px;
+      border-radius: 2px;
+    }
+    
+    .project-name {
+      font-size: 36px;
+      font-weight: 800;
+      color: white;
+      margin-bottom: 32px;
+      letter-spacing: -0.01em;
+    }
+    
+    .cups-badge {
+      display: inline-block;
+      font-size: 12px;
+      font-weight: 600;
+      color: white;
+      padding: 14px 28px;
+      border: 1px solid rgba(249, 115, 22, 0.4);
+      border-radius: 30px;
+      letter-spacing: 0.08em;
+      margin-bottom: 20px;
+      background: rgba(249, 115, 22, 0.1);
+    }
+    
+    .tarifa {
+      font-size: 11px;
+      color: #f97316;
+      letter-spacing: 0.15em;
+      margin-top: 12px;
+      font-weight: 600;
+    }
+    
+    .footer-note {
+      font-size: 9px;
+      color: rgba(255,255,255,0.3);
+      letter-spacing: 0.15em;
+      margin-top: 100px;
+      font-weight: 500;
+    }
+    
+    .closing {
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      min-height: 297mm;
+    }
+    
+    .closing-container {
+      background: rgba(15, 23, 42, 0.6);
+      border: 1px solid rgba(249, 115, 22, 0.3);
+      border-radius: 24px;
+      padding: 60px 80px;
+      max-width: 600px;
+      width: 100%;
+      box-sizing: border-box;
+    }
+    
+    .closing-content {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+    
+    .closing-company {
+      font-size: 56px;
+      font-weight: 900;
+      color: #f97316;
+      letter-spacing: 0.05em;
+      margin-bottom: 32px;
+      text-shadow: 0 0 40px rgba(249, 115, 22, 0.4);
+    }
+    
+    .closing-contact {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      margin-bottom: 48px;
+      padding: 24px 32px;
+      background: rgba(15, 23, 42, 0.4);
+      border-radius: 16px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      width: 100%;
+    }
+    
+    .contact-item {
+      font-size: 16px;
+      color: rgba(255,255,255,0.8);
+      font-weight: 500;
+      padding: 8px 0;
+    }
+    
+    .closing-footer {
+      font-size: 11px;
+      color: rgba(255,255,255,0.4);
+      letter-spacing: 0.2em;
+      font-weight: 500;
+      text-transform: uppercase;
+    }
+    
+    .badge-adjusted {
+      display: inline-block;
+      font-size: 7px;
+      padding: 2px 4px;
+      background: #facc15;
+      color: #000;
+      border-radius: 4px;
+      margin-left: 4px;
+      font-weight: 700;
+    }
+  </style>
+</head>
+<body>
+  <!-- PAGE 1: COVER -->
+  <div class="page cover">
+    <div class="cover-content">
+      <div class="logo">VOLTIS</div>
+      <div class="logo-sub">INFORME DE GAS</div>
+      <div class="divider"></div>
+      <div class="project-name">${project.name}</div>
+      <div class="cups-badge">CUPS · ${cups}</div>
+      <div class="tarifa">TARIFA ${tarifa}</div>
+      <div class="footer-note">INFORME DE AUDITORÍA ENERGÉTICA - GAS</div>
+    </div>
+  </div>
+
+  <!-- PAGE 2: KPIs -->
+  <div class="page">
+    <div class="section-title">Métricas Auditadas</div>
+    <div class="section-heading">Resultados Anuales - Gas</div>
+    
+    <div class="kpi-dashboard">
+      <div class="kpi-block">
+        <div class="kpi-block-label">Facturación Global</div>
+        <div class="kpi-block-value">${totalEur.toLocaleString('es-ES', { minimumFractionDigits: 2 })}</div>
+        <div class="kpi-block-unit">EUR</div>
+      </div>
+      
+      <div class="kpi-block">
+        <div class="kpi-block-label">Consumo Total Gas</div>
+        <div class="kpi-block-value">${totalKwh.toLocaleString('es-ES')}</div>
+        <div class="kpi-block-unit">kWh</div>
+      </div>
+      
+      <div class="kpi-grid-row">
+        <div class="kpi-block-sm">
+          <div class="kpi-block-label">Precio Medio</div>
+          <div class="kpi-block-value">${avgPrice.toLocaleString('es-ES', { minimumFractionDigits: 4 })}</div>
+          <div class="kpi-block-unit">EUR/kWh</div>
+        </div>
+        <div class="kpi-block-sm">
+          <div class="kpi-block-label">Documentos Procesados</div>
+          <div class="kpi-block-value">${sorted.length}</div>
+          <div class="kpi-block-unit">FACTURAS</div>
+        </div>
+      </div>
+    </div>
+    
+    ${adjustedCount > 0 ? `
+    <div style="margin-top: 20px; padding: 12px 16px; background: rgba(250, 204, 21, 0.1); border: 1px solid rgba(250, 204, 21, 0.3); border-radius: 8px;">
+      <div style="font-size: 9px; font-weight: 900; color: #facc15; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 8px;">⚠ Facturas con Ajustes/Regularizaciones</div>
+      <div style="font-size: 14px; color: white;">${adjustedCount} factura${adjustedCount > 1 ? 's' : ''} contiene${adjustedCount === 1 ? '' : 'n'} ajustes de consumo</div>
+    </div>
+    ` : ''}
+  </div>
+
+  <!-- PAGE 3: CHARTS -->
+  <div class="page">
+    <div style="display: flex; flex-direction: column; flex: 1;">
+      <div class="section-title">Análisis Temporal</div>
+      <div class="section-heading">Evolución del Gasto Mensual</div>
+      <div class="chart-container" style="flex: 1; min-height: 0;">
+        ${barChartSVG}
+      </div>
+      
+      <div class="section-title" style="margin-top: 16px;">Análisis Estructural</div>
+      <div class="section-heading">Distribución de Costes</div>
+      <div class="bio-section" style="flex: 1; min-height: 180px;">
+        <div class="pie-container">
+          <div class="pie-center">
+            ${pieChartSVG}
+            <div class="pie-total">
+              ${totalEur.toLocaleString('es-ES', { maximumFractionDigits: 0 })}€
+            </div>
+          </div>
+        </div>
+        <div class="pie-legend">
+          ${pieLegend}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- PAGE 4: TABLE -->
+  <div class="page">
+    <div class="section-title">Engineering Matrix</div>
+    <div class="section-heading">Detalle de Facturas de Gas</div>
+    
+    <table>
+      <thead>
+        <tr>
+          <th>Mes</th>
+          <th>Tarifa</th>
+          <th>kWh</th>
+          <th>m³</th>
+          <th>Factor</th>
+          <th>€/kWh</th>
+          <th>Término Fijo</th>
+          <th>Impuesto</th>
+          <th>Alquiler</th>
+          <th>IVA</th>
+          <th>Total €</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${tableRowsHTML}
+      </tbody>
+      <tfoot>
+        ${tableTotalsHTML}
+      </tfoot>
+    </table>
+    
+    <div style="margin-top: 12px; font-size: 9px; color: rgba(255,255,255,0.4); text-transform: uppercase; letter-spacing: 0.05em;">
+      <span style="color: #facc15;">●</span> Precios en amarillo son estimados · m³ es informativo y no se usa para facturación · <span style="color: #facc15;">●</span> Puntos amarillos en mes indican facturas con ajustes/regularizaciones
+    </div>
+  </div>
+
+  <!-- PAGE 5: CLOSING -->
+  <div class="page closing">
+    <div class="closing-container">
+      <div class="closing-content">
+        <div class="closing-company">${VOLTIS_CONTACT.company}</div>
+        <div class="closing-contact">
+          <div class="contact-item">${VOLTIS_CONTACT.email}</div>
+          <div class="contact-item">${VOLTIS_CONTACT.phone}</div>
+          <div class="contact-item">${VOLTIS_CONTACT.website}</div>
+        </div>
+        <div class="closing-footer">VOLTIS · INFORME ECONÓMICO ANUAL - GAS</div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>`;
+
   return html;
 }

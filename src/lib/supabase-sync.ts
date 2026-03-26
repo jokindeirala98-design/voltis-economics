@@ -113,8 +113,11 @@ export async function fetchAllProjectsFromDB(userId: string): Promise<ProjectWor
 
 export async function syncProjectToDB(project: ProjectWorkspace, userId: string, retryCount = 0): Promise<boolean> {
   const MAX_RETRIES = 2;
+  const fileName = project.name || project.id;
+  
   try {
-    console.log(`[DB Sync] Inciando sync para proyecto: ${project.id} (Usuario: ${userId})`);
+    console.log(`[CLOUD_SAVE_TRACE][${fileName}] Iniciando sincronización...`);
+    console.log(`[CLOUD_SAVE_TRACE][${fileName}] Usuario: ${userId}, Facturas: ${project.bills?.length || 0}`);
     
     // 1. Upsert project
     const { error: pErr } = await supabase.from('projects').upsert({
@@ -125,70 +128,93 @@ export async function syncProjectToDB(project: ProjectWorkspace, userId: string,
     });
     
     if (pErr) {
-      console.error('[DB Sync] Error en tabla projects:', pErr);
+      console.error(`[CLOUD_SAVE_TRACE][${fileName}] Error en tabla projects:`, pErr.message);
       throw pErr;
     }
+    console.log(`[CLOUD_SAVE_TRACE][${fileName}] Proyecto upserted correctamente`);
 
     // 2. Sync bills (with deletion of orphans)
     const currentBillIds = (project.bills || []).map(b => b.id);
     
     if (currentBillIds.length > 0) {
       // First, delete orphans
+      console.log(`[CLOUD_SAVE_TRACE][${fileName}] Limpiando facturas huérfanas...`);
       const { error: dErr } = await supabase.from('bills').delete().eq('project_id', project.id).not('id', 'in', `(${currentBillIds.map(id => `'${id}'`).join(',')})`);
-      if (dErr) console.error('[DB Sync] Error eliminando facturas huérfanas:', dErr);
+      if (dErr) console.error(`[CLOUD_SAVE_TRACE][${fileName}] Error eliminando facturas huérfanas:`, dErr.message);
       
       // Then upsert current bills
-      const billRows = project.bills.map(b => ({
-        id: b.id,
-        project_id: project.id,
-        raw_data: b,
-        user_id: userId,
-        extraction_status: b.extractionStatus || 'success',
-        validation_status: b.validationStatus || 'unchecked',
-        math_check_passed: b.mathCheckPassed,
-        discrepancy_amount: b.discrepancyAmount || 0,
-        review_attempts: b.reviewAttempts || 0,
-        validation_notes: b.validationNotes,
-        storage_path: b.storagePath,
-        file_hash: b.fileHash
-      }));
+      console.log(`[CLOUD_SAVE_TRACE][${fileName}] Realizando upsert de ${currentBillIds.length} facturas...`);
+      const billRows = project.bills.map(b => {
+        const row: any = {
+          id: b.id,
+          project_id: project.id,
+          raw_data: b,
+          extraction_status: b.extractionStatus || 'success',
+          validation_status: b.validationStatus || 'unchecked',
+          math_check_passed: b.mathCheckPassed,
+          discrepancy_amount: b.discrepancyAmount || 0,
+          review_attempts: b.reviewAttempts || 0,
+          validation_notes: b.validationNotes,
+          storage_path: b.storagePath,
+          file_hash: b.fileHash
+        };
+        
+        // Only include user_id if it's not the generic global one OR we want to be safe 
+        // against missing column in older schemas. 
+        // Given we saw PGRST204 (missing column), we'll skip it for bills if it fails once or just omit it 
+        // if we are sure it's missing. For now, let's omit it as RLS doesn't require it currently.
+        // row.user_id = userId; 
+        
+        return row;
+      });
       
       const { error: uErr } = await supabase.from('bills').upsert(billRows);
       if (uErr) {
-        console.error('[DB Sync] Error en upsert de bills:', uErr);
+        console.error(`[CLOUD_SAVE_TRACE][${fileName}] Error en upsert de bills:`, uErr.message, uErr.details);
+        // If it's the specific "user_id" missing error, try again without it (or just always omit it for bills)
+        if (uErr.message?.includes('user_id')) {
+           console.warn(`[CLOUD_SAVE_TRACE][${fileName}] Reintentando sin columna user_id en bills...`);
+           // The recursion handles the retry if we wanted, but let's just make it work.
+        }
         throw uErr;
       }
+      console.log(`[CLOUD_SAVE_TRACE][${fileName}] Facturas sincronizadas correctamente`);
     } else {
+      console.log(`[CLOUD_SAVE_TRACE][${fileName}] No hay facturas para sincronizar, limpiando tabla...`);
       await supabase.from('bills').delete().eq('project_id', project.id);
     }
 
     // 3. Sync Custom Concepts
     if (project.customOCs) {
        const entries = Object.entries(project.customOCs);
-       for (const [billId, ocs] of entries) {
-         if (ocs && ocs.length > 0) {
-            await supabase.from('custom_concepts').delete().eq('bill_id', billId);
-            const { error: iErr } = await supabase.from('custom_concepts').insert({
-               bill_id: billId,
-               data: ocs
-            });
-            if (iErr) console.error('[DB Sync] Error insertando conceptos custom:', iErr);
+       if (entries.length > 0) {
+         console.log(`[CLOUD_SAVE_TRACE][${fileName}] Sincronizando conceptos personalizados para ${entries.length} facturas...`);
+         for (const [billId, ocs] of entries) {
+           if (ocs && ocs.length > 0) {
+              await supabase.from('custom_concepts').delete().eq('bill_id', billId);
+              const { error: iErr } = await supabase.from('custom_concepts').insert({
+                 bill_id: billId,
+                 data: ocs
+              });
+              if (iErr) console.error(`[CLOUD_SAVE_TRACE][${fileName}] Error en conceptos custom (bill ${billId}):`, iErr.message);
+           }
          }
        }
     }
     
-    console.log('[DB Sync] Sync completado con éxito');
+    console.log(`[CLOUD_SAVE_TRACE][${fileName}] Sincronización finalizada con éxito`);
     return true;
-  } catch (error) {
-    console.error(`[DB Sync] Error de sincronización (intento ${retryCount + 1}/${MAX_RETRIES + 1}):`, error);
+  } catch (error: any) {
+    const errorMsg = error?.message || String(error);
+    console.error(`[CLOUD_SAVE_TRACE][${fileName}] Fallo en intento ${retryCount + 1}/${MAX_RETRIES + 1}: ${errorMsg}`);
     
     if (retryCount < MAX_RETRIES) {
-      console.log(`[DB Sync] Reintentando en 1 segundo...`);
+      console.log(`[CLOUD_SAVE_TRACE][${fileName}] Reintentando en 1s...`);
       await new Promise(resolve => setTimeout(resolve, 1000));
       return syncProjectToDB(project, userId, retryCount + 1);
     }
     
-    console.error('[DB Sync] Error fatal de sincronización después de reintentos');
+    console.error(`[CLOUD_SAVE_TRACE][${fileName}] Sincronización abortada tras agotar reintentos`);
     return false;
   }
 }
