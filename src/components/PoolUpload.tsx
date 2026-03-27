@@ -4,17 +4,16 @@ import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react'
 import { useDropzone } from 'react-dropzone';
 import { 
   Upload, X, FileText, Zap, Flame, CheckCircle, AlertTriangle, 
-  Loader, Trash2, FolderOpen, Plus, ChevronRight, ChevronDown,
-  Package, Layers, ArrowRight, RefreshCw, Eye
+  Loader, Trash2, FolderOpen, ChevronRight, ChevronDown,
+  Package, Layers, ArrowRight, Clock
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { PoolFile, PoolGroup, PoolSession, ExtractedBill, isGasBill } from '@/lib/types';
-import { toast } from 'sonner';
 
 interface PoolUploadProps {
   onClose: () => void;
   onComplete: (projects: { name: string; bills: ExtractedBill[] }[]) => void;
-  existingCups: Set<string>; // To detect duplicates
+  existingCups: Set<string>;
 }
 
 const ACCEPTED_TYPES = {
@@ -28,54 +27,67 @@ const ACCEPTED_TYPES = {
   'image/heif': ['.heif']
 };
 
-const fileToBase64 = (file: File): Promise<string> => {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = error => reject(error);
+const BATCH_SIZE = 2;
+const FILE_TIMEOUT_MS = 60000;
+
+async function processFileWithTimeout(file: File): Promise<{ bill: ExtractedBill | null; error?: string }> {
+  return new Promise((resolve) => {
+    const timeout = setTimeout(() => {
+      resolve({ bill: null, error: 'Timeout - archivo demasiado grande o tardado' });
+    }, FILE_TIMEOUT_MS);
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    fetch('/api/extract', { method: 'POST', body: formData })
+      .then(res => res.json())
+      .then(data => {
+        clearTimeout(timeout);
+        if (data.status === 'success') {
+          resolve({ bill: data.bill as ExtractedBill });
+        } else {
+          resolve({ bill: null, error: data.error || 'Error en extracción' });
+        }
+      })
+      .catch(err => {
+        clearTimeout(timeout);
+        resolve({ bill: null, error: err.message || 'Error de red' });
+      });
   });
-};
+}
 
 export default function PoolUpload({ onClose, onComplete, existingCups }: PoolUploadProps) {
   const [session, setSession] = useState<PoolSession | null>(null);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+  const [currentFileIndex, setCurrentFileIndex] = useState(0);
+  const [currentFileName, setCurrentFileName] = useState('');
   const processingRef = useRef(false);
+  const sessionRef = useRef<PoolSession | null>(null);
 
-  const processFile = async (file: File): Promise<ExtractedBill | null> => {
-    const formData = new FormData();
-    formData.append('file', file);
-
-    try {
-      const res = await fetch('/api/extract', { method: 'POST', body: formData });
-      const data = await res.json();
-
-      if (data.status === 'success') {
-        return data.bill as ExtractedBill;
-      } else {
-        throw new Error(data.error || 'Extraction failed');
-      }
-    } catch (err) {
-      console.error('Pool extraction error:', err);
-      return null;
-    }
-  };
+  // Keep sessionRef in sync
+  useEffect(() => {
+    sessionRef.current = session;
+  }, [session]);
 
   const handleDrop = useCallback(async (acceptedFiles: File[]) => {
+    console.log('[Pool] Files dropped:', acceptedFiles.length);
+    
     const newSession: PoolSession = {
       id: `pool-${Date.now()}`,
       startedAt: Date.now(),
-      files: acceptedFiles.map(file => ({
-        id: `file-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      files: acceptedFiles.map((file, idx) => ({
+        id: `file-${Date.now()}-${idx}`,
         file,
-        status: 'pending'
+        status: 'pending' as const
       })),
       groups: [],
       unassigned: [],
       status: 'uploading'
     };
 
+    console.log('[Pool] Session created with', newSession.files.length, 'files');
     setSession(newSession);
+    setCurrentFileIndex(0);
   }, []);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
@@ -84,41 +96,85 @@ export default function PoolUpload({ onClose, onComplete, existingCups }: PoolUp
     disabled: session?.status === 'processing'
   });
 
-  // Process files when session has files
+  // Process files with batch processing
   useEffect(() => {
-    if (!session || session.status !== 'uploading' || processingRef.current) return;
-    if (session.files.length === 0) return;
+    if (!session || session.status !== 'uploading') return;
+    if (session.files.length === 0) {
+      setSession(prev => prev ? { ...prev, status: 'ready' } : null);
+      return;
+    }
+    if (processingRef.current) return;
 
     processingRef.current = true;
+    console.log('[Pool] Starting processing of', session.files.length, 'files');
+    
     setSession(prev => prev ? { ...prev, status: 'processing' } : null);
 
-    const processFiles = async () => {
-      const updatedFiles: PoolFile[] = [];
-      
-      for (const poolFile of session.files) {
-        try {
-          const bill = await processFile(poolFile.file);
-          
-          updatedFiles.push({
-            ...poolFile,
-            status: bill ? 'classified' : 'error',
-            error: bill ? undefined : 'Could not extract data',
-            extractedBill: bill ? { ...bill, fileName: poolFile.file.name } : undefined
-          });
-        } catch (err) {
-          updatedFiles.push({
-            ...poolFile,
-            status: 'error',
-            error: err instanceof Error ? err.message : 'Unknown error'
-          });
-        }
+    const processAllFiles = async () => {
+      const files = [...session.files];
+      const results: PoolFile[] = [];
+      let processedCount = 0;
+
+      for (let i = 0; i < files.length; i += BATCH_SIZE) {
+        const batch = files.slice(i, i + BATCH_SIZE);
+        console.log(`[Pool] Processing batch ${Math.floor(i / BATCH_SIZE) + 1}, files ${i + 1}-${Math.min(i + BATCH_SIZE, files.length)}`);
+        
+        const batchPromises = batch.map(async (poolFile, batchIdx) => {
+          const globalIndex = i + batchIdx;
+          setCurrentFileIndex(globalIndex + 1);
+          setCurrentFileName(poolFile.file.name);
+          console.log(`[Pool] Processing file ${globalIndex + 1}/${files.length}:`, poolFile.file.name);
+
+          try {
+            const result = await processFileWithTimeout(poolFile.file);
+            
+            if (result.bill) {
+              console.log(`[Pool] Success:`, poolFile.file.name, '->', result.bill.energyType, result.bill.cups);
+              return {
+                ...poolFile,
+                status: 'classified' as const,
+                extractedBill: { ...result.bill, fileName: poolFile.file.name },
+                error: undefined
+              };
+            } else {
+              console.log(`[Pool] Error:`, poolFile.file.name, '->', result.error);
+              return {
+                ...poolFile,
+                status: 'error' as const,
+                error: result.error || 'No se pudo extraer'
+              };
+            }
+          } catch (err) {
+            console.error(`[Pool] Exception:`, poolFile.file.name, err);
+            return {
+              ...poolFile,
+              status: 'error' as const,
+              error: err instanceof Error ? err.message : 'Error desconocido'
+            };
+          }
+        });
+
+        const batchResults = await Promise.all(batchPromises);
+        results.push(...batchResults);
+        processedCount += batch.length;
+
+        // Update UI with progress after each batch
+        setSession(prev => {
+          if (!prev) return null;
+          return {
+            ...prev,
+            files: results
+          };
+        });
       }
+
+      console.log('[Pool] All files processed. Grouping by CUPS...');
 
       // Group by CUPS + supply type
       const groups: Record<string, PoolGroup> = {};
       const unassigned: PoolFile[] = [];
 
-      updatedFiles.forEach(pf => {
+      results.forEach(pf => {
         if (pf.status !== 'classified' || !pf.extractedBill) {
           unassigned.push(pf);
           return;
@@ -136,30 +192,44 @@ export default function PoolUpload({ onClose, onComplete, existingCups }: PoolUp
         const key = `${supplyType}-${cups}`;
         
         if (!groups[key]) {
+          const groupIndex = Object.keys(groups).length + 1;
           groups[key] = {
-            id: `group-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+            id: `group-${Date.now()}-${groupIndex}`,
             key,
             supplyType,
             cups,
             bills: [],
-            projectName: generateProjectName(cups, supplyType, Object.keys(groups).length + 1)
+            projectName: generateProjectName(cups, supplyType, groupIndex)
           };
         }
         
         groups[key].bills.push(pf);
       });
 
-      setSession(prev => prev ? {
-        ...prev,
-        files: updatedFiles,
-        groups: Object.values(groups),
-        unassigned,
-        status: 'ready'
-      } : null);
+      console.log('[Pool] Grouping complete:', {
+        groups: Object.keys(groups).length,
+        unassigned: unassigned.length,
+        results: results.length
+      });
+
+      setSession(prev => {
+        if (!prev) return null;
+        return {
+          ...prev,
+          files: results,
+          groups: Object.values(groups),
+          unassigned,
+          status: 'ready'
+        };
+      });
+
+      setCurrentFileIndex(0);
+      setCurrentFileName('');
+      processingRef.current = false;
     };
 
-    processFiles();
-  }, [session?.id, session?.status, session?.files?.length]);
+    processAllFiles();
+  }, [session?.status, session?.files?.length]);
 
   const generateProjectName = (cups: string, supplyType: string, index: number): string => {
     const suffix = cups.slice(-4);
@@ -194,7 +264,6 @@ export default function PoolUpload({ onClose, onComplete, existingCups }: PoolUp
         .map(pf => ({ ...pf.extractedBill!, projectId: group.id }))
     }));
 
-    toast.success(`${projects.length} proyecto${projects.length > 1 ? 's' : ''} creado${projects.length > 1 ? 's' : ''}`);
     onComplete(projects);
   };
 
@@ -223,6 +292,8 @@ export default function PoolUpload({ onClose, onComplete, existingCups }: PoolUp
       gas: session.groups.filter(g => g.supplyType === 'gas').length
     };
   }, [session]);
+
+  const progress = stats.total > 0 ? Math.round((stats.processed / stats.total) * 100) : 0;
 
   return (
     <motion.div 
@@ -285,28 +356,56 @@ export default function PoolUpload({ onClose, onComplete, existingCups }: PoolUp
                 {stats.errors > 0 && (
                   <StatBadge label="Errores" value={stats.errors} icon={<AlertTriangle className="w-3 h-3" />} color="red" />
                 )}
-                {stats.unassigned > 0 && (
-                  <StatBadge label="Sin CUPS" value={stats.unassigned} icon={<AlertTriangle className="w-3 h-3" />} color="amber" />
-                )}
               </div>
 
-              {/* Processing Indicator */}
+              {/* Processing Progress */}
               {session.status === 'processing' && (
-                <div className="flex items-center justify-center gap-3 py-8">
-                  <Loader className="w-6 h-6 text-purple-400 animate-spin" />
-                  <span className="text-slate-400 font-medium">Procesando facturas...</span>
+                <div className="space-y-3 p-4 rounded-xl bg-purple-500/10 border border-purple-500/20">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Loader className="w-5 h-5 text-purple-400 animate-spin" />
+                      <span className="text-sm font-medium text-purple-300">
+                        Procesando {currentFileIndex} / {stats.total}
+                      </span>
+                    </div>
+                    <span className="text-[10px] font-bold text-purple-400/60">{progress}%</span>
+                  </div>
+                  
+                  <div className="w-full h-2 bg-white/5 rounded-full overflow-hidden">
+                    <motion.div 
+                      className="h-full bg-purple-500"
+                      initial={{ width: 0 }}
+                      animate={{ width: `${progress}%` }}
+                      transition={{ duration: 0.3 }}
+                    />
+                  </div>
+                  
+                  <div className="flex items-center gap-2 text-[10px] text-slate-500">
+                    <Clock className="w-3 h-3" />
+                    <span className="truncate max-w-[300px]">{currentFileName}</span>
+                  </div>
                 </div>
               )}
 
               {/* File List */}
-              {session.files.length > 0 && session.status !== 'processing' && (
+              {session.files.length > 0 && (
                 <div className="space-y-2">
-                  <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Archivos</h4>
-                  <div className="max-h-48 overflow-y-auto space-y-1 custom-scrollbar">
+                  <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
+                    Archivos ({stats.processed} / {stats.total})
+                  </h4>
+                  <div className="max-h-64 overflow-y-auto space-y-1 custom-scrollbar">
                     {session.files.map(pf => (
                       <div key={pf.id} className="flex items-center justify-between p-3 rounded-xl bg-white/5 border border-white/5">
                         <div className="flex items-center gap-3 min-w-0 flex-1">
-                          <FileText className="w-4 h-4 text-slate-500 flex-shrink-0" />
+                          {pf.status === 'processing' ? (
+                            <Loader className="w-4 h-4 text-purple-400 animate-spin flex-shrink-0" />
+                          ) : pf.status === 'classified' ? (
+                            <CheckCircle className="w-4 h-4 text-emerald-500 flex-shrink-0" />
+                          ) : pf.status === 'error' ? (
+                            <AlertTriangle className="w-4 h-4 text-red-500 flex-shrink-0" />
+                          ) : (
+                            <FileText className="w-4 h-4 text-slate-600 flex-shrink-0" />
+                          )}
                           <span className="text-xs text-white truncate">{pf.file.name}</span>
                           {pf.status === 'classified' && pf.extractedBill && (
                             <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full flex-shrink-0 ${
@@ -315,18 +414,18 @@ export default function PoolUpload({ onClose, onComplete, existingCups }: PoolUp
                               {isGasBill(pf.extractedBill) ? 'GAS' : 'ELEC'}
                             </span>
                           )}
+                          {pf.status === 'error' && pf.error && (
+                            <span className="text-[9px] text-red-400 truncate max-w-[150px]" title={pf.error}>
+                              {pf.error}
+                            </span>
+                          )}
                         </div>
-                        <div className="flex items-center gap-2">
-                          {pf.status === 'pending' && <Loader className="w-4 h-4 text-slate-500 animate-spin" />}
-                          {pf.status === 'classified' && <CheckCircle className="w-4 h-4 text-emerald-500" />}
-                          {pf.status === 'error' && <AlertTriangle className="w-4 h-4 text-red-500" />}
-                          <button 
-                            onClick={() => removeFile(pf.id)}
-                            className="p-1 hover:bg-red-500/20 rounded text-slate-600 hover:text-red-400"
-                          >
-                            <Trash2 className="w-3 h-3" />
-                          </button>
-                        </div>
+                        <button 
+                          onClick={() => removeFile(pf.id)}
+                          className="p-1 hover:bg-red-500/20 rounded text-slate-600 hover:text-red-400 flex-shrink-0"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
                       </div>
                     ))}
                   </div>
