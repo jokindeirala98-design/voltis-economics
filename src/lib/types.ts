@@ -20,6 +20,73 @@ export interface OtroConcepto {
   total: number;
 }
 
+export interface PowerExcess {
+  periodo: 'P1' | 'P2' | 'P3' | 'P4' | 'P5' | 'P6' | string;
+  kwRegistered: number;
+  kwContracted: number;
+  kwExcess: number;
+  precioExcess: number;
+  total: number;
+  diasFacturados?: number;
+}
+
+export interface ExtractedBillExcessData {
+  hasExcess: boolean;
+  totalExcess: number;
+  details: PowerExcess[];
+}
+
+export function isPowerExcessConcept(concepto: string): boolean {
+  const lower = concepto.toLowerCase();
+  
+  // EXCESS/CHARGE indicators - must be present
+  const excessIndicators = [
+    'exceso',
+    'penalizacion',
+    'penalización',
+    'recargo'
+  ];
+  
+  // POWER indicators - must be present
+  const powerIndicators = [
+    'potencia',
+    'kw',
+    'pot'
+  ];
+  
+  // Combined patterns that indicate excess without explicit "exceso"
+  const combinedPatterns = [
+    { excess: 'demanda', power: 'potencia' },  // "Potencia demandada" = excess
+    { excess: 'maximetro', power: 'kw' },      // "Exceso Maxímetro KW"  
+  ];
+  
+  // Check for explicit excess + power
+  const hasExcess = excessIndicators.some(ind => lower.includes(ind));
+  const hasPower = powerIndicators.some(ind => lower.includes(ind));
+  
+  if (hasExcess && hasPower) {
+    return true;
+  }
+  
+  // Check combined patterns (e.g., "demanda" + "potencia" together)
+  for (const pattern of combinedPatterns) {
+    if (lower.includes(pattern.excess) && lower.includes(pattern.power)) {
+      return true;
+    }
+  }
+  
+  return false;
+}
+
+export function getExcessAmountFromBill(bill: { otrosConceptos?: OtroConcepto[] }): { totalExcess: number; concepts: OtroConcepto[] } {
+  if (!bill.otrosConceptos || bill.otrosConceptos.length === 0) {
+    return { totalExcess: 0, concepts: [] };
+  }
+  const excessConcepts = bill.otrosConceptos.filter(oc => isPowerExcessConcept(oc.concepto));
+  const totalExcess = excessConcepts.reduce((sum, oc) => sum + (oc.total || 0), 0);
+  return { totalExcess, concepts: excessConcepts };
+}
+
 // ============================================================
 // GAS BILL INTERFACES
 // ============================================================
@@ -49,6 +116,8 @@ export interface GasPricing {
   alquilerTotal: number;
   ivaPorcentaje: number;
   ivaTotal: number;
+  descuentoTerminoFijo?: number; // Categoria 2
+  descuentoOtros?: number;       // Categoria 3
 }
 
 // ============================================================
@@ -84,6 +153,12 @@ export interface ExtractedBill {
   costeMedioKwh?: number;
   costeTotalPotencia?: number;
   
+  // Structured energy costs (NEW)
+  costeBrutoConsumo?: number;
+  descuentoEnergia?: number;
+  costeNetoConsumo?: number;
+  costeMedioKwhNeto?: number;
+  
   // Gas-specific fields (NEW)
   tarifaRL?: string;
   gasConsumption?: GasConsumption;
@@ -113,6 +188,9 @@ export interface ExtractedBill {
   
   // Extraction warnings (NEW)
   extractionWarnings?: string[];
+  
+  // Power excess tracking
+  excessData?: ExtractedBillExcessData;
 }
 
 // Helper type guards

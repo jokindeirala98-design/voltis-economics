@@ -40,14 +40,8 @@ export default function LoginScreen({ onLogin, isLoading, error }: LoginScreenPr
             initial={{ scale: 0.8, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
             transition={{ delay: 0.2, duration: 0.8 }}
-            className="flex flex-col items-center gap-6 mb-8"
+            className="flex flex-col items-center gap-8 mb-8"
           >
-            <img 
-              src="/mascota-transparente.png" 
-              alt="Voltis Mascot" 
-              className="w-16 h-16 md:w-20 md:h-20 object-contain"
-            />
-            
             <div className="flex flex-col items-center">
               <h1 className="text-6xl md:text-8xl font-black tracking-tighter uppercase italic leading-none">
                 Voltis
@@ -56,6 +50,12 @@ export default function LoginScreen({ onLogin, isLoading, error }: LoginScreenPr
                 Energia
               </span>
             </div>
+
+            <img 
+              src="/mascota-transparente.png" 
+              alt="Voltis Mascot" 
+              className="w-16 h-16 md:w-20 md:h-20 object-contain"
+            />
           </motion.div>
           
           <p className="text-slate-500 font-medium tracking-tight text-lg max-w-sm mx-auto pt-4 leading-relaxed">

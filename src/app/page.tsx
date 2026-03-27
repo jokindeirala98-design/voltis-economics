@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { 
   FileText, Upload, Trash2, Download, AlertTriangle, 
@@ -26,6 +26,7 @@ import {
 } from '@/lib/excel-correction';
 import ReportView from '@/components/ReportView';
 import { GasReportView } from '@/components/GasReportView';
+import { MobileUploadButton } from '@/components/MobileUploadButton';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   fetchAllProjectsFromDB, 
@@ -105,6 +106,19 @@ function EnergyBillsAppContent() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearchActive, setIsSearchActive] = useState(false);
+
+  // Scroll lock when any modal is open
+  useEffect(() => {
+    const anyModalOpen = showNewProjectModal || showNewFolderModal || previewBillId || refiningBill || showCorrectionModal || showDiag || showReport;
+    if (anyModalOpen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, [showNewProjectModal, showNewFolderModal, previewBillId, refiningBill, showCorrectionModal, showDiag, showReport]);
 
   // Sync search input with current project name
   useEffect(() => {
@@ -645,7 +659,15 @@ function EnergyBillsAppContent() {
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({ 
     onDrop, 
-    accept: { 'application/pdf': ['.pdf'], 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'] } 
+    accept: { 
+      'application/pdf': ['.pdf'], 
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
+      'image/jpeg': ['.jpg', '.jpeg'],
+      'image/png': ['.png'],
+      'image/webp': ['.webp'],
+      'image/heic': ['.heic'],
+      'image/heif': ['.heif']
+    } 
   });
 
   const createNewProject = async (name: string, folderId?: string) => {
@@ -1315,27 +1337,28 @@ function EnergyBillsAppContent() {
 
   return (
     <div className="flex h-screen bg-[#020617] overflow-hidden font-inter text-slate-100 selection:bg-blue-500/30">
-      {/* Sidebar Overlay Backdrop */}
+      {/* Sidebar Overlay Backdrop - Always on top of content, behind sidebar */}
       <AnimatePresence>
         {isSidebarOpen && (
           <motion.div 
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
             onClick={() => setIsSidebarOpen(false)}
-            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40"
+            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 md:hidden"
           />
         )}
       </AnimatePresence>
 
-      {/* Sidebar */}
+      {/* Sidebar - Hidden on mobile by default, overlay on desktop too */}
       <motion.aside 
         initial={false}
         animate={{ 
           x: isSidebarOpen ? 0 : -320,
         }}
         transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-        className="fixed inset-y-0 left-0 z-50 w-80 bg-black border-r border-white/5 flex flex-col shadow-2xl"
+        className="fixed inset-y-0 left-0 z-50 w-80 md:w-80 bg-black border-r border-white/5 flex flex-col shadow-2xl mobile-sidebar"
       >
         <div className="absolute top-0 left-0 w-full h-[300px] bg-blue-600/5 blur-[100px] pointer-events-none" />
         
@@ -1356,7 +1379,8 @@ function EnergyBillsAppContent() {
             </div>
             <button 
               onClick={() => setIsSidebarOpen(false)}
-              className="p-2 hover:bg-white/5 text-slate-500 rounded-lg md:hidden"
+              className="p-2 hover:bg-white/5 text-slate-500 rounded-lg transition-colors touch-target"
+              aria-label="Cerrar menú"
             >
               <X className="w-5 h-5" />
             </button>
@@ -1434,24 +1458,24 @@ function EnergyBillsAppContent() {
                           </span>
                         )}
                       </div>
-                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity md:opacity-100 lg:opacity-0">
                         <button 
                           onClick={(e) => { e.stopPropagation(); downloadFolderZIP(folder.name, folderProjects); }}
-                          className={`p-1.5 hover:bg-emerald-500/20 text-emerald-400 rounded-lg transition-all ${exportProgress.status !== 'idle' ? 'opacity-30 cursor-wait' : ''}`}
-                          title="Descargar todos los informes PDF"
+                          className={`p-1.5 hover:bg-emerald-500/20 text-emerald-400 rounded-lg transition-all touch-target ${exportProgress.status !== 'idle' ? 'opacity-30 cursor-wait' : ''}`}
+                          title="Descargar ZIP"
                           disabled={exportProgress.status !== 'idle'}
                         >
                           <Download className="w-3 h-3" />
                         </button>
                         <button 
                           onClick={(e) => { e.stopPropagation(); setRenamingFolderId(folder.id); setNewFolderName(folder.name); }}
-                          className="p-1.5 hover:bg-blue-500/20 text-blue-400 rounded-lg"
+                          className="p-1.5 hover:bg-blue-500/20 text-blue-400 rounded-lg touch-target"
                         >
                           <Edit2 className="w-3 h-3" />
                         </button>
                         <button 
                           onClick={(e) => { e.stopPropagation(); deleteFolder(folder.id); }}
-                          className="p-1.5 hover:bg-red-500/20 text-red-500 rounded-lg"
+                          className="p-1.5 hover:bg-red-500/20 text-red-500 rounded-lg touch-target"
                         >
                           <Trash2 className="w-3 h-3" />
                         </button>
@@ -1478,7 +1502,7 @@ function EnergyBillsAppContent() {
                         )}
                         <button 
                           onClick={() => { setShowNewProjectModal(true); setNewProjectName(''); }}
-                          className="flex items-center gap-2 p-2 rounded-lg text-blue-500/60 hover:text-blue-400 hover:bg-blue-500/5 transition-all text-[10px] font-bold uppercase tracking-wider mt-1"
+                          className="flex items-center gap-2 p-2 rounded-lg text-blue-500/60 hover:text-blue-400 hover:bg-blue-500/5 transition-all text-[10px] font-bold uppercase tracking-wider mt-1 touch-target"
                         >
                           <Plus className="w-3 h-3" /> Nuevo Proyecto
                         </button>
@@ -1556,22 +1580,22 @@ function EnergyBillsAppContent() {
         {!isAuthenticated ? (
           <LoginScreen onLogin={() => setIsAuthenticated(true)} isLoading={isAuthLoading} error={authError} />
         ) : (
-          <div className="px-8 md:px-16 py-12 flex flex-col gap-10 max-w-7xl mx-auto w-full relative z-10">
+          <div className="px-4 md:px-8 lg:px-16 py-6 md:py-12 flex flex-col gap-8 md:gap-10 max-w-7xl mx-auto w-full relative z-10">
             
-            <header className="flex items-center justify-between border-b border-white/5 pb-6">
-              <div className="flex items-center gap-4">
+            <header className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4 md:gap-6 border-b border-white/5 pb-6 mobile-header">
+              <div className="flex items-center gap-3 md:gap-4">
                 <button 
                   onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-                  className="p-2.5 bg-white/5 hover:bg-white/10 text-white rounded-xl border border-white/5 transition-all group"
+                  className="p-2.5 bg-white/5 hover:bg-white/10 text-white rounded-xl border border-white/5 transition-all group touch-target flex-shrink-0"
                   title={isSidebarOpen ? "Cerrar menú" : "Abrir menú"}
                 >
                   <LayoutDashboard className={`w-5 h-5 transition-transform duration-300 ${isSidebarOpen ? 'rotate-90 text-blue-400' : 'text-slate-400 group-hover:text-white'}`} />
                 </button>
                 <form 
                   onSubmit={handleProjectSearch}
-                  className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white/5 border border-white/10 group focus-within:border-blue-500/50 focus-within:bg-white/10 transition-all w-full max-w-[240px]"
+                  className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white/5 border border-white/10 group focus-within:border-blue-500/50 focus-within:bg-white/10 transition-all w-full max-w-[240px] md:max-w-[240px]"
                 >
-                  <Search className="w-3.5 h-3.5 text-slate-500 group-focus-within:text-blue-400" />
+                  <Search className="w-3.5 h-3.5 text-slate-500 group-focus-within:text-blue-400 flex-shrink-0" />
                   <input
                     type="text"
                     value={searchQuery}
@@ -1592,11 +1616,11 @@ function EnergyBillsAppContent() {
                 </form>
               </div>
 
-              <div className="flex items-center gap-3 no-print">
+              <div className="flex flex-wrap items-center gap-2 md:gap-3 no-print">
                 <button 
                   onClick={() => setShowReport(true)}
                   disabled={bills.length === 0}
-                  className="btn-primary h-10 px-6"
+                  className="btn-primary h-10 px-3 md:px-6 text-[10px] md:text-xs whitespace-nowrap"
                 >
                   <Sparkles className="w-3.5 h-3.5" />
                   Generar informe
@@ -1604,13 +1628,13 @@ function EnergyBillsAppContent() {
                 <button 
                   onClick={handleExport}
                   disabled={bills.length === 0}
-                  className="btn-secondary h-10 px-5"
+                  className="btn-secondary h-10 px-3 md:px-5 text-[10px] md:text-xs whitespace-nowrap"
                 >
                   <Download className="w-3.5 h-3.5 text-emerald-400" />
                   Excel
                 </button>
                 <label 
-                  className="btn-outline h-10 px-5 cursor-pointer"
+                  className="btn-outline h-10 px-3 md:px-5 cursor-pointer text-[10px] md:text-xs whitespace-nowrap"
                   title="Importar correcciones"
                 >
                   <input
@@ -1631,10 +1655,20 @@ function EnergyBillsAppContent() {
             </header>
 
             {/* FUTURISTIC SCANNER DROPZONE */}
+            {/* Mobile: Show dedicated upload button */}
+            <div className="md:hidden">
+              <MobileUploadButton
+                onFilesSelected={(files) => onDrop(files)}
+                maxFiles={10}
+                disabled={isExtracting}
+              />
+            </div>
+            
+            {/* Desktop: Show dropzone */}
             <div 
               {...getRootProps()} 
               className={`
-                premium-card p-8 group cursor-pointer text-center flex flex-col items-center gap-4
+                hidden md:flex premium-card p-8 group cursor-pointer text-center flex flex-col items-center gap-4
                 ${isDragActive ? 'border-blue-500/50 bg-blue-500/5' : ''}
               `}
             >
@@ -1646,11 +1680,16 @@ function EnergyBillsAppContent() {
                    <Upload className={`w-6 h-6 transition-colors ${isDragActive ? 'text-blue-400' : 'text-slate-500'}`} />
                  )}
               </div>
-              <div className="flex flex-col gap-1">
-                 <h3 className="text-sm font-bold text-white uppercase tracking-tight">Cargar Facturas</h3>
-                 <p className="text-slate-500 text-[10px] font-medium uppercase tracking-wider">PDF o Excel • Arrastra o haz clic para subir</p>
-              </div>
+               <div className="flex flex-col gap-1">
+                  <h3 className="text-sm font-bold text-white uppercase tracking-tight">Cargar Facturas</h3>
+                  <p className="text-slate-500 text-[10px] font-medium uppercase tracking-wider">PDF, Imagen o Excel • Arrastra o haz clic para subir</p>
+               </div>
             </div>
+            
+            {/* Mobile hint */}
+            <p className="md:hidden text-slate-500 text-[10px] font-medium text-center mt-2">
+              O arrastra archivos aquí en escritorio
+            </p>
             
             {/* EXTRACTION QUEUE UI */}
             <AnimatePresence>
@@ -1733,27 +1772,27 @@ function EnergyBillsAppContent() {
                 <motion.div 
                   initial={{ opacity: 0, y: 30 }}
                   animate={{ opacity: 1, y: 0 }}
-                  className="flex flex-col gap-6 mb-20"
+                  className="flex flex-col gap-5 md:gap-6 mb-16 md:mb-20"
                 >
-                  <div className="flex items-center justify-between border-b border-white/5 pb-4 relative">
-                     <h2 className="text-xl font-bold tracking-tight flex items-center gap-3">
+                  <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-3 md:gap-4 border-b border-white/5 pb-4 relative">
+                     <h2 className="text-lg md:text-xl font-bold tracking-tight flex items-center gap-2 md:gap-3">
                        Datos Extraídos <span className="text-[10px] bg-white/5 text-blue-400 px-2 py-0.5 rounded-full border border-white/5">{bills.length}</span>
                      </h2>
 
-                     {/* Project Name - Centered Refinement */}
-                     <div className="absolute left-1/2 -translate-x-1/2 hidden md:block">
+                     {/* Project Name - Centered on desktop, below title on mobile */}
+                     <div className="md:absolute md:left-1/2 md:-translate-x-1/2">
                         <span className="text-[11px] font-semibold text-slate-400/80 uppercase tracking-[0.2em]">
                           {savedProjects.find(p => p.id === currentProjectId)?.name}
                         </span>
                      </div>
 
-                     <div className="flex items-center gap-4 text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                     <div className="hidden md:flex items-center gap-4 text-[10px] font-bold text-slate-500 uppercase tracking-wider">
                         <span className="flex items-center gap-1.5"><CheckCircle className="w-3.5 h-3.5 text-emerald-500" /> AI Verified</span>
                         <span className="flex items-center gap-1.5"><Smartphone className="w-3.5 h-3.5 text-blue-500" /> Sync Safe</span>
                      </div>
                   </div>
 
-                  <div className="glass-card rounded-[40px] border border-white/5 overflow-hidden shadow-3xl">
+                  <div className="glass-card rounded-2xl md:rounded-[40px] border border-white/5 overflow-hidden shadow-3xl">
                     <FileTable 
                       bills={bills} 
                       onUpdateBills={handleUpdateBills} 
@@ -1780,39 +1819,39 @@ function EnergyBillsAppContent() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[60] flex items-center justify-center p-6 bg-black/80 backdrop-blur-md"
+            className="fixed inset-0 z-[60] flex items-center justify-center p-4 md:p-6 bg-black/80 backdrop-blur-md"
           >
             <motion.div 
               initial={{ scale: 0.9, y: 20 }}
               animate={{ scale: 1, y: 0 }}
-              className="glass-card w-full max-w-lg rounded-[40px] p-10 border border-white/10 shadow-3xl text-white relative"
+              className="glass-card w-full max-w-lg rounded-2xl md:rounded-[40px] p-6 md:p-10 border border-white/10 shadow-3xl text-white relative mobile-modal max-h-[90vh] overflow-y-auto"
             >
-              <button onClick={() => setShowDiag(false)} className="absolute top-8 right-8 text-slate-500 hover:text-white">
-                <X className="w-6 h-6" />
+              <button onClick={() => setShowDiag(false)} className="absolute top-4 right-4 md:top-8 md:right-8 text-slate-500 hover:text-white p-2">
+                <X className="w-5 h-5 md:w-6 md:h-6" />
               </button>
 
-              <div className="flex flex-col gap-8">
-                <div className="flex items-center gap-4">
-                  <div className="p-3 bg-blue-500/10 rounded-2xl">
-                    <Settings className="w-8 h-8 text-blue-400" />
+              <div className="flex flex-col gap-6 md:gap-8">
+                <div className="flex items-center gap-3 md:gap-4">
+                  <div className="p-2 md:p-3 bg-blue-500/10 rounded-xl md:rounded-2xl">
+                    <Settings className="w-6 h-6 md:w-8 md:h-8 text-blue-400" />
                   </div>
                   <div>
-                    <h2 className="text-2xl font-black tracking-tighter italic">DIAGNÓSTICO DE SISTEMAS</h2>
-                    <p className="text-xs font-bold text-blue-400 tracking-widest uppercase opacity-60">Auditoría Técnica en Vivo</p>
+                    <h2 className="text-lg md:text-2xl font-black tracking-tighter italic">DIAGNÓSTICO DE SISTEMAS</h2>
+                    <p className="text-[10px] md:text-xs font-bold text-blue-400 tracking-widest uppercase opacity-60">Auditoría Técnica en Vivo</p>
                   </div>
                 </div>
 
                 {isCheckingDiag ? (
-                  <div className="flex flex-col items-center gap-4 py-12">
-                     <Loader className="w-10 h-10 text-blue-500 animate-spin" />
-                     <span className="text-xs font-black tracking-widest">ANALIZANDO CONEXIONES...</span>
+                  <div className="flex flex-col items-center gap-4 py-8 md:py-12">
+                     <Loader className="w-8 h-8 md:w-10 md:h-10 text-blue-500 animate-spin" />
+                     <span className="text-[10px] md:text-xs font-black tracking-widest">ANALIZANDO CONEXIONES...</span>
                   </div>
                 ) : (
-                  <div className="flex flex-col gap-6">
+                  <div className="flex flex-col gap-4 md:gap-6">
                     {/* ENTORNO */}
-                    <div className="flex flex-col gap-3">
+                    <div className="flex flex-col gap-2 md:gap-3">
                        <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Llaves de API (Variables Vercel)</h3>
-                       <div className="grid grid-cols-2 gap-4">
+                       <div className="grid grid-cols-2 gap-2 md:gap-4">
                           <StatusItem label="Groq AI" status={diagInfo?.env?.has_groq_key} />
                           <StatusItem label="Supabase URL" status={diagInfo?.env?.has_supabase_url} />
                           <StatusItem label="Supabase Key" status={diagInfo?.env?.has_supabase_key} />
@@ -1823,27 +1862,27 @@ function EnergyBillsAppContent() {
 
                     <button
                       onClick={repairProjects}
-                      className="w-full mt-2 p-4 rounded-2xl bg-blue-500/10 border border-blue-500/20 text-blue-400 font-black text-[10px] uppercase tracking-[0.2em] hover:bg-blue-500/20 transition-all flex items-center justify-center gap-2"
+                      className="w-full mt-1 md:mt-2 p-3 md:p-4 rounded-xl md:rounded-2xl bg-blue-500/10 border border-blue-500/20 text-blue-400 font-black text-[10px] uppercase tracking-[0.2em] hover:bg-blue-500/20 transition-all flex items-center justify-center gap-2 touch-target"
                     >
                       <Zap className="w-4 h-4" /> Reparar Integridad de Proyectos
                     </button>
 
                     {/* BASE DE DATOS */}
-                    <div className="flex flex-col gap-3 mt-4">
+                    <div className="flex flex-col gap-2 md:gap-3 mt-2 md:mt-4">
                        <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Base de Datos (Supabase)</h3>
-                       <div className={`p-4 rounded-2xl border ${diagInfo?.database?.status === 'connected' ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-red-500/5 border-red-500/20'}`}>
-                          <div className="flex items-center justify-between mb-2">
-                             <span className="text-[12px] font-bold">Estado del Enlace Cloud</span>
-                             <span className={`text-[10px] font-black px-3 py-1 rounded-full ${diagInfo?.database?.status === 'connected' ? 'bg-emerald-500 text-white' : 'bg-red-500 text-white'}`}>
+                       <div className={`p-3 md:p-4 rounded-xl md:rounded-2xl border ${diagInfo?.database?.status === 'connected' ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-red-500/5 border-red-500/20'}`}>
+                          <div className="flex items-center justify-between mb-1 md:mb-2">
+                             <span className="text-[11px] md:text-[12px] font-bold">Estado del Enlace Cloud</span>
+                             <span className={`text-[9px] md:text-[10px] font-black px-2 md:px-3 py-0.5 md:py-1 rounded-full ${diagInfo?.database?.status === 'connected' ? 'bg-emerald-500 text-white' : 'bg-red-500 text-white'}`}>
                                 {diagInfo?.database?.status?.toUpperCase() || 'DESCONECTADO'}
                              </span>
                           </div>
                           {diagInfo?.database?.error && (
-                            <p className="text-[10px] text-red-300 font-mono bg-red-950/30 p-2 rounded-lg mt-2 break-all">
+                            <p className="text-[9px] md:text-[10px] text-red-300 font-mono bg-red-950/30 p-2 rounded-lg mt-1 md:mt-2 break-all">
                                {diagInfo.database.error}
                             </p>
                           )}
-                          <p className="text-[10px] opacity-40 mt-2">
+                          <p className="text-[9px] md:text-[10px] opacity-40 mt-1 md:mt-2">
                              Este indicador verifica si la app puede leer/escribir proyectos en la nube.
                           </p>
                        </div>
@@ -1851,7 +1890,7 @@ function EnergyBillsAppContent() {
                     
                     <button 
                       onClick={runDiagnostic}
-                      className="w-full py-4 bg-white text-black font-black text-xs uppercase tracking-widest rounded-2xl hover:bg-slate-200 transition-all flex items-center justify-center gap-2"
+                      className="w-full py-3 md:py-4 bg-white text-black font-black text-xs uppercase tracking-widest rounded-xl md:rounded-2xl hover:bg-slate-200 transition-all flex items-center justify-center gap-2 touch-target"
                     >
                       <Sparkles className="w-4 h-4" /> Re-Scanear
                     </button>
@@ -1870,23 +1909,23 @@ function EnergyBillsAppContent() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[500] flex items-center justify-center p-4 bg-black/80 backdrop-blur-xl no-print"
+            className="fixed inset-0 z-[500] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/80 backdrop-blur-xl no-print"
             onClick={() => setShowNewProjectModal(false)}
           >
             <motion.div
               initial={{ opacity: 0, scale: 0.95, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="glass-card border border-white/10 rounded-[40px] w-full max-w-md p-10 flex flex-col gap-8"
+              className="glass-card border border-white/10 rounded-t-2xl sm:rounded-2xl md:rounded-[40px] w-full sm:max-w-md p-6 md:p-10 flex flex-col gap-6 md:gap-8 mobile-modal"
               onClick={e => e.stopPropagation()}
             >
               <div className="flex items-center gap-4">
-                <div className="w-11 h-11 rounded-2xl bg-blue-600/20 border border-blue-500/30 flex items-center justify-center">
-                  <Plus className="w-5 h-5 text-blue-400" />
+                <div className="w-10 h-10 md:w-11 md:h-11 rounded-xl md:rounded-2xl bg-blue-600/20 border border-blue-500/30 flex items-center justify-center">
+                  <Plus className="w-4 h-4 md:w-5 md:h-5 text-blue-400" />
                 </div>
                 <div>
-                  <h3 className="text-xl font-black tracking-tight text-white">Nuevo Proyecto</h3>
-                  <p className="text-[11px] text-slate-500 font-medium">Introduce un nombre identificador</p>
+                  <h3 className="text-lg md:text-xl font-black tracking-tight text-white">Nuevo Proyecto</h3>
+                  <p className="text-[10px] md:text-[11px] text-slate-500 font-medium">Introduce un nombre identificador</p>
                 </div>
               </div>
 
@@ -1900,20 +1939,20 @@ function EnergyBillsAppContent() {
                   if (e.key === 'Escape') setShowNewProjectModal(false);
                 }}
                 placeholder="Ej: AOIZ, PAMPLONA..."
-                className="w-full bg-white/5 border border-white/10 rounded-2xl px-5 py-4 text-white font-bold text-sm placeholder:normal-case placeholder:font-normal placeholder:text-slate-600 focus:outline-none focus:border-blue-500/50 transition-all"
+                className="w-full bg-white/5 border border-white/10 rounded-xl md:rounded-2xl px-4 md:px-5 py-3 md:py-4 text-white font-bold text-sm placeholder:normal-case placeholder:font-normal placeholder:text-slate-600 focus:outline-none focus:border-blue-500/50 transition-all"
               />
 
-              <div className="flex gap-3">
+              <div className="flex flex-col sm:flex-row gap-2 md:gap-3">
                 <button
                   onClick={() => setShowNewProjectModal(false)}
-                  className="flex-1 py-3 rounded-2xl border border-white/10 text-slate-400 font-bold text-xs uppercase tracking-widest hover:bg-white/5 transition-all"
+                  className="flex-1 py-3 rounded-xl md:rounded-2xl border border-white/10 text-slate-400 font-bold text-xs uppercase tracking-widest hover:bg-white/5 transition-all touch-target"
                 >
                   Cancelar
                 </button>
                 <button
                   onClick={() => createNewProject(newProjectName)}
                   disabled={!newProjectName.trim()}
-                  className="flex-1 py-3 rounded-2xl bg-blue-600 hover:bg-blue-500 disabled:opacity-30 disabled:cursor-not-allowed text-white font-bold text-xs uppercase tracking-widest transition-all flex items-center justify-center gap-2"
+                  className="flex-1 py-3 rounded-xl md:rounded-2xl bg-blue-600 hover:bg-blue-500 disabled:opacity-30 disabled:cursor-not-allowed text-white font-bold text-xs uppercase tracking-widest transition-all flex items-center justify-center gap-2 touch-target"
                 >
                   <Plus className="w-4 h-4" /> Crear
                 </button>
@@ -1926,47 +1965,47 @@ function EnergyBillsAppContent() {
       {/* BILL PREVIEW MODAL */}
       <AnimatePresence>
         {previewBillId && (
-          <div className="fixed inset-0 z-[300] flex items-center justify-center p-8 bg-black/95 backdrop-blur-xl no-print" onClick={() => setPreviewBillId(null)}>
+          <div className="fixed inset-0 z-[300] flex items-center justify-center p-4 md:p-8 bg-black/95 backdrop-blur-xl no-print" onClick={() => setPreviewBillId(null)}>
             <div className="absolute top-0 left-0 w-full h-[300px] bg-blue-600/10 blur-[120px] pointer-events-none" />
             <motion.div 
               initial={{ opacity: 0, scale: 0.95, y: 20 }} 
               animate={{ opacity: 1, scale: 1, y: 0 }} 
               exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="bg-[#0f172a] border border-white/10 rounded-[48px] w-full max-w-6xl h-[90vh] flex flex-col overflow-hidden shadow-2xl relative z-10"
+              className="bg-[#0f172a] border border-white/10 rounded-2xl md:rounded-[48px] w-full max-w-6xl h-[85vh] md:h-[90vh] flex flex-col overflow-hidden shadow-2xl relative z-10 mobile-modal"
               onClick={e => e.stopPropagation()}
             >
-              <div className="p-10 border-b border-white/5 flex items-center justify-between bg-white/5">
-                <div className="flex items-center gap-5">
-                  <div className="w-12 h-12 rounded-2xl bg-blue-500/20 flex items-center justify-center">
-                    <FileText className="w-6 h-6 text-blue-400" />
+              <div className="p-4 md:p-10 border-b border-white/5 flex items-center justify-between bg-white/5 gap-4">
+                <div className="flex items-center gap-3 md:gap-5 min-w-0 flex-1">
+                  <div className="w-10 h-10 md:w-12 md:h-12 rounded-xl md:rounded-2xl bg-blue-500/20 flex items-center justify-center flex-shrink-0">
+                    <FileText className="w-5 h-5 md:w-6 md:h-6 text-blue-400" />
                   </div>
-                  <div>
-                    <h3 className="text-2xl font-black uppercase tracking-tight text-white">
+                  <div className="min-w-0 flex-1">
+                    <h3 className="text-base md:text-2xl font-black uppercase tracking-tight text-white truncate">
                       {bills.find(b => b.id === previewBillId)?.fileName}
                     </h3>
-                    <p className="text-xs text-slate-500 font-bold uppercase tracking-widest mt-1">Audit Control • Original Document</p>
+                    <p className="text-[10px] md:text-xs text-slate-500 font-bold uppercase tracking-widest mt-0.5 md:mt-1 hidden sm:block">Audit Control • Original Document</p>
                   </div>
                 </div>
-                <button onClick={() => setPreviewBillId(null)} className="w-12 h-12 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center transition-all border border-white/10">
-                  <X className="w-6 h-6" />
+                <button onClick={() => setPreviewBillId(null)} className="w-10 h-10 md:w-12 md:h-12 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center transition-all border border-white/10 flex-shrink-0 touch-target">
+                  <X className="w-5 h-5 md:w-6 md:h-6" />
                 </button>
               </div>
               
-              <div className="flex-1 bg-black/40 p-6 overflow-hidden">
+              <div className="flex-1 bg-black/40 p-3 md:p-6 overflow-hidden">
                 {fileRefs[previewBillId] ? (
                   <iframe 
                     src={URL.createObjectURL(fileRefs[previewBillId])} 
-                    className="w-full h-full rounded-2xl border-none"
+                    className="w-full h-full rounded-xl md:rounded-2xl border-none"
                     title="Bill Preview"
                   />
                 ) : (
-                  <div className="w-full h-full flex flex-col items-center justify-center gap-6 text-slate-500 border-2 border-dashed border-white/5 rounded-[40px] bg-white/[0.02]">
-                    <AlertTriangle className="w-16 h-16 text-amber-500/50" />
+                  <div className="w-full h-full flex flex-col items-center justify-center gap-4 md:gap-6 text-slate-500 border-2 border-dashed border-white/5 rounded-2xl md:rounded-[40px] bg-white/[0.02] p-4">
+                    <AlertTriangle className="w-12 h-12 md:w-16 md:h-16 text-amber-500/50" />
                     <div className="text-center space-y-2">
-                      <p className="text-xl font-black text-white uppercase tracking-tight">Archivo no disponible</p>
-                      <p className="text-sm font-medium text-slate-500 max-w-xs mx-auto">El archivo original solo está disponible en la sesión en la que se subió.</p>
+                      <p className="text-lg md:text-xl font-black text-white uppercase tracking-tight">Archivo no disponible</p>
+                      <p className="text-xs md:text-sm font-medium text-slate-500 max-w-xs mx-auto">El archivo original solo está disponible en la sesión en la que se subió.</p>
                     </div>
-                    <p className="text-[10px] uppercase tracking-[0.3em] text-blue-400/50 font-black">Precisión Voltis IA</p>
+                    <p className="text-[9px] md:text-[10px] uppercase tracking-[0.3em] text-blue-400/50 font-black">Precisión Voltis IA</p>
                   </div>
                 )}
               </div>
@@ -1982,31 +2021,31 @@ function EnergyBillsAppContent() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[400] flex items-center justify-center p-6 bg-black/90 backdrop-blur-md"
+            className="fixed inset-0 z-[400] flex items-end sm:items-center justify-center p-0 sm:p-6 bg-black/90 backdrop-blur-md"
           >
             <motion.div 
               initial={{ scale: 0.9, y: 20 }}
               animate={{ scale: 1, y: 0 }}
-              className="glass-card w-full max-w-lg rounded-[40px] p-10 border border-white/10 shadow-3xl text-white relative"
+              className="glass-card w-full max-w-lg rounded-t-2xl sm:rounded-2xl md:rounded-[40px] p-6 md:p-10 border border-white/10 shadow-3xl text-white relative mobile-modal"
             >
-              <button onClick={() => setRefiningBill(null)} className="absolute top-8 right-8 text-slate-500 hover:text-white">
-                <X className="w-6 h-6" />
+              <button onClick={() => setRefiningBill(null)} className="absolute top-4 right-4 md:top-8 md:right-8 text-slate-500 hover:text-white p-2">
+                <X className="w-5 h-5 md:w-6 md:h-6" />
               </button>
 
-              <div className="flex flex-col gap-8">
-                <div className="flex items-center gap-4">
-                  <div className="p-3 bg-blue-500/10 rounded-2xl">
-                    <Sparkles className="w-8 h-8 text-blue-400" />
+              <div className="flex flex-col gap-4 md:gap-8">
+                <div className="flex items-center gap-3 md:gap-4">
+                  <div className="p-2 md:p-3 bg-blue-500/10 rounded-xl md:rounded-2xl">
+                    <Sparkles className="w-6 h-6 md:w-8 md:h-8 text-blue-400" />
                   </div>
                   <div>
-                    <h2 className="text-2xl font-black tracking-tighter italic">REFINAR CON INTELIGENCIA</h2>
-                    <p className="text-xs font-bold text-blue-400 tracking-widest uppercase opacity-60">Instrucciones de Corrección</p>
+                    <h2 className="text-lg md:text-2xl font-black tracking-tighter italic">REFINAR CON IA</h2>
+                    <p className="text-[10px] md:text-xs font-bold text-blue-400 tracking-widest uppercase opacity-60">Instrucciones de Corrección</p>
                   </div>
                 </div>
 
-                <div className="flex flex-col gap-4">
-                  <p className="text-sm text-slate-400 font-medium leading-relaxed">
-                    Indica qué datos faltan o deben corregirse en la factura <span className="text-white font-bold">{refiningBill.fileName}</span>.
+                <div className="flex flex-col gap-3 md:gap-4">
+                  <p className="text-xs md:text-sm text-slate-400 font-medium leading-relaxed">
+                    Indica qué datos faltan o deben corregirse en la factura <span className="text-white font-bold truncate block max-w-full">{refiningBill.fileName}</span>.
                   </p>
                   
                   <textarea
@@ -2014,22 +2053,22 @@ function EnergyBillsAppContent() {
                     value={refineInstruction}
                     onChange={(e) => setRefineInstruction(e.target.value)}
                     placeholder="Ej: 'Extrae el exceso de potencia de P4, P5 y P6 que falta' o 'El total no coincide, busca el bono social'..."
-                    className="w-full h-32 bg-white/5 border border-white/10 rounded-2xl p-5 text-white font-medium text-sm focus:outline-none focus:border-blue-500/50 transition-all resize-none"
+                    className="w-full h-32 md:h-40 bg-white/5 border border-white/10 rounded-xl md:rounded-2xl p-3 md:p-5 text-white font-medium text-sm focus:outline-none focus:border-blue-500/50 transition-all resize-none"
                   />
                 </div>
 
-                <div className="flex gap-3 mt-2">
+                <div className="flex flex-col sm:flex-row gap-2 md:gap-3 mt-1 md:mt-2">
                   <button
                     onClick={() => setRefiningBill(null)}
                     disabled={isRefining}
-                    className="flex-1 py-4 rounded-2xl border border-white/10 text-slate-400 font-bold text-xs uppercase tracking-widest hover:bg-white/5 transition-all"
+                    className="flex-1 py-3 md:py-4 rounded-xl md:rounded-2xl border border-white/10 text-slate-400 font-bold text-xs uppercase tracking-widest hover:bg-white/5 transition-all touch-target"
                   >
                     Cancelar
                   </button>
                   <button
                     onClick={handleRefine}
                     disabled={isRefining || !refineInstruction.trim()}
-                    className="flex-[2] py-4 rounded-2xl bg-blue-600 hover:bg-blue-500 disabled:opacity-30 disabled:cursor-not-allowed text-white font-bold text-xs uppercase tracking-widest transition-all shadow-[0_0_20px_rgba(37,99,235,0.3)] flex items-center justify-center gap-2"
+                    className="flex-[2] py-3 md:py-4 rounded-xl md:rounded-2xl bg-blue-600 hover:bg-blue-500 disabled:opacity-30 disabled:cursor-not-allowed text-white font-bold text-xs uppercase tracking-widest transition-all shadow-[0_0_20px_rgba(37,99,235,0.3)] flex items-center justify-center gap-2 touch-target"
                   >
                     {isRefining ? <Loader className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
                     {isRefining ? 'PROCESANDO...' : 'REFINAR EXTRACCIÓN'}
@@ -2102,24 +2141,24 @@ function EnergyBillsAppContent() {
       {/* NEW FOLDER MODAL */}
       <AnimatePresence>
         {showNewFolderModal && (
-          <div className="fixed inset-0 z-[510] flex items-center justify-center p-6 bg-black/90 backdrop-blur-md">
+          <div className="fixed inset-0 z-[510] flex items-end sm:items-center justify-center p-0 sm:p-6 bg-black/90 backdrop-blur-md">
             <motion.div 
               initial={{ scale: 0.9, y: 20 }}
               animate={{ scale: 1, y: 0 }}
-              className="glass-card w-full max-w-md rounded-[32px] p-8 border border-white/10 shadow-3xl text-white relative"
+              className="glass-card w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl md:rounded-[32px] p-6 md:p-8 border border-white/10 shadow-3xl text-white relative mobile-modal"
             >
-              <button onClick={() => setShowNewFolderModal(false)} className="absolute top-6 right-6 text-slate-500 hover:text-white">
+              <button onClick={() => setShowNewFolderModal(false)} className="absolute top-4 right-4 md:top-6 md:right-6 text-slate-500 hover:text-white p-2">
                 <X className="w-5 h-5" />
               </button>
 
-              <div className="flex flex-col gap-6">
-                <div className="flex items-center gap-4">
-                  <div className="p-3 bg-orange-500/10 rounded-xl text-orange-400">
-                    <FolderOpen className="w-6 h-6" />
+              <div className="flex flex-col gap-4 md:gap-6">
+                <div className="flex items-center gap-3 md:gap-4">
+                  <div className="p-2 md:p-3 bg-orange-500/10 rounded-xl text-orange-400">
+                    <FolderOpen className="w-5 h-5 md:w-6 md:h-6" />
                   </div>
                   <div>
-                    <h2 className="text-xl font-black uppercase tracking-tight italic">NUEVA CARPETA</h2>
-                    <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Organizar proyectos</p>
+                    <h2 className="text-lg md:text-xl font-black uppercase tracking-tight italic">NUEVA CARPETA</h2>
+                    <p className="text-[9px] md:text-[10px] text-slate-500 font-bold uppercase tracking-widest">Organizar proyectos</p>
                   </div>
                 </div>
 
@@ -2131,14 +2170,14 @@ function EnergyBillsAppContent() {
                     onChange={(e) => setNewFolderName(e.target.value)}
                     onKeyDown={(e) => e.key === 'Enter' && createFolder(newFolderName)}
                     placeholder="CLIENTE GRUPO..."
-                    className="w-full bg-white/5 border border-white/10 rounded-xl p-4 text-white font-bold uppercase tracking-wider text-sm focus:outline-none focus:border-orange-500/50 transition-all"
+                    className="w-full bg-white/5 border border-white/10 rounded-xl p-3 md:p-4 text-white font-bold uppercase tracking-wider text-sm focus:outline-none focus:border-orange-500/50 transition-all"
                   />
                 </div>
 
                 <button
                   onClick={() => createFolder(newFolderName)}
                   disabled={!newFolderName.trim()}
-                  className="w-full py-4 rounded-xl bg-orange-600 hover:bg-orange-500 disabled:opacity-30 text-white font-black text-xs uppercase tracking-widest transition-all shadow-lg shadow-orange-900/20"
+                  className="w-full py-3 md:py-4 rounded-xl bg-orange-600 hover:bg-orange-500 disabled:opacity-30 text-white font-black text-xs uppercase tracking-widest transition-all shadow-lg shadow-orange-900/20 touch-target"
                 >
                   CREAR CARPETA
                 </button>
@@ -2196,9 +2235,22 @@ function EnergyBillsAppContent() {
 
 const ProjectItem = ({ proj, isActive, onLoad, onRename, onDelete, onMove, folders }: any) => {
   const [showMoveMenu, setShowMoveMenu] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setShowMoveMenu(false);
+      }
+    };
+    if (showMoveMenu) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showMoveMenu]);
 
   return (
-    <div className="relative">
+    <div className="relative" ref={menuRef}>
       <div 
         onClick={onLoad}
         className={`sidebar-item group ${
@@ -2212,15 +2264,15 @@ const ProjectItem = ({ proj, isActive, onLoad, onRename, onDelete, onMove, folde
           <span className="text-[9px] opacity-50 font-medium tracking-tight">{(proj.bills || []).length} items</span>
         </div>
         
-        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity md:opacity-100 lg:opacity-0">
           <button 
             onClick={(e) => { e.stopPropagation(); setShowMoveMenu(!showMoveMenu); }}
-            className={`p-1 rounded transition-colors ${showMoveMenu ? 'bg-white/10 text-white' : 'hover:bg-white/10 text-slate-500 hover:text-white'}`}
-            title="Mover"
+            className={`p-1.5 rounded transition-colors touch-target ${showMoveMenu ? 'bg-white/10 text-white' : 'hover:bg-white/10 text-slate-500 hover:text-white'}`}
+            title="Mover a carpeta"
           >
             <Layers className="w-3 h-3" />
           </button>
-          <button onClick={(e) => { e.stopPropagation(); onDelete(e); }} className="p-1 hover:bg-red-500/10 text-slate-500 hover:text-red-500 rounded">
+          <button onClick={(e) => { e.stopPropagation(); onDelete(e); }} className="p-1.5 hover:bg-red-500/10 text-slate-500 hover:text-red-500 rounded touch-target">
             <Trash2 className="w-3 h-3" />
           </button>
         </div>
@@ -2229,15 +2281,22 @@ const ProjectItem = ({ proj, isActive, onLoad, onRename, onDelete, onMove, folde
       {showMoveMenu && (
         <div 
           className="absolute left-full ml-2 top-0 z-50 w-56 glass-card border border-white/20 rounded-2xl p-3 shadow-2xl overflow-hidden"
-          onMouseLeave={() => setShowMoveMenu(false)}
         >
           <div className="absolute top-0 left-0 w-full h-[60px] bg-blue-600/5 blur-xl pointer-events-none" />
-          <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest px-1 py-1 border-b border-white/5 mb-2 relative z-10">Mover a carpeta</p>
+          <div className="flex items-center justify-between mb-2 relative z-10">
+            <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest px-1 py-1">Mover a carpeta</p>
+            <button 
+              onClick={() => setShowMoveMenu(false)}
+              className="p-1 hover:bg-white/10 rounded touch-target"
+            >
+              <X className="w-3 h-3 text-slate-500" />
+            </button>
+          </div>
           
           <div className="flex flex-col gap-1 max-h-56 overflow-y-auto custom-scrollbar relative z-10">
             <button 
               onClick={(e) => { e.stopPropagation(); onMove(null); setShowMoveMenu(false); }}
-              className={`flex items-center gap-2 px-3 py-2 rounded-xl text-[10px] font-bold uppercase tracking-tight transition-all ${!proj.folderId ? 'text-blue-400 bg-blue-500/10' : 'text-slate-400 hover:bg-white/5'}`}
+              className={`flex items-center gap-2 px-3 py-2.5 rounded-xl text-[10px] font-bold uppercase tracking-tight transition-all touch-target ${!proj.folderId ? 'text-blue-400 bg-blue-500/10' : 'text-slate-400 hover:bg-white/5'}`}
             >
               <X className="w-3 h-3 opacity-40" /> Sin Carpeta
             </button>
@@ -2246,7 +2305,7 @@ const ProjectItem = ({ proj, isActive, onLoad, onRename, onDelete, onMove, folde
               <button 
                 key={f.id}
                 onClick={(e) => { e.stopPropagation(); onMove(f.id); setShowMoveMenu(false); }}
-                className={`flex items-center gap-2 px-3 py-2 rounded-xl text-[10px] font-bold uppercase tracking-tight transition-all ${proj.folderId === f.id ? 'text-blue-400 bg-blue-500/10' : 'text-slate-400 hover:bg-white/5'}`}
+                className={`flex items-center gap-2 px-3 py-2.5 rounded-xl text-[10px] font-bold uppercase tracking-tight transition-all touch-target ${proj.folderId === f.id ? 'text-blue-400 bg-blue-500/10' : 'text-slate-400 hover:bg-white/5'}`}
               >
                 <FolderOpen className={`w-3 h-3 ${proj.folderId === f.id ? 'text-blue-400' : 'opacity-40'}`} />
                 <span className="truncate">{f.name}</span>
@@ -2258,20 +2317,13 @@ const ProjectItem = ({ proj, isActive, onLoad, onRename, onDelete, onMove, folde
             <button 
               onClick={(e) => { 
                 e.stopPropagation(); 
-                // We'll open the main new folder modal
-                // but we could also do it inline. For now, let's keep it consistent
-                // or just trigger the parent state.
                 const name = prompt('Nombre de la nueva carpeta:');
                 if (name) {
-                  // We need to pass the createFolder function or use a specific callback
-                  // Simplified: we'll use a hack to call the parent's createFolder
-                  // or just find it via context/props if we had them.
-                  // Since ProjectItem is a helper, I'll update its props.
                   onMove({ createNew: true, name });
                 }
                 setShowMoveMenu(false);
               }}
-              className="flex items-center gap-2 px-3 py-2 rounded-xl text-[10px] font-bold uppercase tracking-tight text-blue-400 hover:bg-blue-500/10 transition-all border border-blue-500/10"
+              className="flex items-center gap-2 px-3 py-2.5 rounded-xl text-[10px] font-bold uppercase tracking-tight text-blue-400 hover:bg-blue-500/10 transition-all border border-blue-500/10 touch-target"
             >
               <Plus className="w-3 h-3" /> Crear Carpeta
             </button>

@@ -4,79 +4,64 @@ import { ExtractedBill, EnergyType } from './types';
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
 
 const GAS_EXTRACTION_PROMPT = `
-Eres un experto en facturas de GAS NATURAL españolas. Tu tarea es extraer datos de facturas de gas con precisión matemática.
+Eres un experto en auditoría de facturas de GAS NATURAL en España. Tu objetivo es la precisión matemática absoluta y la clasificación técnica de costes.
 
-REGLAS DE EXTRACCIÓN (GAS):
+REGLAS CRÍTICAS DE EXTRACCIÓN (GAS V3.0):
 
-0. **CUPS (OBLIGATORIO):** Extrae el código CUPS completo (empieza por ES). Es fundamental.
+0. **CUPS (MANDATORIO):** Extrae el código CUPS completo (empieza por ES). Es innegociable.
 
-1. **DATOS DE LA FACTURA:**
-   - numeroFactura: Número de factura completo
-   - fechaEmision: Fecha de emisión (DD/MM/YYYY)
-   - periodoInicio: Fecha inicio del periodo (DD/MM/YYYY)
-   - periodoFin: Fecha fin del periodo (DD/MM/YYYY)
+1. **DESGLOSE DE CONSUMO (VISIÓN ENERGÉTICA):**
+   - Extrae 'consumoKwh' exactos facturados.
+   - Extrae el 'precioKwh' (término variable). Si no es explícito, calcúlalo: (Gasto bruto energía / kWh).
+   - Define **'costeBrutoConsumo'** = (consumoKwh × precioKwh).
 
-2. **CONSUMO:**
-   - Busca "Consumo: XXX kWh" o similar
-   - Si hay m³, extráelos también
-   - Si hay factor de conversión, extráelo
-   - Si hay "Lectura anterior" y "Lectura actual", extráelas
-   - Si hay tipo de lectura (real/estimada/media), extráelo
+2. **CLASIFICACIÓN TÉCNICA DE DESCUENTOS (CRÍTICO):**
+   Debes clasificar CADA descuento encontrado en una de estas 3 categorías:
+   - **'descuentoEnergia'** (Categoría 1): Descuentos aplicados EXCLUSIVAMENTE al consumo (ej: "% sobre energía", "bonificación consumo").
+   - **'descuentoTerminoFijo'** (Categoría 2): Descuentos aplicados al término fijo o cuota de servicio.
+   - **'descuentoOtros'** (Categoría 3): Descuentos sobre el total de la factura o promociones genéricas.
 
-3. **AJUSTES / REGULARIZACIONES (IMPORTANT):**
-   - Busca "Regularización", "Ajuste PCS", "Ajuste", etc.
-   - Si existen ajustes, extráelos con kWh y euros afectados
-   - IMPORTANTE: Usa el consumo AJUSTADO/FACTURADO para cálculos finales
+3. **CÁLCULO DEL NETO ENERGÉTICO:**
+   - **'costeNetoConsumo'** = costeBrutoConsumo - descuentoEnergia.
+   - Este valor es el que usaremos para auditar el precio real de la molécula de gas.
 
-4. **PRECIOS:**
-   - Busca el precio €/kWh explícito si existe
-   - Busca el término fijo diario (€/día)
-   - Calcula el término fijo total (diario × días)
+4. **OTROS CONCEPTOS FIJOS:**
+   - Extrae 'terminoFijoTotal' (Cuota fija / Término fijo).
+   - Extrae 'impuestoHidrocarbTotal' (Impuesto sobre hidrocarburos).
+   - Extrae 'alquilerTotal' (Alquiler de contador).
+   - Extrae 'ivaTotal' (Calculado sobre la base imponible total).
 
-5. **OTROS CONCEPTOS:**
-   - Impuesto hidrocarburos (siempre presente)
-   - Alquiler contador
-   - IVA (normalmente 21%)
+5. **BUCLE DE AUTOCONTROL MATEMÁTICO (REGLA DE ORO):**
+   - **PASO A:** Extrae el 'totalFactura' directamente del "Total a Pagar" visual de la factura.
+   - **PASO B (Cálculo Teórico):** 
+     Suma: (costeBrutoConsumo + terminoFijoTotal + impuestoHidrocarbTotal + alquilerTotal)
+     Resta: (descuentoEnergia + descuentoTerminoFijo + descuentoOtros)
+     Suma: IVA/Impuestos Finales.
+   - **PASO C (Verificación):** Si la suma del PASO B no coincide con el PASO A (tolerancia 0,05€), re-examina la factura. Asegúrate de que no has omitido ningún concepto o clasificado mal un descuento.
 
-6. **MATEMÁTICA:**
-   - Verifica que: Consumo × Precio + Término Fijo + Impuesto + Alquiler ≈ Total Factura
-   - El consumo a usar es el AJUSTADO si hay ajustes
-
-7. **CASOS ESPECIALES:**
-   - Si no hay €/kWh explícito pero tienes coste y kWh → calcula: coste/kWh
-   - Si no hay factor de conversión → usa null (no inventes)
-   - Si no hay m³ → usa null
-
-8. **FACTURAS DE AJUSTE:**
-   - Pueden tener valores negativos
-   - Úsalos tal cual aparecen
-
-RESPONDE ÚNICAMENTE CON JSON VÁLIDO:
+RESPONDE ÚNICAMENTE CON UN JSON VÁLIDO siguiendo esta interfaz:
 {
   "comercializadora": string,
   "numeroFactura": string,
-  "fechaEmision": "DD/MM/YYYY",
-  "periodoInicio": "DD/MM/YYYY",
-  "periodoFin": "DD/MM/YYYY",
+  "fechaEmision": "YYYY-MM-DD",
+  "periodoInicio": "YYYY-MM-DD",
+  "periodoFin": "YYYY-MM-DD",
   "cups": string,
-  "distribuidora": string | null,
   "tarifaRL": string,
   "consumoKwh": number,
   "consumoM3": number | null,
   "factorConversion": number | null,
-  "tipoLectura": "real" | "estimada" | "media" | null,
-  "lecturaAnterior": number | null,
-  "lecturaActual": number | null,
-  "precioKwh": number | null,
+  "precioKwh": number,
+  "costeBrutoConsumo": number,
+  "descuentoEnergia": number,
+  "descuentoTerminoFijo": number,
+  "descuentoOtros": number,
+  "costeNetoConsumo": number,
   "terminoFijoDiario": number,
   "diasFacturados": number,
   "terminoFijoTotal": number,
   "impuestoHidrocarbTotal": number,
   "alquilerTotal": number,
-  "ajustes": [
-    { "concepto": string, "kwh": number, "euros": number }
-  ] | null,
-  "costeConsumoAjustado": number | null,
   "ivaPorcentaje": number,
   "ivaTotal": number,
   "totalFactura": number
@@ -94,22 +79,21 @@ interface GasExtractedData {
   periodoInicio?: string;
   periodoFin?: string;
   cups?: string;
-  distribuidora?: string | null;
   tarifaRL?: string;
   consumoKwh?: number;
   consumoM3?: number | null;
   factorConversion?: number | null;
-  tipoLectura?: 'real' | 'estimada' | 'media' | null;
-  lecturaAnterior?: number | null;
-  lecturaActual?: number | null;
-  precioKwh?: number | null;
+  precioKwh?: number;
+  costeBrutoConsumo?: number;
+  descuentoEnergia?: number;
+  descuentoTerminoFijo?: number;
+  descuentoOtros?: number;
+  costeNetoConsumo?: number;
   terminoFijoDiario?: number;
   diasFacturados?: number;
   terminoFijoTotal?: number;
   impuestoHidrocarbTotal?: number;
   alquilerTotal?: number;
-  ajustes?: { concepto: string; kwh: number; euros: number }[] | null;
-  costeConsumoAjustado?: number | null;
   ivaPorcentaje?: number;
   ivaTotal?: number;
   totalFactura?: number;
@@ -153,13 +137,13 @@ export async function extractGasBillData(
     const warnings: string[] = [];
 
     // Determine if precioKwh was estimated
-    const precioKwhEstimated: boolean = !data.precioKwh && !!(data.consumoKwh && data.costeConsumoAjustado);
+    const precioKwhEstimated: boolean = !data.precioKwh && !!(data.consumoKwh && data.costeBrutoConsumo);
 
     const bill: ExtractedBill = {
       id: '', // Will be set by caller
       fileName: '', // Will be set by caller
       status: 'success',
-      energyType: 'gas' as EnergyType, // Explicitly set — extractor always knows it's gas
+      energyType: 'gas' as EnergyType,
       comercializadora: data.comercializadora,
       cups: data.cups,
       fechaInicio: data.periodoInicio,
@@ -169,9 +153,6 @@ export async function extractGasBillData(
         kwh: data.consumoKwh || 0,
         m3: data.consumoM3 ?? undefined,
         factorConversion: data.factorConversion ?? undefined,
-        tipoLectura: data.tipoLectura ?? undefined,
-        lecturaAnterior: data.lecturaAnterior ?? undefined,
-        lecturaActual: data.lecturaActual ?? undefined,
       },
       gasPricing: {
         precioKwh: data.precioKwh || 0,
@@ -183,12 +164,22 @@ export async function extractGasBillData(
         alquilerTotal: data.alquilerTotal || 0,
         ivaPorcentaje: data.ivaPorcentaje || 21,
         ivaTotal: data.ivaTotal || 0,
+        descuentoTerminoFijo: data.descuentoTerminoFijo || 0,
+        descuentoOtros: data.descuentoOtros || 0,
       },
-      gasAdjustments: data.ajustes || undefined,
+      costeBrutoConsumo: data.costeBrutoConsumo || 0,
+      descuentoEnergia: data.descuentoEnergia || 0,
+      costeNetoConsumo: data.costeNetoConsumo || 0,
+      costeTotalConsumo: data.costeNetoConsumo || 0, // Canonical energy term cost
       totalFactura: data.totalFactura,
       extractionStatus: 'success',
       extractionWarnings: warnings,
     };
+
+    // Calculate net avg price
+    if (bill.costeNetoConsumo !== undefined && (data.consumoKwh || 0) > 0) {
+      bill.costeMedioKwhNeto = bill.costeNetoConsumo / (data.consumoKwh || 1);
+    }
 
     // Add warnings for missing fields
     if (!data.consumoM3) {
@@ -199,9 +190,6 @@ export async function extractGasBillData(
     }
     if (precioKwhEstimated) {
       warnings.push('€/kWh calculado (no explícito)');
-    }
-    if (data.ajustes && data.ajustes.length > 0) {
-      warnings.push(`Ajustes detectados: ${data.ajustes.length}`);
     }
 
     return bill;

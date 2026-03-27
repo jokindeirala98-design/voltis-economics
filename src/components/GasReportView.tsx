@@ -106,6 +106,7 @@ export function GasReportView({ bills, onBack, projectName = 'PROYECTO', project
 
     let totalKwh = 0;
     let totalEur = 0;
+    let totalEnergyNetEur = 0;
     let totalTerminoFijo = 0;
     let totalImpuesto = 0;
     let totalAlquiler = 0;
@@ -122,6 +123,7 @@ export function GasReportView({ bills, onBack, projectName = 'PROYECTO', project
 
       const kwh = b.gasConsumption?.kwh || 0;
       const eur = b.totalFactura || 0;
+      const energyNetEur = b.costeNetoConsumo || 0;
       const terminoFijo = b.gasPricing?.terminoFijoTotal || 0;
       const impuesto = b.gasPricing?.impuestoHidrocarbTotal || 0;
       const alquiler = b.gasPricing?.alquilerTotal || 0;
@@ -133,25 +135,27 @@ export function GasReportView({ bills, onBack, projectName = 'PROYECTO', project
 
       totalKwh += kwh;
       totalEur += eur;
+      totalEnergyNetEur += energyNetEur;
       totalTerminoFijo += terminoFijo;
       totalImpuesto += impuesto;
       totalAlquiler += alquiler;
       totalIva += iva;
 
-      if (b.gasAdjustments && b.gasAdjustments.length > 0) {
+      if (b.descuentoEnergia && b.descuentoEnergia > 0) {
         adjustedCount++;
       }
 
       gasBillMap.set(`${month}-${b.fechaFin}`, b);
     });
 
-    const avgPrice = totalKwh > 0 ? totalEur / totalKwh : 0;
+    const avgPrice = totalKwh > 0 ? totalEnergyNetEur / totalKwh : 0;
 
     const pieData = [
-      { name: 'Consumo Gas', value: totalEur - totalTerminoFijo - totalImpuesto - totalAlquiler, color: '#f97316' },
+      { name: 'Energía Neta', value: totalEnergyNetEur, color: '#f97316' },
       { name: 'Término Fijo', value: totalTerminoFijo, color: '#fb923c' },
       { name: 'Impuesto Hidrocarb.', value: totalImpuesto, color: '#fbbf24' },
       { name: 'Alquiler', value: totalAlquiler, color: '#facc15' },
+      { name: 'IVA', value: totalIva, color: '#eab308' },
     ].filter(i => i.value > 0);
 
     const tData = gasBills
@@ -172,11 +176,15 @@ export function GasReportView({ bills, onBack, projectName = 'PROYECTO', project
         factor: b.gasConsumption?.factorConversion,
         precioKwh: b.gasPricing?.precioKwh,
         precioEstimated: b.gasPricing?.precioKwhEstimated,
+        costeBrutoConsumo: b.costeBrutoConsumo || 0,
+        descuentoEnergia: b.descuentoEnergia || 0,
+        costeNetoConsumo: b.costeNetoConsumo || 0,
+        costeMedioKwhNeto: b.costeMedioKwhNeto || 0,
         terminoFijo: b.gasPricing?.terminoFijoTotal || 0,
         impuesto: b.gasPricing?.impuestoHidrocarbTotal || 0,
         alquiler: b.gasPricing?.alquilerTotal || 0,
         total: b.totalFactura || 0,
-        hasAdjustments: (b.gasAdjustments?.length || 0) > 0,
+        hasAdjustments: (b.descuentoEnergia || 0) > 0,
         warnings: b.extractionWarnings || [],
       }));
 
@@ -185,6 +193,7 @@ export function GasReportView({ bills, onBack, projectName = 'PROYECTO', project
       summaryStats: {
         totalKwh,
         totalEur,
+        totalEnergyNetEur,
         avgPrice,
         totalTerminoFijo,
         totalImpuesto,
@@ -350,16 +359,19 @@ export function GasReportView({ bills, onBack, projectName = 'PROYECTO', project
           {/* Table */}
           <section className="glass p-4 rounded-3xl border border-white/10 overflow-hidden">
             <h3 className="text-sm font-black uppercase text-slate-400 tracking-widest mb-4 px-4">Facturas de Gas</h3>
-            <table className="w-full text-xs">
+            <table className="w-full text-[10px]">
               <thead>
                 <tr className="bg-slate-900/50 font-black uppercase text-slate-500 tracking-wider">
                   <th className="px-4 py-3 text-left">Mes</th>
-                  <th className="px-3 py-3 text-center">Tarifa</th>
-                  <th className="px-3 py-3 text-right">kWh</th>
-                  <th className="px-3 py-3 text-right">€/kWh</th>
-                  <th className="px-3 py-3 text-right">Término Fijo</th>
-                  <th className="px-3 py-3 text-right">Impuesto</th>
-                  <th className="px-3 py-3 text-right">Alquiler</th>
+                  <th className="px-2 py-3 text-center">Tarifa</th>
+                  <th className="px-2 py-3 text-right">kWh</th>
+                  <th className="px-2 py-3 text-right">Bruto En.</th>
+                  <th className="px-2 py-3 text-right text-green-500/80">Desc. En.</th>
+                  <th className="px-2 py-3 text-right text-orange-400">Neto En.</th>
+                  <th className="px-2 py-3 text-right">€/kWh</th>
+                  <th className="px-2 py-3 text-right">T. Fijo</th>
+                  <th className="px-2 py-3 text-right">Imp.</th>
+                  <th className="px-2 py-3 text-right">Alquiler</th>
                   <th className="px-4 py-3 text-right">Total</th>
                 </tr>
               </thead>
@@ -367,23 +379,47 @@ export function GasReportView({ bills, onBack, projectName = 'PROYECTO', project
                 {tableData.map((row, idx) => (
                   <tr
                     key={idx}
-                    className="hover:bg-white/5 cursor-pointer"
+                    className="hover:bg-white/5 cursor-pointer transition-colors"
                     onClick={() => setSelectedBillId(row.id)}
                   >
                     <td className="px-4 py-3 font-black text-white">{row.name}</td>
-                    <td className="px-3 py-3 text-center text-orange-400 font-bold">{row.tarifaRL}</td>
-                    <td className="px-3 py-3 text-right font-mono">{row.kwh.toLocaleString()}</td>
-                    <td className={`px-3 py-3 text-right font-mono ${row.precioEstimated ? 'text-yellow-400' : 'text-slate-300'}`}>
-                      {row.precioKwh ? row.precioKwh.toFixed(4) : '-'}
-                      {row.precioEstimated && <span className="block text-[8px] text-yellow-500/60">est.</span>}
+                    <td className="px-2 py-3 text-center text-slate-400 font-bold">{row.tarifaRL}</td>
+                    <td className="px-2 py-3 text-right font-mono">{row.kwh.toLocaleString()}</td>
+                    <td className="px-2 py-3 text-right font-mono text-slate-400">{row.costeBrutoConsumo.toFixed(2)}€</td>
+                    <td className="px-2 py-3 text-right font-mono text-green-500/60">
+                      {row.descuentoEnergia > 0 ? `-${row.descuentoEnergia.toFixed(2)}€` : '-'}
                     </td>
-                    <td className="px-3 py-3 text-right">{row.terminoFijo > 0 ? `${row.terminoFijo.toFixed(2)}€` : '-'}</td>
-                    <td className="px-3 py-3 text-right">{row.impuesto > 0 ? `${row.impuesto.toFixed(2)}€` : '-'}</td>
-                    <td className="px-3 py-3 text-right">{row.alquiler > 0 ? `${row.alquiler.toFixed(2)}€` : '-'}</td>
-                    <td className="px-4 py-3 text-right font-black text-orange-400">{row.total.toFixed(2)}€</td>
+                    <td className="px-2 py-3 text-right font-mono text-orange-400/90 font-bold">{row.costeNetoConsumo.toFixed(2)}€</td>
+                    <td className={`px-2 py-3 text-right font-mono ${row.precioEstimated ? 'text-yellow-400' : 'text-slate-300'}`}>
+                      {row.costeMedioKwhNeto ? row.costeMedioKwhNeto.toFixed(4) : '-'}
+                      {row.precioEstimated && <span className="block text-[8px] text-yellow-500/60 leading-none">est.</span>}
+                    </td>
+                    <td className="px-2 py-3 text-right text-slate-400">{row.terminoFijo > 0 ? `${row.terminoFijo.toFixed(2)}€` : '-'}</td>
+                    <td className="px-2 py-3 text-right text-slate-400">{row.impuesto > 0 ? `${row.impuesto.toFixed(2)}€` : '-'}</td>
+                    <td className="px-2 py-3 text-right text-slate-400">{row.alquiler > 0 ? `${row.alquiler.toFixed(2)}€` : '-'}</td>
+                    <td className="px-4 py-3 text-right font-black text-white bg-white/5">{row.total.toFixed(2)}€</td>
                   </tr>
                 ))}
               </tbody>
+              <tfoot className="bg-white/5 border-t border-white/10 font-black text-[11px]">
+                <tr>
+                  <td className="px-4 py-4 text-white uppercase italic">TOTAL</td>
+                  <td className="px-2 py-4 text-center text-slate-500">RL</td>
+                  <td className="px-2 py-4 text-right tabular-nums text-white">{summaryStats.totalKwh.toLocaleString()}</td>
+                  <td className="px-2 py-4 text-right tabular-nums text-slate-400">{(summaryStats.totalEur - summaryStats.totalTerminoFijo - summaryStats.totalImpuesto - summaryStats.totalAlquiler - summaryStats.totalIva).toFixed(2)}€</td>
+                  <td className="px-2 py-4 text-right tabular-nums text-green-500/60">
+                    {gasBills.reduce((acc, b) => acc + (b.descuentoEnergia || 0), 0) > 0 
+                      ? `-${gasBills.reduce((acc, b) => acc + (b.descuentoEnergia || 0), 0).toFixed(2)}€` 
+                      : '-'}
+                  </td>
+                  <td className="px-2 py-4 text-right tabular-nums text-orange-400">{(summaryStats.totalEnergyNetEur).toFixed(2)}€</td>
+                  <td className="px-2 py-4 text-right tabular-nums text-white">{summaryStats.avgPrice.toFixed(4)}</td>
+                  <td className="px-2 py-4 text-right tabular-nums text-slate-400">{summaryStats.totalTerminoFijo.toFixed(2)}€</td>
+                  <td className="px-2 py-4 text-right tabular-nums text-slate-400">{summaryStats.totalImpuesto.toFixed(2)}€</td>
+                  <td className="px-2 py-4 text-right tabular-nums text-slate-400">{summaryStats.totalAlquiler.toFixed(2)}€</td>
+                  <td className="px-4 py-4 text-right tabular-nums text-white bg-white/10">{summaryStats.totalEur.toFixed(2)}€</td>
+                </tr>
+              </tfoot>
             </table>
           </section>
         </main>

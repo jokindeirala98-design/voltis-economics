@@ -19,7 +19,7 @@
  */
 import { NextRequest, NextResponse } from 'next/server';
 import { fetchProjectById } from '@/lib/supabase-sync';
-import { ExtractedBill, ProjectWorkspace, isGasBill } from '@/lib/types';
+import { ExtractedBill, ProjectWorkspace, isGasBill, getExcessAmountFromBill } from '@/lib/types';
 import { getMonthlyAggregatedData, CANONICAL_MONTHS } from '@/lib/date-utils';
 import puppeteer from 'puppeteer-core';
 import chromium from '@sparticuz/chromium';
@@ -92,6 +92,9 @@ interface ProcessedData {
   matrixData: any[];
   periodData: any[];
   periodAverages: any[];
+  excessData: any[];
+  totalExcessAmount: number;
+  hasExcesses: boolean;
 }
 
 function processProjectData(project: { bills: ExtractedBill[]; customOCs: Record<string, any>; name: string }): ProcessedData {
@@ -160,7 +163,9 @@ function processProjectData(project: { bills: ExtractedBill[]; customOCs: Record
   ].filter(i => i.value > 0);
 
   const matrixData = sorted.map(b => {
-    const energia = b.costeTotalConsumo || 0;
+    const energia = b.costeTotalConsumo || 0; // Already net (costeNetoConsumo)
+    const energiaBruta = b.costeBrutoConsumo || b.costeTotalConsumo || 0;
+    const descuentoEnergia = b.descuentoEnergia || 0;
     const potencia = b.costeTotalPotencia || 0;
     let imp = 0, others = 0;
     [...(b.otrosConceptos || [])].forEach(oc => {
@@ -169,10 +174,16 @@ function processProjectData(project: { bills: ExtractedBill[]; customOCs: Record
     });
     const totalF = energia + potencia + imp + others;
     const totalKwh = b.consumoTotalKwh || 0;
-    const avgPrice = b.costeMedioKwh || (totalKwh > 0 ? energia / totalKwh : 0);
+    // Use cosineMedioKwhNeto if available (discount-aware), fallback to cosineTotalConsumo / kWh
+    const avgPrice = b.costeMedioKwhNeto || (totalKwh > 0 ? energia / totalKwh : 0);
 
-    // Calculate € spend per period for each bill
-    const avgEnergyPrice = totalKwh > 0 ? energia / totalKwh : 0;
+    // Calculate discount factor for period spend
+    const discountFactor = (energiaBruta > 0 && descuentoEnergia > 0) 
+      ? energia / energiaBruta 
+      : 1;
+    const avgEnergyPrice = totalKwh > 0 ? energia / totalKwh : 0; // Already net price
+    
+    // Calculate € spend per period using DISCOUNT-AWARE logic
     const periodSpend = periods.map(period => {
       const consumoItem = b.consumo?.find(c => c.periodo === period);
       const kwh = consumoItem?.kwh || 0;
@@ -180,9 +191,11 @@ function processProjectData(project: { bills: ExtractedBill[]; customOCs: Record
       let isEstimated = false;
       if (consumoItem) {
         if (consumoItem.total !== undefined && consumoItem.total > 0) {
-          eur = consumoItem.total;
+          // Apply discount if available
+          eur = descuentoEnergia > 0 ? consumoItem.total * discountFactor : consumoItem.total;
         } else if (consumoItem.precioKwh !== undefined && consumoItem.precioKwh > 0 && kwh > 0) {
-          eur = kwh * consumoItem.precioKwh;
+          // Apply discount to price
+          eur = kwh * consumoItem.precioKwh * discountFactor;
         } else if (kwh > 0 && avgEnergyPrice > 0) {
           eur = kwh * avgEnergyPrice;
           isEstimated = true;
@@ -191,14 +204,25 @@ function processProjectData(project: { bills: ExtractedBill[]; customOCs: Record
       return { eur, isEstimated };
     });
 
+    // Calculate net prices per period
+    const prices = {
+      P1: ((b.consumo?.find(c => c.periodo === 'P1')?.precioKwh) || 0) * discountFactor,
+      P2: ((b.consumo?.find(c => c.periodo === 'P2')?.precioKwh) || 0) * discountFactor,
+      P3: ((b.consumo?.find(c => c.periodo === 'P3')?.precioKwh) || 0) * discountFactor,
+      P4: ((b.consumo?.find(c => c.periodo === 'P4')?.precioKwh) || 0) * discountFactor,
+      P5: ((b.consumo?.find(c => c.periodo === 'P5')?.precioKwh) || 0) * discountFactor,
+      P6: ((b.consumo?.find(c => c.periodo === 'P6')?.precioKwh) || 0) * discountFactor,
+    };
+
     return {
       id: b.id,
       name: (parseDate(b.fechaFin) || new Date()).toLocaleString('es-ES', { month: 'long' }),
       totalKwh,
       avgPrice,
       totalFactura: totalF,
-      energia, potencia, otros: imp + others,
+      energia, energiaBruta, descuentoEnergia, potencia, otros: imp + others,
       consumo: b.consumo || [],
+      prices,
       periodSpend: {
         P1: { eur: periodSpend[0].eur, isEstimated: periodSpend[0].isEstimated },
         P2: { eur: periodSpend[1].eur, isEstimated: periodSpend[1].isEstimated },
@@ -219,6 +243,24 @@ function processProjectData(project: { bills: ExtractedBill[]; customOCs: Record
     avgPrice: periodAverages[idx].avgPrice
   }));
 
+  // Extract power excess data using robust detection
+  const excessData = sorted
+    .map(b => {
+      const { totalExcess, concepts } = getExcessAmountFromBill(b);
+      const name = (parseDate(b.fechaFin) || new Date()).toLocaleString('es-ES', { month: 'long' });
+      return {
+        name,
+        fechaFin: b.fechaFin,
+        excessAmount: totalExcess,
+        conceptCount: concepts.length,
+        hasExcess: totalExcess > 0
+      };
+    })
+    .filter(b => b.hasExcess);
+
+  const totalExcessAmount = excessData.reduce((sum, b) => sum + b.excessAmount, 0);
+  const hasExcesses = totalExcessAmount > 0;
+
   const firstBill = sorted[0];
   return {
     bills: sorted,
@@ -231,6 +273,9 @@ function processProjectData(project: { bills: ExtractedBill[]; customOCs: Record
     matrixData,
     periodData,
     periodAverages,
+    excessData,
+    totalExcessAmount,
+    hasExcesses,
   };
 }
 
@@ -676,14 +721,16 @@ function generateReportHTML(project: ProjectWorkspace): string {
     </tr>
   ` : '';
 
+  // Matrix Coste - use NET prices (discount applied)
   const matrixCosteRows = data.matrixData.map((row, idx) => `
     <tr>
       <td style="text-align:left">${row.name}</td>
-      ${[1,2,3,4,5,6].map(p => {
-        const c = row.consumo.find((c: any) => c.periodo === `P${p}`);
-        return `<td>${c ? c.precioKwh?.toFixed(3) : '-'}</td>`;
+      ${['P1', 'P2', 'P3', 'P4', 'P5', 'P6'].map(p => {
+        // Use net prices (discount applied)
+        const price = row.prices?.[p] || 0;
+        return `<td>${price > 0 ? price.toFixed(4) : '-'}</td>`;
       }).join('')}
-      <td class="${top3Price.has(idx) ? 'highlight-top3' : ''}">${row.avgPrice.toFixed(3)}</td>
+      <td class="${top3Price.has(idx) ? 'highlight-top3' : ''}">${row.avgPrice.toFixed(4)}</td>
     </tr>
   `).join('');
 
@@ -710,6 +757,41 @@ function generateReportHTML(project: ProjectWorkspace): string {
       `).join('')}
       <td style="font-weight: 900; color: #818cf8;">${data.periodData.reduce((sum, p) => sum + p.totalEur, 0).toFixed(2)}</td>
     </tr>
+  ` : '';
+
+  // Excess table - only show if there are excesses
+  const excessTableHTML = data.hasExcesses ? `
+    <div style="margin-top: 24px; padding: 16px; border: 1px solid rgba(245, 158, 11, 0.2); border-radius: 12px; background: linear-gradient(to bottom right, rgba(245, 158, 11, 0.05), transparent);">
+      <div style="font-size: 10px; font-weight: 700; color: rgba(245, 158, 11, 0.8); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
+        <span style="display: inline-block; width: 8px; height: 8px; background: #f59e0b; border-radius: 50%;"></span>
+        Seguimiento de excesos de potencia
+      </div>
+      <table style="width: 100%; border-collapse: collapse; font-size: 10px;">
+        <thead>
+          <tr style="background: rgba(245, 158, 11, 0.1); color: rgba(245, 158, 11, 0.6); text-transform: uppercase; letter-spacing: 0.05em;">
+            <th style="padding: 8px 12px; text-align: left; font-weight: 700;">Periodo</th>
+            <th style="padding: 8px 12px; text-align: right; font-weight: 700;">Importe Exceso</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${data.excessData.map(row => `
+            <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+              <td style="padding: 8px 12px; color: rgba(255,255,255,0.7);">${row.name}</td>
+              <td style="padding: 8px 12px; text-align: right; color: rgba(245, 158, 11, 0.8); font-family: monospace;">${row.excessAmount.toFixed(2)} €</td>
+            </tr>
+          `).join('')}
+        </tbody>
+        <tfoot>
+          <tr style="background: rgba(245, 158, 11, 0.1); border-top: 1px solid rgba(245, 158, 11, 0.3);">
+            <td style="padding: 8px 12px; font-weight: 700; color: #f59e0b;">TOTAL EXCESOS</td>
+            <td style="padding: 8px 12px; text-align: right; font-weight: 700; color: #f59e0b; font-family: monospace;">${data.totalExcessAmount.toFixed(2)} €</td>
+          </tr>
+        </tfoot>
+      </table>
+      <p style="text-align: center; font-size: 9px; color: rgba(245, 158, 11, 0.4); margin-top: 12px; font-style: italic;">
+        La detección de excesos sugiere que podría ser recomendable revisar el ajuste de la potencia contratada.
+      </p>
+    </div>
   ` : '';
 
   const pieLegend = data.pieData.map(item => `
@@ -1288,6 +1370,9 @@ function generateReportHTML(project: ProjectWorkspace): string {
       ${matrixEconomicaTotals ? `<tfoot>${matrixEconomicaTotals}</tfoot>` : ''}
     </table>
     <div style="margin-top: 12px; font-size: 9px; color: #facc15; text-transform: uppercase; letter-spacing: 0.05em;">Valores en amarillo son estimados (kWh × precio medio energia)</div>
+    
+    <!-- Excess Table - Conditional -->
+    ${excessTableHTML}
   </div>
 
   <!-- PAGE 7: CLOSING -->

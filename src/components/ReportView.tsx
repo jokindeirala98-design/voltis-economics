@@ -3,7 +3,7 @@
 import React, { useMemo, useRef, useEffect, useState, useCallback } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useReactToPrint } from 'react-to-print';
-import { ExtractedBill } from '@/lib/types';
+import { ExtractedBill, getExcessAmountFromBill } from '@/lib/types';
 import { 
   BarChart, Bar, XAxis, YAxis, Tooltip as RechartsTooltip, ResponsiveContainer, 
   PieChart, Pie, Cell, CartesianGrid
@@ -17,6 +17,14 @@ import { getAssignedMonth, parseSpanishDate, getMonthlyAggregatedData, CANONICAL
 import { HeroTitle } from './HeroTitle';
 
 gsap.registerPlugin(ScrollTrigger);
+
+interface ExcessRow {
+  id: string;
+  name: string;
+  fechaFin?: string;
+  excessAmount: number;
+  hasExcess: boolean;
+}
 
 interface ReportViewProps {
   bills: ExtractedBill[];
@@ -332,7 +340,7 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
     return validCups[0] || filteredValidBills[0]?.cups || 'CUPS NO DETECTADO';
   }, [filteredValidBills]);
 
-  const { chartData, pieData, summaryStats, tableData, periodData, averagePriceStats } = useMemo(() => {
+  const { chartData, pieData, summaryStats, tableData, periodData, averagePriceStats, excessData, totalExcessAmount, hasExcesses } = useMemo(() => {
     const periods = ['P1', 'P2', 'P3', 'P4', 'P5', 'P6'];
     const billsForSelectedMonths = filteredValidBills.filter(b => {
       const { month: monthIdx } = getAssignedMonth(b.fechaInicio, b.fechaFin);
@@ -381,15 +389,14 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
       totalKwh: p.totalKwh
     }));
 
-    // New precioPromedio = average of period averages (excluding periods with 0 kWh)
-    const validPeriods = periodAverages.filter(p => p.totalKwh > 0);
-    const newPrecioPromedio = validPeriods.length > 0
-      ? validPeriods.reduce((sum, p) => sum + p.avgPrice, 0) / validPeriods.length
-      : 0;
+    // NEW Global average price = weighted average (Total Net Energy / Total kWh)
+    const newPrecioPromedio = totals.kwh > 0 ? totals.energetic / totals.kwh : 0;
 
     // Keep the tableData as individual bills for the detailed matrix
     const tData = billsForSelectedMonths.map(b => {
       const energia = b.costeTotalConsumo || 0;
+      const energiaBruta = b.costeBrutoConsumo || b.costeTotalConsumo || 0;
+      const descuentoEnergia = b.descuentoEnergia || 0;
       const potencia = b.costeTotalPotencia || 0;
       let imp = 0, others = 0;
       [...(b.otrosConceptos || []), ...(customOCs[b.id] || [])].forEach(oc => {
@@ -398,10 +405,14 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
       });
       const totalF = energia + potencia + imp + others;
       const totalKwh = b.consumoTotalKwh || 0;
-      const avgPrice = b.costeMedioKwh || (totalKwh > 0 ? energia / totalKwh : 0);
+      const avgPrice = b.costeMedioKwhNeto || (totalKwh > 0 ? energia / totalKwh : 0);
 
-      // Calculate € spend per period for each bill
-      const avgEnergyPrice = totalKwh > 0 ? energia / totalKwh : 0;
+      // Calculate € spend per period for each bill using DISCOUNT-AWARE logic
+      // Calculate discount factor: if descuentoEnergia > 0, apply it proportionally
+      const discountFactor = (energiaBruta > 0 && descuentoEnergia > 0) 
+        ? energia / energiaBruta  // Net / Gross ratio = discount factor applied
+        : 1;
+      const avgEnergyPrice = totalKwh > 0 ? energia / totalKwh : 0; // Already net price
       const periodSpend = periods.map(period => {
         const consumoItem = b.consumo?.find(c => c.periodo === period);
         const kwh = consumoItem?.kwh || 0;
@@ -409,11 +420,19 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
         let isEstimated = false;
         if (consumoItem) {
           if (consumoItem.total !== undefined && consumoItem.total > 0) {
-            eur = consumoItem.total;
+            // If total is provided, check if it's gross or net
+            // If we have a discount, scale the period total proportionally
+            if (descuentoEnergia > 0 && energiaBruta > 0) {
+              // Scale gross period total to net
+              eur = consumoItem.total * discountFactor;
+            } else {
+              eur = consumoItem.total;
+            }
           } else if (consumoItem.precioKwh !== undefined && consumoItem.precioKwh > 0 && kwh > 0) {
-            eur = kwh * consumoItem.precioKwh;
+            // Apply discount to the price if discount exists
+            eur = kwh * consumoItem.precioKwh * discountFactor;
           } else if (kwh > 0 && avgEnergyPrice > 0) {
-            // Fallback: estimate using average energy price
+            // Fallback: estimate using average NET energy price (discount already included)
             eur = kwh * avgEnergyPrice;
             isEstimated = true;
           }
@@ -433,14 +452,20 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
         totalKwh,
         avgPrice,
         totalFactura: totalF,
-        energia, potencia, otros: imp + others, id: b.id,
+        energia, 
+        energiaBruta,
+        descuentoEnergia,
+        potencia, 
+        otros: imp + others, 
+        id: b.id,
+        // Net prices per period (with discount applied if any)
         prices: {
-          P1: b.consumo?.find(c => c.periodo === 'P1')?.precioKwh || 0,
-          P2: b.consumo?.find(c => c.periodo === 'P2')?.precioKwh || 0,
-          P3: b.consumo?.find(c => c.periodo === 'P3')?.precioKwh || 0,
-          P4: b.consumo?.find(c => c.periodo === 'P4')?.precioKwh || 0,
-          P5: b.consumo?.find(c => c.periodo === 'P5')?.precioKwh || 0,
-          P6: b.consumo?.find(c => c.periodo === 'P6')?.precioKwh || 0,
+          P1: (b.consumo?.find(c => c.periodo === 'P1')?.precioKwh || 0) * discountFactor,
+          P2: (b.consumo?.find(c => c.periodo === 'P2')?.precioKwh || 0) * discountFactor,
+          P3: (b.consumo?.find(c => c.periodo === 'P3')?.precioKwh || 0) * discountFactor,
+          P4: (b.consumo?.find(c => c.periodo === 'P4')?.precioKwh || 0) * discountFactor,
+          P5: (b.consumo?.find(c => c.periodo === 'P5')?.precioKwh || 0) * discountFactor,
+          P6: (b.consumo?.find(c => c.periodo === 'P6')?.precioKwh || 0) * discountFactor,
           P1_agg: b.consumo?.find(c => c.periodo === 'P1')?.isAggregate,
           P2_agg: b.consumo?.find(c => c.periodo === 'P2')?.isAggregate,
           P3_agg: b.consumo?.find(c => c.periodo === 'P3')?.isAggregate,
@@ -469,6 +494,24 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
       avgPrice: periodAverages[idx].avgPrice
     }));
 
+    // Extract power excess data from bills using robust detection
+    const excessData = billsForSelectedMonths
+      .map(b => {
+        const { totalExcess, concepts } = getExcessAmountFromBill(b);
+        return {
+          id: b.id,
+          name: getMonthYear(b.fechaFin),
+          fechaFin: b.fechaFin,
+          excessAmount: totalExcess,
+          conceptCount: concepts.length,
+          hasExcess: totalExcess > 0
+        };
+      })
+      .filter(b => b.hasExcess);
+
+    const totalExcessAmount = excessData.reduce((sum, b) => sum + b.excessAmount, 0);
+    const hasExcesses = totalExcessAmount > 0;
+
     const pData = [
       { name: 'Consumo Energía', value: totals.energetic, color: '#3b82f6' },
       { name: 'Potencia Contratada', value: totals.power, color: '#8b5cf6' },
@@ -482,7 +525,10 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
       summaryStats: { ...totals, precioPromedio: newPrecioPromedio },
       tableData: tData,
       periodData: periodTotalsEur,
-      averagePriceStats: periodAverages
+      averagePriceStats: periodAverages,
+      excessData,
+      totalExcessAmount,
+      hasExcesses
     };
   }, [filteredValidBills, customOCs, selectedMonths]);
 
@@ -533,11 +579,11 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
         </div>
 
         {/* NAV - Apple Glass Style */}
-        <div className="fixed top-6 left-6 right-6 flex items-center justify-between z-[100] no-print px-4">
-          <div className="flex items-center gap-4">
+        <div className="fixed top-3 left-3 right-3 md:top-6 md:left-6 md:right-6 flex items-center justify-between z-[100] no-print px-2 md:px-4 report-nav">
+          <div className="flex items-center gap-2 md:gap-4">
             {/* Circular Back Button */}
             <button onClick={onBack} className="back-btn" title="Volver">
-              <ArrowLeft className="w-5 h-5" />
+              <ArrowLeft className="w-4 h-4 md:w-5 md:h-5" />
             </button>
           </div>
           
@@ -631,18 +677,18 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
               </div>
             </section>
 
-            {/* ── PAGE 2: KPIs ── */}
+              {/* ── PAGE 2: KPIs ── */}
               {/* ── KPIs ── */}
-              <section id="scene-2" className="report-page flex flex-col justify-center px-16">
+              <section id="scene-2" className="report-page flex flex-col justify-center px-4 md:px-16">
                 <div className="w-full max-w-5xl mx-auto">
-                  <div className="mb-12 flex items-end justify-between border-b border-white/5 pb-8">
-                    <div className="space-y-3">
+                  <div className="mb-6 md:mb-12 flex flex-col md:flex-row items-start md:items-end justify-between gap-4 md:gap-0 border-b border-white/5 pb-4 md:pb-8">
+                    <div className="space-y-2 md:space-y-3">
                       <span className="text-[10px] font-black uppercase tracking-[0.5em] text-blue-500">Métricas Auditadas</span>
-                      <h3 className="text-6xl font-black tracking-tighter uppercase">Resultados {isAnnual ? 'Anuales' : 'Personalizados'}</h3>
+                      <h3 className="text-3xl md:text-6xl font-black tracking-tighter uppercase">Resultados {isAnnual ? 'Anuales' : 'Personalizados'}</h3>
                     </div>
-                    <div className="text-[10px] font-black text-slate-600 uppercase tracking-widest mb-2">v5.0 Certified Analysis</div>
+                    <div className="text-[10px] font-black text-slate-600 uppercase tracking-widest md:mb-2">v5.0 Certified Analysis</div>
                   </div>
-                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-6">
+                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-6 report-kpi-grid">
                     {[
                       { label: 'Facturación Global', value: summaryStats.global, unit: '€', icon: DollarSign, color: 'text-blue-500', dec: 2, clickable: false },
                       { label: 'Energía Absoluta', value: summaryStats.kwh, unit: 'kWh', icon: Zap, color: 'text-sky-400', dec: 0, clickable: false },
@@ -651,22 +697,22 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
                     ].map((kpi, i) => (
                       <div
                         key={i}
-                        className={`kpi-card kpi-glass-premium p-8 rounded-[40px] border relative overflow-hidden group ${kpi.clickable ? 'cursor-pointer hover:border-teal-500/40 hover:bg-teal-500/5 transition-all' : ''}`}
+                        className={`kpi-card kpi-glass-premium p-4 md:p-8 rounded-2xl md:rounded-[40px] border relative overflow-hidden group ${kpi.clickable ? 'cursor-pointer hover:border-teal-500/40 hover:bg-teal-500/5 transition-all' : ''}`}
                         onClick={kpi.clickable ? kpi.onClick : undefined}
                       >
-                        <div className={`w-14 h-14 rounded-2xl flex items-center justify-center mb-8 bg-white/10 border border-white/10 ${kpi.color} kpi-icon-glow`}>
-                          <kpi.icon className="w-7 h-7" />
+                        <div className={`w-10 h-10 md:w-14 md:h-14 rounded-xl md:rounded-2xl flex items-center justify-center mb-4 md:mb-8 bg-white/10 border border-white/10 ${kpi.color} kpi-icon-glow`}>
+                          <kpi.icon className="w-5 h-5 md:w-7 md:h-7" />
                         </div>
-                        <span className="text-[11px] font-black uppercase tracking-widest text-slate-400 block mb-2">{kpi.label}</span>
-                        <div className="flex items-baseline gap-2">
-                          <p className={`text-4xl font-black tracking-tighter tabular-nums ${kpi.clickable ? 'text-teal-400 group-hover:text-teal-300' : 'text-white'} transition-colors`}>
+                        <span className="text-[9px] md:text-[11px] font-black uppercase tracking-widest text-slate-400 block mb-1 md:mb-2">{kpi.label}</span>
+                        <div className="flex items-baseline gap-1 md:gap-2">
+                          <p className={`text-2xl md:text-4xl font-black tracking-tighter tabular-nums ${kpi.clickable ? 'text-teal-400 group-hover:text-teal-300' : 'text-white'} transition-colors`}>
                             <CountUp value={kpi.value} decimals={kpi.dec} />
                           </p>
-                          <span className="text-xs font-bold text-slate-500 uppercase">{kpi.unit}</span>
+                          <span className="text-[10px] md:text-xs font-bold text-slate-500 uppercase">{kpi.unit}</span>
                         </div>
                         {kpi.clickable && (
-                          <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <TrendingUp className="w-4 h-4 text-teal-400" />
+                          <div className="absolute top-2 right-2 md:top-4 md:right-4 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <TrendingUp className="w-3 h-3 md:w-4 md:h-4 text-teal-400" />
                           </div>
                         )}
                       </div>
@@ -676,24 +722,24 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
               </section>
 
               {/* ── PAGE 3: EVOLUCIÓN MENSUAL + BIO-ESTRUCTURA ── */}
-              <section id="scene-3" className="report-page flex flex-col justify-center px-16 gap-12">
-                <div className="w-full max-w-5xl mx-auto grid grid-cols-1 lg:grid-cols-5 gap-12">
+              <section id="scene-3" className="report-page flex flex-col justify-center px-4 md:px-16 gap-8 md:gap-12">
+                <div className="w-full max-w-5xl mx-auto grid grid-cols-1 lg:grid-cols-5 gap-8 md:gap-12">
                   {/* Chart */}
-                  <div className="lg:col-span-3 flex flex-col gap-6">
+                  <div className="lg:col-span-3 flex flex-col gap-4 md:gap-6">
                     <div>
                       <span className="text-[10px] font-black uppercase tracking-[0.5em] text-blue-500 block">Digital Flow 03</span>
-                      <h3 className="text-4xl font-black tracking-tighter uppercase leading-[0.9]">Evolución Mensual</h3>
-                      <p className="text-slate-400 text-sm font-medium mt-2">Esta es tu curva de consumo anual.</p>
+                      <h3 className="text-2xl md:text-4xl font-black tracking-tighter uppercase leading-[0.9]">Evolución Mensual</h3>
+                      <p className="text-slate-400 text-xs md:text-sm font-medium mt-2">Esta es tu curva de consumo anual.</p>
                     </div>
-                    <div className="flex-1 w-full glass p-6 rounded-[40px] border border-white/5 overflow-visible" style={{ height: 350, minHeight: 350 }}>
+                    <div className="flex-1 w-full glass p-3 md:p-6 rounded-2xl md:rounded-[40px] border border-white/5 overflow-visible" style={{ height: 250, minHeight: 250 }}>
                       {!isExportMode ? (
-                        <ResponsiveContainer width="100%" height={330}>
-                          <BarChart data={chartData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+                        <ResponsiveContainer width="100%" height={230}>
+                          <BarChart data={chartData} margin={{ top: 5, right: 5, left: -15, bottom: 0 }}>
                             <CartesianGrid strokeDasharray="5 5" stroke="rgba(255,255,255,0.03)" vertical={false} />
-                            <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fill: 'rgba(255,255,255,0.3)', fontSize: 11, fontWeight: 900 }} dy={10} interval={0} />
-                            <YAxis axisLine={false} tickLine={false} tick={{ fill: 'rgba(255,255,255,0.2)', fontSize: 9, fontWeight: 900 }} />
+                            <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fill: 'rgba(255,255,255,0.3)', fontSize: 8, fontWeight: 900 }} dy={8} interval={0} tickFormatter={(val) => val.slice(0, 3)} />
+                            <YAxis axisLine={false} tickLine={false} tick={{ fill: 'rgba(255,255,255,0.2)', fontSize: 7, fontWeight: 900 }} width={40} tickFormatter={(val) => val >= 1000 ? `${(val/1000).toFixed(0)}k` : val} />
                             <RechartsTooltip content={<CustomBarTooltip />} cursor={{ fill: 'rgba(59, 130, 246, 0.05)' }} />
-                            <Bar dataKey="totalFactura" fill="url(#blueGrad)" radius={[6, 6, 0, 0]} barSize={32} minPointSize={3}>
+                            <Bar dataKey="totalFactura" fill="url(#blueGrad)" radius={[4, 4, 0, 0]} barSize={18} minPointSize={2}>
                               {chartData.map((entry: any, index: number) => (
                                 <Cell key={`cell-${index}`} fillOpacity={Math.abs(entry.totalFactura) < 0.01 ? 0.15 : 1} />
                               ))}
@@ -707,11 +753,11 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
                           </BarChart>
                         </ResponsiveContainer>
                       ) : (
-                        <BarChart width={750} height={330} data={chartData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+                        <BarChart width={600} height={230} data={chartData} margin={{ top: 5, right: 5, left: -15, bottom: 0 }}>
                           <CartesianGrid strokeDasharray="5 5" stroke="rgba(255,255,255,0.03)" vertical={false} />
-                          <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fill: 'rgba(255,255,255,0.3)', fontSize: 11, fontWeight: 900 }} dy={10} interval={0} />
-                          <YAxis axisLine={false} tickLine={false} tick={{ fill: 'rgba(255,255,255,0.2)', fontSize: 9, fontWeight: 900 }} />
-                          <Bar dataKey="totalFactura" fill="#3b82f6" radius={[6, 6, 0, 0]} barSize={32} isAnimationActive={false}>
+                          <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fill: 'rgba(255,255,255,0.3)', fontSize: 8, fontWeight: 900 }} dy={8} interval={0} tickFormatter={(val) => val.slice(0, 3)} />
+                          <YAxis axisLine={false} tickLine={false} tick={{ fill: 'rgba(255,255,255,0.2)', fontSize: 7, fontWeight: 900 }} width={40} tickFormatter={(val) => val >= 1000 ? `${(val/1000).toFixed(0)}k` : val} />
+                          <Bar dataKey="totalFactura" fill="#3b82f6" radius={[4, 4, 0, 0]} barSize={18} isAnimationActive={false}>
                             {chartData.map((entry: any, index: number) => (
                               <Cell key={`cell-${index}`} fillOpacity={1} />
                             ))}
@@ -722,39 +768,39 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
                   </div>
 
                   {/* Pie */}
-                  <div className="lg:col-span-2 flex flex-col gap-6">
+                  <div className="lg:col-span-2 flex flex-col gap-4 md:gap-6">
                     <div>
                       <span className="text-[10px] font-black uppercase tracking-[0.8em] text-blue-500">Visual 04</span>
-                      <h3 className="text-4xl font-black tracking-tighter uppercase leading-[0.9]">Bio-Estructura Económica</h3>
+                      <h3 className="text-2xl md:text-4xl font-black tracking-tighter uppercase leading-[0.9]">Bio-Estructura Económica</h3>
                     </div>
-                    <div className="lg:col-span-2 w-full glass p-8 rounded-[40px] border border-white/5 flex items-center justify-center relative overflow-visible" style={{ height: 350, minHeight: 350 }}>
+                    <div className="w-full glass p-3 md:p-8 rounded-2xl md:rounded-[40px] border border-white/5 flex items-center justify-center relative overflow-visible" style={{ height: 250, minHeight: 250 }}>
                       {!isExportMode ? (
-                        <ResponsiveContainer width="100%" height={330}>
+                        <ResponsiveContainer width="100%" height={230}>
                           <PieChart>
-                            <Pie data={pieData} cx="50%" cy="50%" innerRadius={60} outerRadius={85} paddingAngle={6} dataKey="value" stroke="none">
+                            <Pie data={pieData} cx="50%" cy="50%" innerRadius={40} outerRadius={60} paddingAngle={6} dataKey="value" stroke="none">
                               {pieData.map((e: any, i: number) => <Cell key={i} fill={e.color} />)}
                             </Pie>
                           </PieChart>
                         </ResponsiveContainer>
                       ) : (
-                        <PieChart width={350} height={330}>
-                          <Pie data={pieData} cx="50%" cy="50%" innerRadius={60} outerRadius={85} paddingAngle={6} dataKey="value" stroke="none" isAnimationActive={false}>
+                        <PieChart width={250} height={230}>
+                          <Pie data={pieData} cx="50%" cy="50%" innerRadius={40} outerRadius={60} paddingAngle={6} dataKey="value" stroke="none" isAnimationActive={false}>
                             {pieData.map((e: any, i: number) => <Cell key={i} fill={e.color} />)}
                           </Pie>
                         </PieChart>
                       )}
                       <div className="absolute flex flex-col items-center pointer-events-none">
-                        <span className="text-3xl font-black tracking-tighter">{summaryStats.global.toLocaleString('es-ES', { maximumFractionDigits: 0 })}€</span>
+                        <span className="text-xl md:text-3xl font-black tracking-tighter">{summaryStats.global.toLocaleString('es-ES', { maximumFractionDigits: 0 })}€</span>
                       </div>
                     </div>
                     <div className="space-y-2">
                       {pieData.map((item: any, i) => (
-                        <div key={i} className="flex items-center justify-between p-4 rounded-2xl bg-white/[0.02] border border-white/5">
-                          <div className="flex items-center gap-3">
-                            <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: item.color }} />
-                            <span className="text-xs font-black text-white/70 uppercase">{item.name}</span>
+                        <div key={i} className="flex items-center justify-between p-3 md:p-4 rounded-xl md:rounded-2xl bg-white/[0.02] border border-white/5">
+                          <div className="flex items-center gap-2 md:gap-3">
+                            <div className="w-2 h-2 md:w-2.5 md:h-2.5 rounded-full" style={{ backgroundColor: item.color }} />
+                            <span className="text-[10px] md:text-xs font-black text-white/70 uppercase truncate max-w-[100px] md:max-w-none">{item.name}</span>
                           </div>
-                          <span className="text-sm font-black text-blue-400">{((item.value / summaryStats.global) * 100).toFixed(2)}%</span>
+                          <span className="text-xs md:text-sm font-black text-blue-400">{((item.value / summaryStats.global) * 100).toFixed(2)}%</span>
                         </div>
                       ))}
                     </div>
@@ -763,11 +809,11 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
               </section>
 
             {/* ── PAGE 4: MATRIZ ENERGÉTICA ── */}
-            <section id="scene-4" className={`report-page flex flex-col justify-start px-10 ${isExportMode ? 'pt-10' : 'pt-20'}`}>
-              <div className="max-w-6xl w-full mx-auto space-y-8">
+            <section id="scene-4" className={`report-page flex flex-col justify-start px-4 md:px-10 ${isExportMode ? 'pt-10' : 'pt-16 md:pt-20'}`}>
+              <div className="max-w-6xl w-full mx-auto space-y-6 md:space-y-8 overflow-x-auto">
                 <div className="text-center space-y-2">
                   <span className="text-[10px] font-black uppercase tracking-[1em] text-blue-500">Engineering Matrix</span>
-                  <h3 className="text-5xl font-black tracking-tighter uppercase">Audit Matrix Pro</h3>
+                  <h3 className="text-3xl md:text-5xl font-black tracking-tighter uppercase">Audit Matrix Pro</h3>
                 </div>
                 <MatrixTable
                   title="Matriz Energética Mensual (kWh)"
@@ -785,8 +831,8 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
             </section>
 
             {/* ── PAGE 5: MATRIZ DE COSTE x PERIODO ── */}
-            <section id="scene-5" className={`report-page flex flex-col justify-start px-10 ${isExportMode ? 'pt-10' : 'pt-20'}`}>
-              <div className="max-w-6xl w-full mx-auto space-y-8">
+            <section id="scene-5" className={`report-page flex flex-col justify-start px-4 md:px-10 ${isExportMode ? 'pt-10' : 'pt-16 md:pt-20'}`}>
+              <div className="max-w-6xl w-full mx-auto space-y-6 md:space-y-8 overflow-x-auto">
                 <MatrixTable
                   title="Matriz de Coste x Periodo (€/kWh)"
                   color="text-cyan-400"
@@ -803,92 +849,137 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
               </div>
             </section>
 
-            {/* ── PAGE 6: MATRIZ ECONÓMICA INTEGRAL ── */}
-            <section id="scene-6" className={`report-page flex flex-col justify-start px-10 ${isExportMode ? 'pt-10' : 'pt-20'}`}>
-              <div className="max-w-6xl w-full mx-auto space-y-8">
+            {/* ── PAGE 6: MATRIZ DE GASTO POR PERIODO (ORIGINAL SIMPLE FORMAT) ── */}
+            <section id="scene-6" className={`report-page flex flex-col justify-start px-4 md:px-10 ${isExportMode ? 'pt-10' : 'pt-16 md:pt-20'}`}>
+              <div className="max-w-6xl w-full mx-auto space-y-6 md:space-y-8">
+                {/* Simplified economic matrix - original format */}
                 <div className="space-y-4 w-full">
-                  <h4 className="text-[11px] font-black uppercase tracking-[0.6em] text-indigo-400 flex items-center justify-between px-4">
-                    <div className="flex items-center gap-3">
-                      <Activity className="w-4 h-4" /> Matriz Económica Integral (€ por Periodo)
+                  <h4 className="text-[10px] md:text-[11px] font-black uppercase tracking-[0.6em] text-indigo-400 flex flex-col md:flex-row items-start md:items-center justify-between gap-2 px-2 md:px-4">
+                    <div className="flex items-center gap-2 md:gap-3">
+                      <Activity className="w-3 h-3 md:w-4 md:h-4" /> Matriz de Gasto por Periodo (€)
                     </div>
-                    <span className="text-[8px] opacity-30 lowercase tracking-normal font-medium no-print">Gasto en euros por periodo</span>
+                    <span className="text-[8px] opacity-30 lowercase tracking-normal font-medium no-print">Gasto en euros por periodo (precio neto)</span>
                   </h4>
-                  <div className="glass p-2 rounded-[40px] border border-white/5 overflow-visible bg-slate-900/10">
-                    <table className="w-full text-left border-collapse text-[10px]">
+                  <div className="glass p-2 rounded-2xl md:rounded-[40px] border border-white/5 overflow-visible bg-slate-900/10">
+                    <div className="overflow-x-auto mobile-table-scroll scrollable-matrix">
+                    <table className="w-full text-left border-collapse text-[9px] md:text-[10px] matrix-table">
                       <thead className="bg-slate-900/30 font-black uppercase tracking-widest text-slate-500">
                         <tr>
-                          <th className="px-6 py-5">Mes</th>
-                          {['P1','P2','P3','P4','P5','P6'].map(p => <th key={p} className="px-3 py-5 text-center">{p}</th>)}
-                          <th className="px-6 py-5 text-right">Total €</th>
-                          <th className="px-4 py-5 text-center no-print"></th>
+                          <th className="px-2 md:px-6 py-3 md:py-5">Mes</th>
+                          <th className="px-1 md:px-3 py-3 md:py-5 text-center hidden sm:table-cell">kWh</th>
+                          <th className="px-1 md:px-3 py-3 md:py-5 text-center text-blue-400">Energía (€)</th>
+                          <th className="px-1 md:px-3 py-3 md:py-5 text-center hidden lg:table-cell">Potencia</th>
+                          <th className="px-1 md:px-3 py-3 md:py-5 text-center hidden xl:table-cell">Otros</th>
+                          <th className="px-1 md:px-3 py-3 md:py-5 text-center">€/kWh</th>
+                          <th className="px-2 md:px-6 py-3 md:py-5 text-right">Total €</th>
+                          <th className="px-2 md:px-4 py-3 md:py-5 text-center no-print"></th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-white/[0.03]">
                         {tableData.map((row: any, idx: number) => (
                           <tr key={idx} className="hover:bg-white/[0.02] transition-all group cursor-pointer" onClick={() => setSelectedBillId(row.id)}>
-                            <td className="px-6 py-4 font-black text-white italic uppercase text-[11px]">{row.name}</td>
-                            {(['P1', 'P2', 'P3', 'P4', 'P5', 'P6'] as const).map(period => {
-                              const ps = row.periodSpend?.[period];
-                              const value = ps?.eur || 0;
-                              const isEstimated = ps?.isEstimated || false;
-                              return (
-                                <td key={period} className="px-3 py-4 text-center group-hover:text-slate-300 text-[9px]">
-                                  {value > 0 ? (
-                                    <span className={`font-bold ${isEstimated ? 'text-yellow-400' : 'text-slate-500'}`}>
-                                      {value.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                      {isEstimated && <span className="block text-[7px] text-yellow-500/60 mt-0.5">est.</span>}
-                                    </span>
-                                  ) : '-'}
-                                </td>
-                              );
-                            })}
-                            <td className="px-6 py-4 text-right font-black text-indigo-400 text-[13px]">
-                              {row.periodSpend?.totalEur?.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                            <td className="px-2 md:px-6 py-2 md:py-4 font-black text-white italic uppercase text-[9px] md:text-[11px]">{row.name}</td>
+                            <td className="px-1 md:px-3 py-2 md:py-4 text-center text-slate-400 font-bold hidden sm:table-cell">{row.totalKwh.toLocaleString('es-ES', { maximumFractionDigits: 0 })}</td>
+                            <td className="px-1 md:px-3 py-2 md:py-4 text-center text-blue-400 font-black">{row.energia.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €</td>
+                            <td className="px-1 md:px-3 py-2 md:py-4 text-center text-slate-500 font-bold hidden lg:table-cell">{row.potencia.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €</td>
+                            <td className="px-1 md:px-3 py-2 md:py-4 text-center text-slate-500 font-bold hidden xl:table-cell">{row.otros.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €</td>
+                            <td className="px-1 md:px-3 py-2 md:py-4 text-center text-cyan-400/80 font-black italic">{row.avgPrice.toLocaleString('es-ES', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}</td>
+                            <td className="px-2 md:px-6 py-2 md:py-4 text-right font-black text-indigo-400 text-[11px] md:text-[13px]">
+                              {row.totalFactura.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
                             </td>
-                            <td className="px-4 py-4 text-center no-print">
+                            <td className="px-2 md:px-4 py-2 md:py-4 text-center no-print">
                               <button
                                 onClick={(e) => { e.stopPropagation(); onPreviewBill?.(row.id); }}
-                                className="p-2 rounded-xl bg-white/5 hover:bg-blue-600/20 text-slate-500 hover:text-blue-400 transition-all border border-white/5"
+                                className="p-1.5 md:p-2 rounded-xl bg-white/5 hover:bg-blue-600/20 text-slate-500 hover:text-blue-400 transition-all border border-white/5 touch-target"
                                 title="Ver factura original"
                               >
-                                <FileText className="w-3.5 h-3.5" />
+                                <FileText className="w-3 h-3 md:w-3.5 md:h-3.5" />
                               </button>
                             </td>
                           </tr>
                         ))}
                       </tbody>
-                      {periodData && periodData.length > 0 && (
+                      {tableData && tableData.length > 0 && (
                         <tfoot>
                           <tr className="bg-indigo-500/10 border-t-2 border-indigo-500/40">
-                            <td className="px-6 py-4 font-black text-indigo-400 uppercase text-[11px]">TOTAL</td>
-                            {(['P1', 'P2', 'P3', 'P4', 'P5', 'P6'] as const).map((period, idx) => (
-                              <td key={period} className="px-3 py-4 text-center font-black text-indigo-400 text-[10px]">
-                                {periodData[idx]?.totalEur > 0 ? periodData[idx]?.totalEur.toLocaleString('es-ES', { maximumFractionDigits: 2 }) : '-'}
-                              </td>
-                            ))}
-                            <td className="px-6 py-4 text-right font-black text-indigo-400 text-[14px]">
-                              {periodData.reduce((sum, p) => sum + p.totalEur, 0).toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                            <td className="px-2 md:px-6 py-2 md:py-4 font-black text-indigo-400 uppercase text-[9px] md:text-[11px]">TOTAL</td>
+                            <td className="px-1 md:px-3 py-2 md:py-4 text-center font-black text-indigo-400/80 hidden sm:table-cell">
+                              {tableData.reduce((sum: number, r: any) => sum + r.totalKwh, 0).toLocaleString('es-ES', { maximumFractionDigits: 0 })}
                             </td>
-                            <td className="px-4 py-4 text-center no-print"></td>
+                            <td className="px-1 md:px-3 py-2 md:py-4 text-center font-black text-blue-400">
+                              {tableData.reduce((sum: number, r: any) => sum + r.energia, 0).toLocaleString('es-ES', { minimumFractionDigits: 2 })} €
+                            </td>
+                            <td className="px-1 md:px-3 py-2 md:py-4 text-center font-black text-indigo-400/80 hidden lg:table-cell">
+                              {tableData.reduce((sum: number, r: any) => sum + r.potencia, 0).toLocaleString('es-ES', { minimumFractionDigits: 2 })} €
+                            </td>
+                            <td className="px-1 md:px-3 py-2 md:py-4 text-center font-black text-indigo-400/80 hidden xl:table-cell">
+                              {tableData.reduce((sum: number, r: any) => sum + r.otros, 0).toLocaleString('es-ES', { minimumFractionDigits: 2 })} €
+                            </td>
+                            <td className="px-1 md:px-3 py-2 md:py-4 text-center font-black text-cyan-400 italic">
+                              {(tableData.reduce((sum: number, r: any) => sum + r.energia, 0) / (tableData.reduce((sum: number, r: any) => sum + r.totalKwh, 0) || 1)).toLocaleString('es-ES', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
+                            </td>
+                            <td className="px-2 md:px-6 py-2 md:py-4 text-right font-black text-indigo-400 text-[12px] md:text-[14px]">
+                              {tableData.reduce((sum: number, r: any) => sum + r.totalFactura, 0).toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                            </td>
+                            <td className="px-2 md:px-4 py-2 md:py-4 text-center no-print"></td>
                           </tr>
                         </tfoot>
                       )}
                     </table>
+                    </div>
                   </div>
-                  <p className="text-center text-[10px] text-yellow-500/60 uppercase tracking-widest">Los valores en amarillo son estimados (fallback: kWh × precio medio energia)</p>
+                  <p className="text-center text-[10px] text-yellow-500/60 uppercase tracking-widest hidden md:block">Gasto energético calculado con precio neto (descuentos aplicados)</p>
                 </div>
+
+                {/* ── EXCESS TABLE: Only show if there are power excesses ── */}
+                {hasExcesses && (
+                  <div className="space-y-4 w-full mt-8">
+                    <div className="glass p-4 md:p-6 rounded-2xl border border-amber-500/20 bg-gradient-to-br from-amber-500/5 to-transparent">
+                      <h4 className="text-[10px] md:text-[11px] font-black uppercase tracking-[0.4em] text-amber-400/80 flex items-center gap-2 mb-3">
+                        <Activity className="w-3 h-3" /> Seguimiento de excesos de potencia
+                      </h4>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left border-collapse text-[9px] md:text-[10px]">
+                          <thead>
+                            <tr className="bg-amber-500/10 font-black uppercase tracking-wider text-amber-400/60">
+                              <th className="px-3 md:px-4 py-2 md:py-3">Periodo</th>
+                              <th className="px-3 md:px-4 py-2 md:py-3 text-right">Importe Exceso</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-white/[0.05]">
+                            {excessData.map((row: any, idx: number) => (
+                              <tr key={idx} className="hover:bg-white/[0.02] transition-colors">
+                                <td className="px-3 md:px-4 py-2 md:py-3 font-bold text-slate-300">{row.name}</td>
+                                <td className="px-3 md:px-4 py-2 md:py-3 text-right font-mono text-amber-400/80">{row.excessAmount.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                          <tfoot>
+                            <tr className="bg-amber-500/10 border-t border-amber-500/30">
+                              <td className="px-3 md:px-4 py-2 md:py-3 font-black text-amber-300">TOTAL EXCESOS</td>
+                              <td className="px-3 md:px-4 py-2 md:py-3 text-right font-black text-amber-300">{totalExcessAmount.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €</td>
+                            </tr>
+                          </tfoot>
+                        </table>
+                      </div>
+                      <p className="text-center text-[9px] text-amber-400/40 mt-3 italic">
+                        La detección de excesos sugiere que podría ser recomendable revisar el ajuste de la potencia contratada.
+                      </p>
+                    </div>
+                  </div>
+                )}
               </div>
             </section>
 
             {/* ── PAGE 7: LISTO PARA OPTIMIZAR ── */}
-            <section id="scene-7" className={`report-page relative flex flex-col items-center justify-center overflow-hidden ${isExportMode ? 'p-6 min-h-[400px]' : 'p-12 min-h-screen'}`}>
+            <section id="scene-7" className={`report-page relative flex flex-col items-center justify-center overflow-hidden ${isExportMode ? 'p-4 md:p-6 min-h-[400px]' : 'p-6 md:p-12 min-h-screen'}`}>
               <GlowOrb className="top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 opacity-30 parallax-bg" size="xl" />
               
-              <div className={`max-w-3xl w-full flex flex-col items-center text-center relative z-10 ${isExportMode ? 'space-y-8' : 'space-y-12'}`}>
+              <div className={`max-w-3xl w-full flex flex-col items-center text-center relative z-10 ${isExportMode ? 'space-y-6 md:space-y-8' : 'space-y-8 md:space-y-12'}`}>
                 {/* Voltis Logo */}
-                <div className="flex flex-col items-center gap-6">
-                  <h3 className="text-7xl md:text-[100px] font-black uppercase tracking-tighter leading-[0.7] text-glow-pulse">LISTO PARA OPTIMIZAR</h3>
-                  <p className="text-xl text-slate-400 font-medium opacity-50">Auditoría de Precisión Finalizada</p>
+                <div className="flex flex-col items-center gap-4 md:gap-6">
+                  <h3 className="text-4xl md:text-7xl lg:text-[100px] font-black uppercase tracking-tighter leading-[0.7] text-glow-pulse">LISTO PARA OPTIMIZAR</h3>
+                  <p className="text-base md:text-xl text-slate-400 font-medium opacity-50">Auditoría de Precisión Finalizada</p>
                 </div>
 
                 {/* GENERAR PDF Button - Centered, Premium */}
@@ -939,27 +1030,27 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
                       toast.error(err.message || 'Error al generar PDF');
                     }
                   }}
-                  className="no-print flex items-center gap-3 px-10 py-4 rounded-full bg-blue-600 hover:bg-blue-500 text-white font-black text-sm uppercase tracking-wider shadow-2xl shadow-blue-500/30 transition-all min-w-[300px] justify-center"
+                  className="no-print flex items-center gap-2 md:gap-3 px-6 md:px-10 py-3 md:py-4 rounded-full bg-blue-600 hover:bg-blue-500 text-white font-black text-xs md:text-sm uppercase tracking-wider shadow-2xl shadow-blue-500/30 transition-all min-w-[240px] md:min-w-[300px] justify-center touch-target"
                 >
-                  <Cpu className="w-5 h-5" /> GENERAR PDF
+                  <Cpu className="w-4 h-4 md:w-5 md:h-5" /> GENERAR PDF
                 </button>
 
                 {/* Minimal Email Form - Apple Glass Style */}
                 <form 
                   onSubmit={handleSendEmail} 
-                  className="flex items-center gap-2 mt-8 no-print p-0 bg-transparent border-none w-full max-w-sm justify-center"
+                  className="flex flex-col sm:flex-row items-center gap-2 mt-4 md:mt-8 no-print p-0 bg-transparent border-none w-full max-w-sm justify-center"
                 >
                   <input
                     type="email"
                     value={email}
                     onChange={e => setEmail(e.target.value)}
                     placeholder="correo@ejemplo.com"
-                    className="h-10 px-4 bg-white/5 border border-white/10 rounded-full text-[#f5f5f7] text-xs placeholder:text-white/40 backdrop-blur-md focus:outline-none focus:border-white/30 focus:ring-1 focus:ring-white/10 transition-all w-64"
+                    className="h-10 px-4 bg-white/5 border border-white/10 rounded-full text-[#f5f5f7] text-xs placeholder:text-white/40 backdrop-blur-md focus:outline-none focus:border-white/30 focus:ring-1 focus:ring-white/10 transition-all w-full sm:w-64"
                   />
                   <button
                     type="submit"
                     disabled={isSending || isSent}
-                    className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${
+                    className={`w-full sm:w-auto h-10 rounded-full flex items-center justify-center transition-all ${
                       isSent ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : 
                       'bg-white/10 border border-white/20 text-white/70 hover:bg-white/20 hover:scale-105 active:scale-95'
                     } disabled:opacity-50`}
@@ -1527,73 +1618,75 @@ function MatrixTable({ title, color, tableData, dataKey, unit, decimals, isTop3,
   } : null;
 
   return (
-    <div className="space-y-4 w-full">
-      <h4 className={`text-[11px] font-black uppercase tracking-[0.6em] ${color} flex items-center justify-between px-4`}>
-        <div className="flex items-center gap-3">
-          <Activity className="w-4 h-4" /> {title}
+    <div className="space-y-3 md:space-y-4 w-full">
+      <h4 className={`text-[10px] md:text-[11px] font-black uppercase tracking-[0.6em] ${color} flex flex-col sm:flex-row items-start sm:items-center justify-between gap-1 px-2 sm:px-4`}>
+        <div className="flex items-center gap-2 md:gap-3">
+          <Activity className="w-3 h-3 md:w-4 md:h-4" /> {title}
         </div>
-        <span className="text-[8px] opacity-30 lowercase tracking-normal font-medium no-print">Click para detalles • Preview disponible</span>
+        <span className="text-[8px] opacity-30 lowercase tracking-normal font-medium no-print">Click para detalles</span>
       </h4>
-      <div className="glass p-2 rounded-[40px] border border-white/5 overflow-visible bg-slate-900/10">
-        <table className="w-full text-left border-collapse text-[10px]">
-          <thead className="bg-slate-900/30 font-black uppercase tracking-widest text-slate-500">
-            <tr>
-              <th className="px-6 py-5">Mes</th>
-              {['P1','P2','P3','P4','P5','P6'].map(p => <th key={p} className="px-3 py-5 text-center">{p}</th>)}
-              <th className="px-6 py-5 text-right">MAGNITUD</th>
-              <th className="px-4 py-5 text-center no-print"></th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-white/[0.03]">
-            {tableData.map((row, idx) => {
-              const val = row[dataKey];
-              const isTopRow = top3Indices.has(idx) && val > 0;
-              return (
-                <tr key={idx} className="hover:bg-white/[0.02] transition-all group cursor-pointer" onClick={() => onRowClick(row.id)}>
-                  <td className="px-6 py-4 font-black text-white italic uppercase text-[11px]">{row.name}</td>
-                  {[1,2,3,4,5,6].map(p => {
-                    const price = isPriceMatrix ? row.prices[`P${p}`] : row[`P${p}`];
-                    const isAgg = isPriceMatrix && row.prices[`P${p}_agg`];
-                    return (
-                      <td key={p} className="px-3 py-4 text-center text-slate-500 font-bold group-hover:text-slate-300 text-[9px]">
-                        {isPriceMatrix ? price.toFixed(4) : Number(price).toLocaleString('es-ES', { maximumFractionDigits: 2 })}
-                        {isAgg && <span className="block text-[7px] text-blue-400 mt-0.5 opacity-60">ATR+C</span>}
-                      </td>
-                    );
-                  })}
-                  <td className={`px-6 py-4 text-right font-black text-[13px] transition-all ${isTopRow ? 'text-red-500' : color}`}>
-                    {val.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {unit}
-                  </td>
-                  <td className="px-4 py-4 text-center no-print">
-                    <button 
-                      onClick={(e) => { e.stopPropagation(); onPreviewBill?.(row.id); }}
-                      className="p-2 rounded-xl bg-white/5 hover:bg-blue-600/20 text-slate-500 hover:text-blue-400 transition-all border border-white/5"
-                      title="Ver factura original"
-                    >
-                      <FileText className="w-3.5 h-3.5" />
-                    </button>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-          {showTotals && totals && (
-            <tfoot>
-              <tr className="bg-blue-500/10 border-t-2 border-blue-500/40">
-                <td className="px-6 py-4 font-black text-blue-400 uppercase text-[11px]">TOTAL</td>
-                {(['P1', 'P2', 'P3', 'P4', 'P5', 'P6'] as const).map(key => (
-                  <td key={key} className="px-3 py-4 text-center font-black text-blue-400 text-[10px]">
-                    {totals[key].toLocaleString('es-ES', { maximumFractionDigits: 2 })}
-                  </td>
-                ))}
-                <td className="px-6 py-4 text-right font-black text-blue-400 text-[14px]">
-                  {totals.totalKwh.toLocaleString('es-ES', { maximumFractionDigits: 2 })} {unit}
-                </td>
-                <td className="px-4 py-4 text-center no-print"></td>
+      <div className="glass p-2 rounded-xl md:rounded-[40px] border border-white/5 overflow-visible bg-slate-900/10">
+        <div className="overflow-x-auto mobile-table-scroll scrollable-matrix">
+          <table className="w-full text-left border-collapse text-[9px] md:text-[10px]">
+            <thead className="bg-slate-900/30 font-black uppercase tracking-widest text-slate-500">
+              <tr>
+                <th className="px-3 md:px-6 py-3 md:py-5">Mes</th>
+                {['P1','P2','P3','P4','P5','P6'].map(p => <th key={p} className="px-1 md:px-3 py-3 md:py-5 text-center">{p}</th>)}
+                <th className="px-3 md:px-6 py-3 md:py-5 text-right">Total</th>
+                <th className="px-2 md:px-4 py-3 md:py-5 text-center no-print"></th>
               </tr>
-            </tfoot>
-          )}
-        </table>
+            </thead>
+            <tbody className="divide-y divide-white/[0.03]">
+              {tableData.map((row, idx) => {
+                const val = row[dataKey];
+                const isTopRow = top3Indices.has(idx) && val > 0;
+                return (
+                  <tr key={idx} className="hover:bg-white/[0.02] transition-all group cursor-pointer" onClick={() => onRowClick(row.id)}>
+                    <td className="px-3 md:px-6 py-2 md:py-4 font-black text-white italic uppercase text-[9px] md:text-[11px]">{row.name}</td>
+                    {[1,2,3,4,5,6].map(p => {
+                      const price = isPriceMatrix ? row.prices[`P${p}`] : row[`P${p}`];
+                      const isAgg = isPriceMatrix && row.prices[`P${p}_agg`];
+                      return (
+                        <td key={p} className="px-1 md:px-3 py-2 md:py-4 text-center text-slate-500 font-bold group-hover:text-slate-300 text-[8px] md:text-[9px]">
+                          {isPriceMatrix ? price.toFixed(4) : Number(price).toLocaleString('es-ES', { maximumFractionDigits: 1 })}
+                          {isAgg && <span className="block text-[7px] text-blue-400 mt-0.5 opacity-60">ATR+C</span>}
+                        </td>
+                      );
+                    })}
+                    <td className={`px-3 md:px-6 py-2 md:py-4 text-right font-black text-[11px] md:text-[13px] transition-all ${isTopRow ? 'text-red-500' : color}`}>
+                      {val.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {unit}
+                    </td>
+                    <td className="px-2 md:px-4 py-2 md:py-4 text-center no-print">
+                      <button 
+                        onClick={(e) => { e.stopPropagation(); onPreviewBill?.(row.id); }}
+                        className="p-1.5 md:p-2 rounded-xl bg-white/5 hover:bg-blue-600/20 text-slate-500 hover:text-blue-400 transition-all border border-white/5 touch-target"
+                        title="Ver factura original"
+                      >
+                        <FileText className="w-3 h-3 md:w-3.5 md:h-3.5" />
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+            {showTotals && totals && (
+              <tfoot>
+                <tr className="bg-blue-500/10 border-t-2 border-blue-500/40">
+                  <td className="px-3 md:px-6 py-2 md:py-4 font-black text-blue-400 uppercase text-[9px] md:text-[11px]">TOTAL</td>
+                  {(['P1', 'P2', 'P3', 'P4', 'P5', 'P6'] as const).map(key => (
+                    <td key={key} className="px-1 md:px-3 py-2 md:py-4 text-center font-black text-blue-400 text-[9px] md:text-[10px]">
+                      {totals[key].toLocaleString('es-ES', { maximumFractionDigits: 1 })}
+                    </td>
+                  ))}
+                  <td className="px-3 md:px-6 py-2 md:py-4 text-right font-black text-blue-400 text-[11px] md:text-[14px]">
+                    {totals.totalKwh.toLocaleString('es-ES', { maximumFractionDigits: 2 })} {unit}
+                  </td>
+                  <td className="px-2 md:px-4 py-2 md:py-4 text-center no-print"></td>
+                </tr>
+              </tfoot>
+            )}
+          </table>
+        </div>
       </div>
     </div>
   );

@@ -16,6 +16,10 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Voltis Anual Economics",
   description: "Sistema experto de análisis energético y optimización de facturas.",
+  icons: {
+    icon: "/mascota-transparente.png",
+    apple: "/mascota-transparente.png",
+  },
 };
 
 

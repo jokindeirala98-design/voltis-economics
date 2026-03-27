@@ -116,59 +116,104 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'No file provided' }, { status: 400 });
     }
 
-    console.log(`[PROCESS_FLOW][${requestId}] Processing file: ${file.name} (${file.size} bytes)`);
+    console.log(`[PROCESS_FLOW][${requestId}] Processing file: ${file.name} (${file.size} bytes, type: ${file.type})`);
 
     const arrayBuffer = await file.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
     const fileName = (file as File).name || 'factura.pdf';
 
-    let pdfText = '';
-    const parseStart = Date.now();
-    try {
-      pdfText = await new Promise((resolve, reject) => {
-        const pdfParser = new PDFParser(null, 1);
-        pdfParser.on("pdfParser_dataError", (errData: any) => reject(errData.parserError));
-        pdfParser.on("pdfParser_dataReady", () => {
-          resolve(pdfParser.getRawTextContent());
-        });
-        pdfParser.parseBuffer(buffer);
-      });
-      console.log(`[CLASSIFIER][${fileName}] PDF parsed in ${Date.now() - parseStart}ms`);
-    } catch (err) {
-      console.error(`[CLASSIFIER][${fileName}] PDF parse error:`, err);
-      return NextResponse.json({ error: 'No se pudo leer el archivo PDF. Asegúrate de que no esté protegido por contraseña.' }, { status: 400 });
-    }
-
-    if (!pdfText.trim()) {
-      return NextResponse.json({ error: 'El PDF parece estar vacío o ser una imagen sin texto reconocible.' }, { status: 400 });
-    }
-
-    const textSample = pdfText.substring(0, 500).replace(/\n/g, ' | ');
-    console.log(`[TRACE][${fileName}] textLength=${pdfText.length}`);
-    console.log(`[TRACE][${fileName}] textSample="${textSample}"`);
-
-    const initialClassification = classifyInvoice(pdfText, fileName);
-    const weakIndicator = isWeakTextForClassification(pdfText);
-    const needsVision = shouldUseVisionFallback(weakIndicator) || initialClassification.confidence < 0.6;
+    // Determine if this is an image (vs PDF)
+    const isImageFile = file.type.startsWith('image/');
+    const isPdfFile = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
     
-    console.log(`[PROCESS_FLOW][${requestId}] Initial Classification: ${initialClassification.energyType} (${initialClassification.confidence.toFixed(2)})`);
-    console.log(`[PROCESS_FLOW][${requestId}] Needs Vision? ${needsVision} (Reason: ${shouldUseVisionFallback(weakIndicator) ? 'weak text' : 'low confidence'})`);
+    // HEIC/HEIF detection
+    const isHeicFile = ['image/heic', 'image/heif', 'image/heic-sequence', 'image/heif-sequence'].includes(file.type) ||
+                       file.name.toLowerCase().match(/\.heic$|\.heif$/);
 
-    let classification = initialClassification;
-    if (needsVision) {
-      console.log(`[PROCESS_FLOW][${requestId}] Triggering vision fallback...`);
+    let classification: ClassificationResult | undefined;
+    let pdfText = '';
+
+    if (isImageFile) {
+      // IMAGE: Skip PDF parsing, go directly to vision
+      console.log(`[PROCESS_FLOW][${requestId}] Image file detected - using vision-based extraction`);
       try {
-        const visionResult = await classifyInvoiceWithVision(buffer, file.type);
-        if (visionResult.confidence > initialClassification.confidence) {
-          classification = visionResult;
-          console.log(`[PROCESS_FLOW][${requestId}] Vision adopted: ${classification.energyType} (${classification.confidence.toFixed(2)})`);
-        } else {
-          console.log(`[PROCESS_FLOW][${requestId}] Vision rejected (conf: ${visionResult.confidence.toFixed(2)}), keeping text-based classification`);
-        }
+        classification = await classifyInvoiceWithVision(buffer, file.type);
+        console.log(`[PROCESS_FLOW][${requestId}] Vision classification: ${classification.energyType} (${classification.confidence.toFixed(2)})`);
       } catch (visionError: any) {
-        console.error(`[PROCESS_FLOW][${requestId}] Vision error:`, visionError.message);
-        console.log(`[PROCESS_FLOW][${requestId}] Proceeding with text-based classification despite vision failure`);
+        console.error(`[PROCESS_FLOW][${requestId}] Vision classification error:`, visionError.message);
+        return NextResponse.json({ error: `No se pudo procesar la imagen: ${visionError.message}` }, { status: 500 });
       }
+    } else if (isPdfFile) {
+      // PDF: Try PDF parsing first
+      const parseStart = Date.now();
+      try {
+        pdfText = await new Promise((resolve, reject) => {
+          const pdfParser = new PDFParser(null, 1);
+          pdfParser.on("pdfParser_dataError", (errData: any) => reject(errData.parserError));
+          pdfParser.on("pdfParser_dataReady", () => {
+            resolve(pdfParser.getRawTextContent());
+          });
+          pdfParser.parseBuffer(buffer);
+        });
+        console.log(`[CLASSIFIER][${fileName}] PDF parsed in ${Date.now() - parseStart}ms`);
+      } catch (err) {
+        console.error(`[CLASSIFIER][${fileName}] PDF parse error:`, err);
+        // If PDF parsing fails, try vision as fallback for scanned PDFs
+        console.log(`[PROCESS_FLOW][${requestId}] PDF parsing failed - attempting vision fallback`);
+        try {
+          classification = await classifyInvoiceWithVision(buffer, file.type || 'application/pdf');
+          console.log(`[PROCESS_FLOW][${requestId}] Vision fallback classification: ${classification.energyType}`);
+        } catch (visionErr) {
+          return NextResponse.json({ error: 'No se pudo leer el archivo PDF. Asegúrate de que no esté protegido por contraseña.' }, { status: 400 });
+        }
+      }
+
+      // Only do text classification if we have text
+      if (pdfText && pdfText.trim()) {
+        const textSample = pdfText.substring(0, 500).replace(/\n/g, ' | ');
+        console.log(`[TRACE][${fileName}] textLength=${pdfText.length}`);
+        console.log(`[TRACE][${fileName}] textSample="${textSample}"`);
+
+        const initialClassification = classifyInvoice(pdfText, fileName);
+        const weakIndicator = isWeakTextForClassification(pdfText);
+        const needsVision = shouldUseVisionFallback(weakIndicator) || initialClassification.confidence < 0.6;
+        
+        console.log(`[PROCESS_FLOW][${requestId}] Initial Classification: ${initialClassification.energyType} (${initialClassification.confidence.toFixed(2)})`);
+        console.log(`[PROCESS_FLOW][${requestId}] Needs Vision? ${needsVision}`);
+
+        if (needsVision) {
+          console.log(`[PROCESS_FLOW][${requestId}] Triggering vision fallback for low-confidence PDF...`);
+          try {
+            const visionResult = await classifyInvoiceWithVision(buffer, file.type || 'application/pdf');
+            if (visionResult.confidence > initialClassification.confidence) {
+              classification = visionResult;
+              console.log(`[PROCESS_FLOW][${requestId}] Vision adopted: ${classification.energyType}`);
+            } else {
+              classification = initialClassification;
+            }
+          } catch (visionError: any) {
+            console.error(`[PROCESS_FLOW][${requestId}] Vision error:`, visionError.message);
+            classification = initialClassification;
+          }
+        } else {
+          classification = initialClassification;
+        }
+      }
+    } else {
+      // Non-image, non-PDF file - not supported
+      return NextResponse.json({ error: 'Tipo de archivo no soportado. Por favor, sube un PDF o una imagen (JPG, PNG).' }, { status: 400 });
+    }
+
+    // Guard: Ensure classification is always set
+    if (!classification) {
+      console.error(`[PROCESS_FLOW][${requestId}] FATAL: classification not set in any code path`);
+      return NextResponse.json({ error: 'Error interno: no se pudo clasificar el documento.' }, { status: 500 });
+    }
+
+    // Guard: Ensure classification is always set
+    if (!classification) {
+      console.error(`[PROCESS_FLOW][${requestId}] FATAL: classification not set in any code path`);
+      return NextResponse.json({ error: 'Error interno: no se pudo clasificar el documento.' }, { status: 500 });
     }
 
     console.log(`[PROCESS_FLOW][${requestId}] Final Classification: ${classification.energyType} (${classification.confidence.toFixed(2)})`);

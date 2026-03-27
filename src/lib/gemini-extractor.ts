@@ -20,17 +20,23 @@ REGLAS CRÍTICAS DE EXTRACCIÓN (V3.0):
    - 'IVA / IGIC': IVA o IGIC.
    - 'EXCESO DE POTENCIA': Agrupa penalizaciones, excesos de potencia, método cuarto horario o puntas.
 
-4. **Auditoría de Potencia Industrial (PRO):**
+4. **Desglose de Energía y Descuentos (NUEVO):**
+   - Extrae el **'costeBrutoConsumo'** como la suma total de los términos de energía (kWh × precio) antes de descuentos.
+   - Identifica **'descuentoEnergia'** buscando descuentos porcentuales o fijos aplicados exclusivamente al término de consumo/energía.
+   - Define **'costeNetoConsumo'** como (costeBrutoConsumo - descuentoEnergia).
+   - **MANDATORIO:** Los descuentos de energía NO deben aparecer en 'otrosConceptos'.
+
+5. **Auditoría de Potencia Industrial (PRO):**
    - Busca el cuadro de "Resumen de Factura" o "Detalle de Potencia". 
    - **MANDATORIO:** Separa los excesos del gasto base. El 'costeTotalPotencia' debe ser solo el término fijo por potencia contratada. Cualquier penalización extra DEBE ir a 'otrosConceptos' como 'EXCESO DE POTENCIA'.
 
-5. **BUCLE DE AUTOCONTROL MATEMÁTICO (REGLA DE ORO):**
+6. **BUCLE DE AUTOCONTROL MATEMÁTICO (REGLA DE ORO):**
    - **Paso A:** Extrae el 'totalFactura' directamente de la posición visual de "Total a Pagar" en el papel.
-   - **Paso B:** Suma matemáticamente todos tus datos extraídos: (costeTotalConsumo + costeTotalPotencia + SUMA de otrosConceptos).
+   - **Paso B:** Suma matemáticamente todos tus datos extraídos: (costeNetoConsumo + costeTotalPotencia + SUMA de otrosConceptos).
    - **Paso C (Verificación):** Compara el sumatorio con el 'totalFactura' extraído en el Paso A.
-   - **Paso D (Re-evaluación):** Si la diferencia es mayor a 0,05€, RE-ESCANEA el documento buscando conceptos omitidos (pequeños ajustes, descuentos de céntimos, servicios extra) hasta que la suma coincida perfectamente. NO entregues resultados descuadrados.
+   - **Paso D (Re-evaluación):** Si la diferencia es mayor a 0,05€, RE-ESCANEA el documento buscando conceptos omitidos hasta que la suma coincida perfectamente.
 
-6. **Facturas de Anulación:** Devuelve valores en NEGATIVO si es abono/rectificativa.
+7. **Facturas de Anulación:** Devuelve valores en NEGATIVO si es abono/rectificativa.
 
 RESPONDE ÚNICAMENTE CON UN JSON VÁLIDO siguiendo esta interfaz:
 {
@@ -43,6 +49,9 @@ RESPONDE ÚNICAMENTE CON UN JSON VÁLIDO siguiendo esta interfaz:
   "consumoTotalKwh": number,
   "consumo": [{ "periodo": "P1", "kwh": number, "precioKwh": number, "total": number, "isAggregate": boolean }],
   "potencia": [{ "periodo": "P1", "kwContratados": number, "precioKwAnual": number, "total": number }],
+  "costeBrutoConsumo": number,
+  "descuentoEnergia": number,
+  "costeNetoConsumo": number,
   "costeTotalConsumo": number,
   "costeTotalPotencia": number,
   "otrosConceptos": [{ "concepto": string, "total": number }],
@@ -108,6 +117,15 @@ export async function extractBillDataWithAI(fileBuffer: Buffer, fileType: string
         }
         return true;
       });
+    }
+
+    // Ensure backward compatibility and calculate net price
+    if (data.costeNetoConsumo !== undefined) {
+      data.costeTotalConsumo = data.costeNetoConsumo;
+    }
+    
+    if (data.costeNetoConsumo !== undefined && data.consumoTotalKwh && data.consumoTotalKwh > 0) {
+      data.costeMedioKwhNeto = data.costeNetoConsumo / data.consumoTotalKwh;
     }
 
     return { ...data, status: 'success', energyType: 'electricity' as EnergyType };

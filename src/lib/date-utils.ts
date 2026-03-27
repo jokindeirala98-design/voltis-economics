@@ -83,6 +83,8 @@ export interface MonthlyAggregatedData {
   labelFull: string;
   totalFactura: number;
   energia: number;
+  energiaBruta: number;
+  descuentoEnergia: number;
   potencia: number;
   otros: number;
   totalKwh: number;
@@ -102,6 +104,8 @@ export function getMonthlyAggregatedData(
     fechaInicio?: string; 
     fechaFin?: string; 
     costeTotalConsumo?: number; 
+    costeBrutoConsumo?: number;
+    descuentoEnergia?: number;
     costeTotalPotencia?: number;
     consumoTotalKwh?: number;
     otrosConceptos?: Array<{ concepto: string; total: number }>;
@@ -115,6 +119,8 @@ export function getMonthlyAggregatedData(
     labelFull: CANONICAL_MONTHS_FULL[i],
     totalFactura: 0,
     energia: 0,
+    energiaBruta: 0,
+    descuentoEnergia: 0,
     potencia: 0,
     otros: 0,
     totalKwh: 0,
@@ -125,11 +131,12 @@ export function getMonthlyAggregatedData(
   bills.forEach(bill => {
     const { month, year } = getAssignedMonth(bill.fechaInicio, bill.fechaFin);
     const monthIdx = month; // 0-11
-    const yearIdx = year - 2024; // 0-based year offset
     
     if (monthIdx < 0 || monthIdx > 11) return; // Skip invalid months
 
     const energia = bill.costeTotalConsumo || 0;
+    const energiaBruta = bill.costeBrutoConsumo || bill.costeTotalConsumo || 0;
+    const descuentoEnergia = bill.descuentoEnergia || 0;
     const potencia = bill.costeTotalPotencia || 0;
     const totalKwh = bill.consumoTotalKwh || 0;
     
@@ -147,6 +154,8 @@ export function getMonthlyAggregatedData(
     // Accumulate into canonical month slot
     monthlyTotals[monthIdx].totalFactura += totalF;
     monthlyTotals[monthIdx].energia += energia;
+    monthlyTotals[monthIdx].energiaBruta += energiaBruta;
+    monthlyTotals[monthIdx].descuentoEnergia += descuentoEnergia;
     monthlyTotals[monthIdx].potencia += potencia;
     monthlyTotals[monthIdx].otros += (imp + others);
     monthlyTotals[monthIdx].totalKwh += totalKwh;
