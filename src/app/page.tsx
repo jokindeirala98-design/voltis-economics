@@ -39,7 +39,6 @@ import {
 import { getAssignedMonth } from '@/lib/date-utils';
 import LoginScreen from '@/components/LoginScreen';
 import { useFolderExport } from '@/hooks/useFolderExport';
-import { MascotaHero } from '@/components/MascotaHero';
 
 const fileToBase64 = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
