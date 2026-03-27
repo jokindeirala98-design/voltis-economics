@@ -111,6 +111,7 @@ function EnergyBillsAppContent() {
   const [refiningBill, setRefiningBill] = useState<ExtractedBill | null>(null);
   const [refineInstruction, setRefineInstruction] = useState('');
   const [isRefining, setIsRefining] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
   const [fileBase64Refs, setFileBase64Refs] = useState<Record<string, { data: string, type: string }>>({});
   
   // Excel Correction State
@@ -190,10 +191,12 @@ function EnergyBillsAppContent() {
       
       if (!previewBillId) {
         setPreviewUrl(null);
+        setPreviewError(null);
         return;
       }
 
       setIsPreviewLoading(true);
+      setPreviewError(null);
       
       try {
         // 1. Check in-memory session Refs first (fastest)
@@ -226,24 +229,39 @@ function EnergyBillsAppContent() {
           const type = (bill.fileMimeType === 'application/pdf' || bill.fileName?.toLowerCase().endsWith('.pdf')) ? 'pdf' : 'image';
           setPreviewType(type as 'pdf' | 'image');
           
-          if (bill.storagePath) {
-            console.log(`[PREVIEW_DEBUG][STORAGE] Initiating Supabase Storage fetch for: ${bill.storagePath}`);
-            const result = await getDocumentForPreview(bill.storagePath, bill.originalFileBase64);
+          let effectivePath = bill.storagePath;
+
+          // FALLBACK STRATEGY: If storagePath is missing, try to construct it using PROJECT_ID/FILENAME
+          // This solves the issue for bills where the storage_path column is null but the file exists in the bucket
+          if (!effectivePath && !(bill as any).originalFileUrl && !bill.originalFileBase64) {
+            console.warn(`[PREVIEW_DEBUG][FILE_REF] storagePath missing. Attempting fallback...`);
+            if (bill.projectId && bill.fileName) {
+              effectivePath = `${bill.projectId}/${bill.fileName}`;
+              console.log(`[PREVIEW_DEBUG][FILE_REF] Fallback path constructed: ${effectivePath}`);
+            }
+          }
+
+          if (effectivePath) {
+            console.log(`[PREVIEW_DEBUG][STORAGE] Initiating Supabase Storage fetch for: ${effectivePath}`);
+            const result = await getDocumentForPreview(effectivePath, bill.originalFileBase64);
             
             if (result) {
               console.log(`[PREVIEW_DEBUG][PAYLOAD] Preview source: Supabase Storage data URL (length: ${result.length})`);
               setPreviewUrl(result);
             } else {
-              console.error(`[PREVIEW_DEBUG][STORAGE] Failed to fetch or convert document from: ${bill.storagePath}`);
+              console.error(`[PREVIEW_DEBUG][STORAGE] Failed to fetch or convert document from: ${effectivePath}`);
             }
           } else if (bill.originalFileBase64) {
             console.log(`[PREVIEW_DEBUG][PAYLOAD] Preview source: Falling back to local Base64 (length: ${bill.originalFileBase64.length})`);
             setPreviewUrl(bill.originalFileBase64);
           } else {
-            console.error(`[PREVIEW_DEBUG][FILE_REF] CRITICAL: Bill found but lacks both storagePath and base64.`, {
+            console.error(`[PREVIEW_DEBUG][FILE_REF] CRITICAL: Bill found but lacks both storagePath (even after fallback) and base64.`, {
               requestedId: previewBillId,
+              projectId: bill.projectId,
+              fileName: bill.fileName,
               availableKeys: Object.keys(bill)
             });
+            setPreviewError('Archivo original no vinculado en base de datos');
           }
         } else {
           console.error(`[PREVIEW_DEBUG][LOOKUP] CRITICAL: Bill with ID ${previewBillId} NOT FOUND in allBillsFlat. Check state synchronization.`);
