@@ -385,7 +385,7 @@ function EnergyBillsAppContent() {
     });
   }, [currentProjectId, isAuthenticated]);
 
-  const processFile = useCallback(async (file: File, queueId: string, targetProjectId: string, userInstruction?: string) => {
+  const processFile = useCallback(async (file: File, queueId: string, targetProjectId: string, userInstruction?: string): Promise<'success' | 'error' | 'duplicate'> => {
     const formData = new FormData();
     formData.append('file', file);
     if (userInstruction) formData.append('userInstruction', userInstruction);
@@ -403,7 +403,7 @@ function EnergyBillsAppContent() {
           )
         }));
         toast.warning(`⚠️ Clasificación ambigua para "${file.name}". ${data.error}`);
-        return;
+        return 'error';
       }
 
       if (data.status === 'success') {
@@ -427,40 +427,40 @@ function EnergyBillsAppContent() {
           newBill.fileMimeType = fileData.type;
         }
 
+        // Check for duplicate BEFORE setting state
+        const projectBills = allBills[targetProjectId] || [];
+        const isDuplicate = projectBills.some(b =>
+          b.cups && newBill.cups &&
+          b.cups === newBill.cups &&
+          b.fechaInicio === newBill.fechaInicio &&
+          b.fechaFin === newBill.fechaFin
+        );
+
+        if (isDuplicate) {
+          console.log(`[REPORT ROUTING][${file.name}] Duplicate detected`);
+          setAllExtractionQueues(q => ({
+            ...q,
+            [targetProjectId]: (q[targetProjectId] || []).map(item =>
+              item.id === queueId ? { ...item, status: 'error' as const, error: 'Factura duplicada en este proyecto' } : item
+            )
+          }));
+          toast.warning(`Factura "${file.name}" ya existe en este proyecto`);
+          return 'duplicate';
+        }
+
         // Update project-keyed bills
-        setAllBills(prev => {
-          const projectBills = prev[targetProjectId] || [];
-          const isDuplicate = projectBills.some(b =>
-            b.cups && newBill.cups &&
-            b.cups === newBill.cups &&
-            b.fechaInicio === newBill.fechaInicio &&
-            b.fechaFin === newBill.fechaFin
-          );
-
-          if (isDuplicate) {
-            setAllExtractionQueues(q => ({
-              ...q,
-              [targetProjectId]: (q[targetProjectId] || []).map(item =>
-                item.id === queueId ? { ...item, status: 'error' as const, error: 'Factura duplicada en este proyecto' } : item
-              )
-            }));
-            return prev;
-          }
-
-          const billWithProject = { ...newBill, projectId: targetProjectId };
-          const nextBills = [...projectBills, billWithProject].sort((a, b) => {
-            const am = getAssignedMonth(a.fechaInicio, a.fechaFin);
-            const bm = getAssignedMonth(b.fechaInicio, b.fechaFin);
-            if (am.year !== bm.year) return am.year - bm.year;
-            return am.month - bm.month;
-          });
-          const next = { ...prev, [targetProjectId]: nextBills };
-
-          const projectCustomOCs = allCustomOCs[targetProjectId] || {};
-          saveToDisk(nextBills, projectCustomOCs, targetProjectId);
-
-          return next;
+        const billWithProject = { ...newBill, projectId: targetProjectId };
+        const nextBills = [...projectBills, billWithProject].sort((a, b) => {
+          const am = getAssignedMonth(a.fechaInicio, a.fechaFin);
+          const bm = getAssignedMonth(b.fechaInicio, b.fechaFin);
+          if (am.year !== bm.year) return am.year - bm.year;
+          return am.month - bm.month;
         });
+
+        setAllBills(prev => ({ ...prev, [targetProjectId]: nextBills }));
+
+        const projectCustomOCs = allCustomOCs[targetProjectId] || {};
+        saveToDisk(nextBills, projectCustomOCs, targetProjectId);
 
         setAllExtractionQueues(prev => ({
           ...prev,
@@ -468,6 +468,9 @@ function EnergyBillsAppContent() {
             item.id === queueId ? { ...item, status: 'success' as const } : item
           )
         }));
+
+        console.log(`[REPORT ROUTING][${file.name}] Success - bill saved`);
+        return 'success';
       } else {
         // Handle extraction failure
         const isRetryable = data.retryable === true;
@@ -490,6 +493,7 @@ function EnergyBillsAppContent() {
         } else {
           toast.error(`Error en ${file.name}: ${errorMsg}`);
         }
+        return 'error';
       }
     } catch (err) {
       console.error(`[REPORT ROUTING][${file.name}] Network error:`, err);
@@ -500,8 +504,9 @@ function EnergyBillsAppContent() {
         )
       }));
       toast.error(`Error de red en ${file.name}`);
+      return 'error';
     }
-  }, [allCustomOCs, saveToDisk]);
+  }, [allBills, allCustomOCs, saveToDisk]);
   const handleRefine = async () => {
     if (!refiningBill || !refineInstruction.trim()) return;
     
@@ -652,20 +657,40 @@ function EnergyBillsAppContent() {
     // Process files with bounded concurrency (limit 2)
     const queue = [...validFiles.map((file, i) => ({ file, id: newItems[i].id }))];
     const concurrencyLimit = 2;
+    
+    // Track results for final toast
+    let successCount = 0;
+    let errorCount = 0;
+    let duplicateCount = 0;
+    
     const workers = Array(Math.min(concurrencyLimit, queue.length))
       .fill(null)
       .map(async () => {
         while (queue.length > 0) {
           const item = queue.shift();
           if (item) {
-            await processFile(item.file, item.id, targetProjectId);
+            const result = await processFile(item.file, item.id, targetProjectId);
+            if (result === 'success') successCount++;
+            else if (result === 'duplicate') duplicateCount++;
+            else errorCount++;
           }
         }
       });
 
     await Promise.all(workers);
     setIsExtracting(false);
-    toast.success('Extracción completada. Todos los datos han sido guardados en el histórico.');
+    
+    // Show contextual success/error message
+    const total = validFiles.length;
+    if (errorCount === 0 && duplicateCount === 0) {
+      toast.success(`Extracción completada. ${successCount} factura${successCount > 1 ? 's' : ''} guardada${successCount > 1 ? 's' : ''} correctamente.`);
+    } else if (errorCount === 0 && duplicateCount > 0) {
+      toast.warning(`${duplicateCount} factura${duplicateCount > 1 ? 's' : ''} duplicada${duplicateCount > 1 ? 's' : ''}, ${successCount} guardada${successCount > 1 ? 's' : ''}.`);
+    } else if (errorCount > 0 && successCount > 0) {
+      toast.error(`${errorCount} error${errorCount > 1 ? 'es' : ''}, ${successCount} guardada${successCount > 1 ? 's' : ''}. Revisa las facturas marcadas en rojo.`);
+    } else {
+      toast.error(`Error en todas las facturas. Por favor, inténtalo de nuevo.`);
+    }
   }, [currentProjectId, saveToDisk, processFile]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({ 
