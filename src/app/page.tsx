@@ -69,6 +69,7 @@ function EnergyBillsAppContent() {
   const [currentProjectId, setCurrentProjectId] = useState<string>('default');
   const [savedProjects, setSavedProjects] = useState<ProjectWorkspace[]>([]);
   const [showReport, setShowReport] = useState(false);
+  const [activeReportTab, setActiveReportTab] = useState<'electricity' | 'gas'>('electricity');
   const [renamingProjectId, setRenamingProjectId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [newProjectName, setNewProjectName] = useState('');
@@ -1112,11 +1113,43 @@ function EnergyBillsAppContent() {
     const gasOnlyBills = reportBills.filter(b => isGasBill(b));
     
     const projectName = savedProjects.find(p => p.id === currentProjectId)?.name || 'PROYECTO';
+     
+    const isMixedProject = hasGasBills && hasElectricityBills;
+    const isElectricityOnly = hasElectricityBills && !hasGasBills;
+    const isGasOnly = hasGasBills && !hasElectricityBills;
     
     return (
       <div className="fixed inset-0 z-[60] bg-[#020617] overflow-hidden">
+        {/* Tab navigation for mixed projects */}
+        {isMixedProject && (
+          <div className="fixed top-0 left-0 right-0 z-[70] bg-slate-900/95 backdrop-blur-xl border-b border-white/10">
+            <div className="flex items-center justify-center gap-8 px-4 py-3">
+              <button
+                onClick={() => setActiveReportTab('electricity')}
+                className={`px-4 py-2 rounded-xl font-bold text-sm transition-all ${
+                  activeReportTab === 'electricity'
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-slate-800 text-slate-400 hover:text-white'
+                }`}
+              >
+                ⚡ Electricidad ({electricityBills.length})
+              </button>
+              <button
+                onClick={() => setActiveReportTab('gas')}
+                className={`px-4 py-2 rounded-xl font-bold text-sm transition-all ${
+                  activeReportTab === 'gas'
+                    ? 'bg-orange-600 text-white'
+                    : 'bg-slate-800 text-slate-400 hover:text-white'
+                }`}
+              >
+                🔥 Gas ({gasOnlyBills.length})
+              </button>
+            </div>
+          </div>
+        )}
+        
         {/* Gas-only report */}
-        {hasGasBills && !hasElectricityBills && (
+        {isGasOnly && (
           <GasReportView
             bills={gasOnlyBills}
             onBack={() => setShowReport(false)}
@@ -1125,8 +1158,8 @@ function EnergyBillsAppContent() {
           />
         )}
         
-        {/* Electricity-only or mixed report */}
-        {hasElectricityBills && (
+        {/* Electricity-only report */}
+        {isElectricityOnly && (
           <ReportView 
             bills={electricityBills} 
             customOCs={reportCustomOCs} 
@@ -1137,12 +1170,25 @@ function EnergyBillsAppContent() {
           />
         )}
         
-        {/* Show gas bills summary if mixed */}
-        {hasGasBills && hasElectricityBills && (
-          <div className="fixed bottom-4 right-4 z-[70] glass p-4 rounded-2xl border border-orange-500/30 bg-[#020617]/90">
-            <p className="text-xs font-bold text-orange-400">📄 {gasOnlyBills.length} factura{gasOnlyBills.length !== 1 ? 's' : ''} de gas detected{gasOnlyBills.length !== 1 ? 'as' : ''}</p>
-            <p className="text-[10px] text-slate-500 mt-1">Ver Informe de Gas pendiente</p>
-          </div>
+        {/* Mixed report - show selected tab only */}
+        {isMixedProject && activeReportTab === 'electricity' && (
+          <ReportView 
+            bills={electricityBills} 
+            customOCs={reportCustomOCs} 
+            onBack={() => setShowReport(false)} 
+            projectName={`${projectName} - Electricidad`}
+            projectId={currentProjectId}
+            onPreviewBill={(id) => setPreviewBillId(id)}
+          />
+        )}
+        
+        {isMixedProject && activeReportTab === 'gas' && (
+          <GasReportView 
+            bills={gasOnlyBills}
+            onBack={() => setShowReport(false)}
+            projectName={`${projectName} - Gas`}
+            projectId={currentProjectId}
+          />
         )}
         
         {/* MODAL PREVIEW FACTURA ORIGINAL */}
