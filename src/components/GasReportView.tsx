@@ -6,7 +6,7 @@ import {
   BarChart, Bar, XAxis, YAxis, Tooltip as RechartsTooltip,
   ResponsiveContainer, PieChart, Pie, Cell
 } from 'recharts';
-import { ArrowLeft, Printer, Activity, DollarSign, Flame, AlertTriangle, Cpu } from 'lucide-react';
+import { ArrowLeft, Printer, Activity, DollarSign, Flame, AlertTriangle, Cpu, FileText } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
 import { getAssignedMonth, CANONICAL_MONTHS } from '@/lib/date-utils';
@@ -16,6 +16,7 @@ interface GasReportViewProps {
   onBack: () => void;
   projectName?: string;
   projectId?: string;
+  onPreviewBill?: (billId: string) => void;
 }
 
 const CountUp = ({ value, decimals = 0 }: { value: number; decimals?: number }) => {
@@ -26,7 +27,7 @@ const CountUp = ({ value, decimals = 0 }: { value: number; decimals?: number }) 
   );
 };
 
-export function GasReportView({ bills, onBack, projectName = 'PROYECTO', projectId }: GasReportViewProps) {
+export function GasReportView({ bills, onBack, projectName = 'PROYECTO', projectId, onPreviewBill }: GasReportViewProps) {
   const contentRef = useRef<HTMLDivElement>(null);
   const [selectedBillId, setSelectedBillId] = useState<string | null>(null);
   const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
@@ -324,7 +325,7 @@ export function GasReportView({ bills, onBack, projectName = 'PROYECTO', project
           <section className="grid lg:grid-cols-2 gap-6">
             <div className="glass p-6 rounded-3xl border border-white/10">
               <h3 className="text-sm font-black uppercase text-slate-400 tracking-widest mb-4">Consumo Mensual (kWh)</h3>
-              <ResponsiveContainer width="100%" height={200}>
+              <ResponsiveContainer width="100%" height={280}>
                 <BarChart data={chartData}>
                   <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fill: 'rgba(255,255,255,0.3)', fontSize: 10 }} />
                   <YAxis axisLine={false} tickLine={false} tick={{ fill: 'rgba(255,255,255,0.2)', fontSize: 9 }} />
@@ -359,7 +360,7 @@ export function GasReportView({ bills, onBack, projectName = 'PROYECTO', project
           {/* Table */}
           <section className="glass p-4 rounded-3xl border border-white/10 overflow-hidden">
             <h3 className="text-sm font-black uppercase text-slate-400 tracking-widest mb-4 px-4">Facturas de Gas</h3>
-            <table className="w-full text-[10px]">
+            <table className="w-full text-xs">
               <thead>
                 <tr className="bg-slate-900/50 font-black uppercase text-slate-500 tracking-wider">
                   <th className="px-4 py-3 text-left">Mes</th>
@@ -397,7 +398,18 @@ export function GasReportView({ bills, onBack, projectName = 'PROYECTO', project
                     <td className="px-2 py-3 text-right text-slate-400">{row.terminoFijo > 0 ? `${row.terminoFijo.toFixed(2)}€` : '-'}</td>
                     <td className="px-2 py-3 text-right text-slate-400">{row.impuesto > 0 ? `${row.impuesto.toFixed(2)}€` : '-'}</td>
                     <td className="px-2 py-3 text-right text-slate-400">{row.alquiler > 0 ? `${row.alquiler.toFixed(2)}€` : '-'}</td>
-                    <td className="px-4 py-3 text-right font-black text-white bg-white/5">{row.total.toFixed(2)}€</td>
+                    <td className="px-4 py-3 text-right font-black text-white bg-white/5 flex items-center justify-end gap-2 group-hover:bg-white/10 transition-colors">
+                      {row.total.toFixed(2)}€
+                      {onPreviewBill && (
+                        <button 
+                          onClick={(e) => { e.stopPropagation(); onPreviewBill(row.id); }}
+                          className="p-1.5 rounded-lg bg-orange-500/10 text-orange-400 hover:bg-orange-500/20 transition-all opacity-0 group-hover:opacity-100"
+                          title="Ver Factura Original"
+                        >
+                          <FileText className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>

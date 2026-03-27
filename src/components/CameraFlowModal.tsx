@@ -3,9 +3,16 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { 
   Camera, Image, X, Check, Trash2, Plus, ChevronLeft, 
-  Loader, AlertCircle, FileText, Upload
+  Loader, AlertCircle, FileText
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { 
+  createImagePreview, 
+  checkHeicWarnings,
+  URLTracker,
+  StagedFile,
+  isHeicType 
+} from '@/lib/image-utils';
 
 interface CameraFlowModalProps {
   isOpen: boolean;
@@ -14,100 +21,85 @@ interface CameraFlowModalProps {
   maxFiles?: number;
 }
 
-const HEIC_TYPES = ['image/heic', 'image/heif', 'image/heic-sequence', 'image/heif-sequence'];
-
 export default function CameraFlowModal({ isOpen, onClose, onFilesSelected, maxFiles = 10 }: CameraFlowModalProps) {
-  const [stagedFiles, setStagedFiles] = useState<{ file: File; preview: string; id: string }[]>([]);
-  const [showCamera, setShowCamera] = useState(false);
+  const [stagedFiles, setStagedFiles] = useState<StagedFile[]>([]);
+  const [showAddOptions, setShowAddOptions] = useState(false);
   const [heicWarning, setHeicWarning] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isAddingFiles, setIsAddingFiles] = useState(false);
   
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const galleryInputRef = useRef<HTMLInputElement>(null);
+  const urlTrackerRef = useRef(new URLTracker());
+  const processingRef = useRef(false); // Guard against double-submit
+  const stagedFilesRef = useRef<StagedFile[]>([]); // Keep ref in sync for async operations
 
-  // Clean up object URLs on unmount
+  // Keep ref in sync with state for use in async callbacks
+  useEffect(() => {
+    stagedFilesRef.current = stagedFiles;
+  }, [stagedFiles]);
+
+  // Clean up all object URLs on unmount
   useEffect(() => {
     return () => {
-      stagedFiles.forEach(f => URL.revokeObjectURL(f.preview));
+      urlTrackerRef.current.revokeAll();
     };
   }, []);
 
-  const createPreview = useCallback((file: File): Promise<string> => {
-    return new Promise((resolve) => {
-      // Check if HEIC
-      const isHeic = HEIC_TYPES.includes(file.type) || /\.heic$/i.test(file.name);
-      
-      if (isHeic) {
-        // Try to create preview
-        const img = document.createElement('img');
-        const objectUrl = URL.createObjectURL(file);
-        
-        img.onload = () => {
-          const canvas = document.createElement('canvas');
-          canvas.width = img.width;
-          canvas.height = img.height;
-          const ctx = canvas.getContext('2d');
-          if (ctx) {
-            ctx.drawImage(img, 0, 0);
-            canvas.toBlob((blob) => {
-              if (blob) {
-                resolve(URL.createObjectURL(blob));
-              } else {
-                resolve(objectUrl);
-              }
-            }, 'image/jpeg', 0.8);
-          } else {
-            resolve(objectUrl);
-          }
-          URL.revokeObjectURL(objectUrl);
-        };
-        
-        img.onerror = () => {
-          URL.revokeObjectURL(objectUrl);
-          // Return a placeholder
-          resolve('');
-        };
-        
-        img.src = objectUrl;
-      } else {
-        resolve(URL.createObjectURL(file));
-      }
-    });
-  }, []);
+  const processFile = async (file: File): Promise<StagedFile> => {
+    const id = `staged-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const { preview } = await createImagePreview(file);
+    
+    return {
+      file,
+      preview,
+      id,
+      error: isHeicType(file) ? undefined : undefined,
+    };
+  };
 
   const addFiles = useCallback(async (files: File[]) => {
-    const remaining = maxFiles - stagedFiles.length;
+    if (processingRef.current) return; // Guard against concurrent operations
+    
+    // Calculate remaining slots from current state (not ref)
+    const currentCount = stagedFiles.length;
+    const remaining = maxFiles - currentCount;
     if (remaining <= 0) return;
-    
+
     const toAdd = Array.from(files).slice(0, remaining);
-    const newStaged: { file: File; preview: string; id: string }[] = [];
-    
-    for (const file of toAdd) {
-      const preview = await createPreview(file);
-      newStaged.push({
-        file,
-        preview,
-        id: `staged-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
-      });
+    if (toAdd.length === 0) return;
+
+    setIsAddingFiles(true);
+    processingRef.current = true;
+
+    try {
+      // Process files sequentially to handle HEIC conversion properly
+      const newStaged: StagedFile[] = [];
+      for (const file of toAdd) {
+        const staged = await processFile(file);
+        newStaged.push(staged);
+        urlTrackerRef.current.create(staged.preview);
+      }
+
+      setStagedFiles(prev => [...prev, ...newStaged]);
+      
+      // Check for HEIC warnings
+      const warning = checkHeicWarnings(newStaged, toAdd);
+      if (warning) {
+        setHeicWarning(warning);
+        setTimeout(() => setHeicWarning(null), 5000);
+      }
+    } finally {
+      setIsAddingFiles(false);
+      processingRef.current = false;
     }
-    
-    setStagedFiles(prev => [...prev, ...newStaged]);
-    
-    // Check for HEIC files that couldn't be previewed
-    const heicFiles = toAdd.filter(f => 
-      HEIC_TYPES.includes(f.type) || /\.heic$/i.test(f.name)
-    );
-    
-    if (heicFiles.length > 0 && newStaged.some(s => !s.preview)) {
-      setHeicWarning('Algunas fotos HEIC no pudieron ser procesadas. Conviértelas a JPG para mejor calidad.');
-    }
-  }, [stagedFiles.length, maxFiles, createPreview]);
+  }, [stagedFiles.length, maxFiles]);
 
   const removeFile = useCallback((id: string) => {
     setStagedFiles(prev => {
       const removed = prev.find(f => f.id === id);
       if (removed) {
-        URL.revokeObjectURL(removed.preview);
+        urlTrackerRef.current.revoke(removed.preview);
       }
       return prev.filter(f => f.id !== id);
     });
@@ -118,9 +110,8 @@ export default function CameraFlowModal({ isOpen, onClose, onFilesSelected, maxF
     if (files.length > 0) {
       addFiles(files);
     }
-    // Reset input
     if (e.target) e.target.value = '';
-    setShowCamera(false);
+    setShowAddOptions(false);
   }, [addFiles]);
 
   const handleGallerySelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
@@ -129,33 +120,46 @@ export default function CameraFlowModal({ isOpen, onClose, onFilesSelected, maxF
       addFiles(files);
     }
     if (e.target) e.target.value = '';
+    setShowAddOptions(false);
   }, [addFiles]);
 
-  const handleProcess = useCallback(async () => {
-    if (stagedFiles.length === 0) return;
-    
+  const handleProcess = useCallback(() => {
+    // Guard against double-submit using ref (safe from stale closure)
+    if (processingRef.current || stagedFilesRef.current.length === 0) return;
+
+    processingRef.current = true;
     setIsProcessing(true);
-    
-    // Give a moment for UI feedback
-    await new Promise(resolve => setTimeout(resolve, 300));
-    
-    onFilesSelected(stagedFiles.map(s => s.file));
-    
-    // Clean up previews
-    stagedFiles.forEach(f => URL.revokeObjectURL(f.preview));
+
+    // Capture files from ref (always current)
+    const filesToProcess = stagedFilesRef.current.map(s => s.file);
+
+    // Clean up all preview URLs immediately
+    urlTrackerRef.current.revokeAll();
     setStagedFiles([]);
-    setIsProcessing(false);
-  }, [stagedFiles, onFilesSelected]);
+
+    // Pass to parent - processingRef will be reset after parent handles the files
+    onFilesSelected(filesToProcess);
+    
+    // Reset processing state after a short delay to ensure parent has received the files
+    setTimeout(() => {
+      processingRef.current = false;
+      setIsProcessing(false);
+    }, 100);
+  }, [onFilesSelected]);
 
   const handleClose = useCallback(() => {
-    // Clean up previews
-    stagedFiles.forEach(f => URL.revokeObjectURL(f.preview));
+    // Clean up all preview URLs
+    urlTrackerRef.current.revokeAll();
     setStagedFiles([]);
-    setShowCamera(false);
+    setShowAddOptions(false);
+    processingRef.current = false;
     onClose();
-  }, [stagedFiles, onClose]);
+  }, [onClose]);
 
   if (!isOpen) return null;
+
+  const canAddMore = stagedFiles.length < maxFiles;
+  const hasFiles = stagedFiles.length > 0;
 
   return (
     <motion.div
@@ -215,16 +219,38 @@ export default function CameraFlowModal({ isOpen, onClose, onFilesSelected, maxF
         
         <div className="text-center">
           <span className="text-white font-bold text-sm">
-            {stagedFiles.length > 0 ? `${stagedFiles.length} foto${stagedFiles.length > 1 ? 's' : ''}` : 'Nueva factura'}
+            {isAddingFiles 
+              ? 'Procesando...' 
+              : hasFiles 
+                ? `${stagedFiles.length} foto${stagedFiles.length !== 1 ? 's' : ''}` 
+                : 'Nueva factura'
+            }
           </span>
         </div>
         
-        <div className="w-20" /> {/* Spacer for centering */}
+        <div className="w-20" />
       </div>
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto p-4">
-        {stagedFiles.length === 0 ? (
+        {/* Loading Overlay */}
+        <AnimatePresence>
+          {isAddingFiles && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 z-10 bg-black/50 flex items-center justify-center"
+            >
+              <div className="flex flex-col items-center gap-3">
+                <Loader className="w-8 h-8 text-white animate-spin" />
+                <span className="text-white/60 text-sm">Preparando imagen...</span>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {!hasFiles ? (
           /* Empty State - Show Capture Options */
           <div className="h-full flex flex-col items-center justify-center gap-6">
             <div className="w-20 h-20 rounded-full bg-white/5 flex items-center justify-center">
@@ -239,7 +265,8 @@ export default function CameraFlowModal({ isOpen, onClose, onFilesSelected, maxF
               {/* Take Photo */}
               <button
                 onClick={() => cameraInputRef.current?.click()}
-                className="w-full flex items-center gap-4 p-4 rounded-2xl bg-blue-600 text-white font-bold transition-all active:scale-[0.98]"
+                disabled={isAddingFiles || isProcessing}
+                className="w-full flex items-center gap-4 p-4 rounded-2xl bg-blue-600 text-white font-bold transition-all active:scale-[0.98] disabled:opacity-50"
               >
                 <div className="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center">
                   <Camera className="w-6 h-6" />
@@ -253,7 +280,8 @@ export default function CameraFlowModal({ isOpen, onClose, onFilesSelected, maxF
               {/* Gallery */}
               <button
                 onClick={() => galleryInputRef.current?.click()}
-                className="w-full flex items-center gap-4 p-4 rounded-2xl bg-white/5 border border-white/10 text-white font-medium transition-all active:scale-[0.98]"
+                disabled={isAddingFiles || isProcessing}
+                className="w-full flex items-center gap-4 p-4 rounded-2xl bg-white/5 border border-white/10 text-white font-medium transition-all active:scale-[0.98] disabled:opacity-50"
               >
                 <div className="w-12 h-12 rounded-xl bg-white/10 flex items-center justify-center">
                   <Image className="w-6 h-6" />
@@ -268,10 +296,12 @@ export default function CameraFlowModal({ isOpen, onClose, onFilesSelected, maxF
         ) : (
           /* Staged Files - Show Previews */
           <div className="space-y-4">
+            {/* Photo Grid */}
             <div className="grid grid-cols-2 gap-3">
               {stagedFiles.map((staged) => (
                 <motion.div
                   key={staged.id}
+                  layout
                   initial={{ scale: 0.8, opacity: 0 }}
                   animate={{ scale: 1, opacity: 1 }}
                   exit={{ scale: 0.8, opacity: 0 }}
@@ -292,7 +322,8 @@ export default function CameraFlowModal({ isOpen, onClose, onFilesSelected, maxF
                   {/* Remove Button */}
                   <button
                     onClick={() => removeFile(staged.id)}
-                    className="absolute top-2 right-2 w-8 h-8 rounded-full bg-black/60 backdrop-blur flex items-center justify-center text-white/80 hover:text-white hover:bg-red-500/80 transition-all touch-target"
+                    disabled={isProcessing}
+                    className="absolute top-2 right-2 w-8 h-8 rounded-full bg-black/60 backdrop-blur flex items-center justify-center text-white/80 hover:text-white hover:bg-red-500/80 transition-all disabled:opacity-50 touch-target"
                   >
                     <X className="w-4 h-4" />
                   </button>
@@ -305,23 +336,30 @@ export default function CameraFlowModal({ isOpen, onClose, onFilesSelected, maxF
               ))}
               
               {/* Add More Button */}
-              {stagedFiles.length < maxFiles && (
+              {canAddMore && !isAddingFiles && (
                 <button
-                  onClick={() => setShowCamera(true)}
+                  onClick={() => setShowAddOptions(true)}
                   className="aspect-[3/4] rounded-2xl border-2 border-dashed border-white/20 flex flex-col items-center justify-center gap-2 text-white/40 hover:border-white/40 hover:text-white/60 transition-all touch-target"
                 >
                   <Plus className="w-8 h-8" />
                   <span className="text-xs font-medium">Añadir más</span>
                 </button>
               )}
+
+              {/* Loading placeholder when adding files */}
+              {isAddingFiles && (
+                <div className="aspect-[3/4] rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center">
+                  <Loader className="w-8 h-8 text-white/30 animate-spin" />
+                </div>
+              )}
             </div>
             
             {/* File List */}
             <div className="space-y-2">
               <p className="text-[10px] font-bold text-white/40 uppercase tracking-wider">
-                {stagedFiles.length} archivo{stagedFiles.length > 1 ? 's' : ''} listo{stagedFiles.length > 1 ? 's' : ''}
+                {hasFiles ? `${stagedFiles.length} archivo${stagedFiles.length !== 1 ? 's' : ''} listo${stagedFiles.length !== 1 ? 's' : ''}` : 'Sin archivos'}
               </p>
-              {stagedFiles.map((staged, idx) => (
+              {stagedFiles.map((staged) => (
                 <div key={staged.id} className="flex items-center gap-3 p-3 rounded-xl bg-white/5 border border-white/5">
                   <div className="w-10 h-10 rounded-lg overflow-hidden flex-shrink-0 bg-white/10">
                     {staged.preview ? (
@@ -338,7 +376,8 @@ export default function CameraFlowModal({ isOpen, onClose, onFilesSelected, maxF
                   </div>
                   <button
                     onClick={() => removeFile(staged.id)}
-                    className="p-2 rounded-lg hover:bg-red-500/20 text-white/40 hover:text-red-400 transition-colors touch-target"
+                    disabled={isProcessing}
+                    className="p-2 rounded-lg hover:bg-red-500/20 text-white/40 hover:text-red-400 transition-colors disabled:opacity-50 touch-target"
                   >
                     <Trash2 className="w-4 h-4" />
                   </button>
@@ -349,69 +388,79 @@ export default function CameraFlowModal({ isOpen, onClose, onFilesSelected, maxF
         )}
       </div>
 
-      {/* Add More Options (when files are staged) */}
+      {/* Add More Options Bottom Sheet */}
       <AnimatePresence>
-        {showCamera && stagedFiles.length > 0 && (
+        {showAddOptions && (
           <motion.div
-            initial={{ y: '100%' }}
-            animate={{ y: 0 }}
-            exit={{ y: '100%' }}
-            className="absolute bottom-0 left-0 right-0 bg-slate-900 rounded-t-3xl p-6 pb-safe border-t border-white/10"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            onClick={() => setShowAddOptions(false)}
           >
-            <div className="w-12 h-1 bg-white/20 rounded-full mx-auto mb-4" />
-            
-            <div className="grid grid-cols-2 gap-3">
-              <button
-                onClick={() => cameraInputRef.current?.click()}
-                className="flex items-center justify-center gap-2 p-4 rounded-2xl bg-blue-600 text-white font-bold transition-all active:scale-[0.98]"
-              >
-                <Camera className="w-5 h-5" />
-                <span>Hacer otra foto</span>
-              </button>
+            <motion.div
+              initial={{ y: '100%' }}
+              animate={{ y: 0 }}
+              exit={{ y: '100%' }}
+              transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+              className="absolute bottom-0 left-0 right-0 bg-slate-900 rounded-t-3xl p-6 pb-safe border-t border-white/10"
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="w-12 h-1 bg-white/20 rounded-full mx-auto mb-4" />
+              
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  onClick={() => cameraInputRef.current?.click()}
+                  className="flex items-center justify-center gap-2 p-4 rounded-2xl bg-blue-600 text-white font-bold transition-all active:scale-[0.98]"
+                >
+                  <Camera className="w-5 h-5" />
+                  <span>Hacer otra foto</span>
+                </button>
+                
+                <button
+                  onClick={() => galleryInputRef.current?.click()}
+                  className="flex items-center justify-center gap-2 p-4 rounded-2xl bg-white/10 text-white font-medium transition-all active:scale-[0.98]"
+                >
+                  <Image className="w-5 h-5" />
+                  <span>Añadir de galería</span>
+                </button>
+              </div>
               
               <button
-                onClick={() => galleryInputRef.current?.click()}
-                className="flex items-center justify-center gap-2 p-4 rounded-2xl bg-white/10 text-white font-medium transition-all active:scale-[0.98]"
+                onClick={() => setShowAddOptions(false)}
+                className="w-full mt-3 py-3 text-sm text-white/40 hover:text-white transition-colors"
               >
-                <Image className="w-5 h-5" />
-                <span>Añadir de galería</span>
+                Cerrar
               </button>
-            </div>
-            
-            <button
-              onClick={() => setShowCamera(false)}
-              className="w-full mt-3 py-3 text-sm text-white/40 hover:text-white transition-colors"
-            >
-              Cerrar
-            </button>
+            </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
 
       {/* Footer - Process Button */}
-      {stagedFiles.length > 0 && !showCamera && (
+      {hasFiles && !showAddOptions && (
         <div className="p-4 border-t border-white/10 bg-black/50 safe-area-bottom">
           <button
             onClick={handleProcess}
-            disabled={isProcessing || stagedFiles.length === 0}
+            disabled={isProcessing || isAddingFiles || stagedFiles.length === 0}
             className="w-full flex items-center justify-center gap-3 py-4 rounded-2xl bg-blue-600 text-white font-bold text-base transition-all disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.98] touch-target"
           >
             {isProcessing ? (
               <>
                 <Loader className="w-5 h-5 animate-spin" />
-                <span>Procesando...</span>
+                <span>Enviando...</span>
               </>
             ) : (
               <>
                 <Check className="w-5 h-5" />
-                <span>Procesar {stagedFiles.length} foto{stagedFiles.length > 1 ? 's' : ''}</span>
+                <span>Procesar {stagedFiles.length} foto{stagedFiles.length !== 1 ? 's' : ''}</span>
               </>
             )}
           </button>
           
-          {stagedFiles.length < maxFiles && (
+          {canAddMore && !isProcessing && (
             <button
-              onClick={() => setShowCamera(true)}
+              onClick={() => setShowAddOptions(true)}
               className="w-full mt-2 py-3 text-sm text-white/60 hover:text-white transition-colors flex items-center justify-center gap-2 touch-target"
             >
               <Plus className="w-4 h-4" />

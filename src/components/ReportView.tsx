@@ -620,7 +620,7 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
                     <h1 className="text-6xl md:text-8xl font-black tracking-tighter italic leading-none text-white drop-shadow-2xl selection:text-blue-500">
                       VOLTIS
                     </h1>
-                    <span className="text-[10px] md:text-xs font-bold tracking-[1em] text-slate-500/80 uppercase mt-4 pl-1">
+                    <span className="text-xs font-bold tracking-[1em] text-slate-500/80 uppercase mt-4 pl-1">
                       ENERGIA
                     </span>
                   </div>
@@ -670,7 +670,7 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
                     
                     <div className="flex items-center gap-2 opacity-60">
                       <div className="w-1.5 h-1.5 rounded-full bg-blue-500" />
-                      <span className="text-[10px] text-blue-400 font-bold tracking-[0.3em] uppercase">
+                      <span className="text-xs text-blue-400 font-bold tracking-[0.3em] uppercase">
                         Tarifa {filteredValidBills[0]?.tarifa || '3.0TD'}
                       </span>
                     </div>
@@ -685,10 +685,10 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
                 <div className="w-full max-w-5xl mx-auto">
                   <div className="mb-6 md:mb-12 flex flex-col md:flex-row items-start md:items-end justify-between gap-4 md:gap-0 border-b border-white/5 pb-4 md:pb-8">
                     <div className="space-y-2 md:space-y-3">
-                      <span className="text-[10px] font-black uppercase tracking-[0.5em] text-blue-500">Métricas Auditadas</span>
+                      <span className="text-xs font-black uppercase tracking-[0.5em] text-blue-500">Métricas Auditadas</span>
                       <h3 className="text-3xl md:text-6xl font-black tracking-tighter uppercase">Resultados {isAnnual ? 'Anuales' : 'Personalizados'}</h3>
                     </div>
-                    <div className="text-[10px] font-black text-slate-600 uppercase tracking-widest md:mb-2">v5.0 Certified Analysis</div>
+                    <div className="text-xs font-black text-slate-600 uppercase tracking-widest md:mb-2">v5.0 Certified Analysis</div>
                   </div>
                   <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-6 report-kpi-grid">
                     {[
@@ -705,12 +705,12 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
                         <div className={`w-10 h-10 md:w-14 md:h-14 rounded-xl md:rounded-2xl flex items-center justify-center mb-4 md:mb-8 bg-white/10 border border-white/10 ${kpi.color} kpi-icon-glow`}>
                           <kpi.icon className="w-5 h-5 md:w-7 md:h-7" />
                         </div>
-                        <span className="text-[9px] md:text-[11px] font-black uppercase tracking-widest text-slate-400 block mb-1 md:mb-2">{kpi.label}</span>
+                        <span className="text-xs font-black uppercase tracking-widest text-slate-400 block mb-1 md:mb-2">{kpi.label}</span>
                         <div className="flex items-baseline gap-1 md:gap-2">
                           <p className={`text-2xl md:text-4xl font-black tracking-tighter tabular-nums ${kpi.clickable ? 'text-teal-400 group-hover:text-teal-300' : 'text-white'} transition-colors`}>
                             <CountUp value={kpi.value} decimals={kpi.dec} />
                           </p>
-                          <span className="text-[10px] md:text-xs font-bold text-slate-500 uppercase">{kpi.unit}</span>
+                          <span className="text-xs font-bold text-slate-500 uppercase">{kpi.unit}</span>
                         </div>
                         {kpi.clickable && (
                           <div className="absolute top-2 right-2 md:top-4 md:right-4 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -729,11 +729,11 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
                   {/* Chart */}
                   <div className="lg:col-span-3 flex flex-col gap-4 md:gap-6">
                     <div>
-                      <span className="text-[10px] font-black uppercase tracking-[0.5em] text-blue-500 block">Digital Flow 03</span>
+                      <span className="text-xs font-black uppercase tracking-[0.5em] text-blue-500 block">Digital Flow 03</span>
                       <h3 className="text-2xl md:text-4xl font-black tracking-tighter uppercase leading-[0.9]">Evolución Mensual</h3>
                       <p className="text-slate-400 text-xs md:text-sm font-medium mt-2">Esta es tu curva de consumo anual.</p>
                     </div>
-                    <div className="flex-1 w-full glass p-3 md:p-6 rounded-2xl md:rounded-[40px] border border-white/5 overflow-visible" style={{ height: 250, minHeight: 250 }}>
+                    <div className="flex-1 w-full glass p-3 md:p-6 rounded-2xl md:rounded-[40px] border border-white/5 overflow-visible h-[280px] md:h-[400px]">
                       {!isExportMode ? (
                         <ResponsiveContainer width="100%" height={230}>
                           <BarChart data={chartData} margin={{ top: 5, right: 5, left: -15, bottom: 0 }}>

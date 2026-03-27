@@ -2,6 +2,7 @@
 
 import React, { useState, useMemo, useCallback } from 'react';
 import { ExtractedBill, isGasBill } from '@/lib/types';
+import { getMobileLabel } from '@/lib/label-utils';
 import { AlertTriangle, GripVertical, Calendar, Sparkles, CheckCircle2, XCircle, Edit3, Save, X, Shield, ShieldAlert, ShieldCheck, RefreshCw, Pencil, Zap, Flame } from 'lucide-react';
 import { getAssignedMonth } from '@/lib/date-utils';
 import { validateBill, getValidationMessage, ValidationResult } from '@/lib/bill-validator';
@@ -110,7 +111,7 @@ function ElectricityBillTable({ bills, customOCs, onUpdateBills, onUpdateOCs, on
       return (
         <div className="flex items-center gap-1 text-emerald-500" title={getValidationMessage(result)}>
           <ShieldCheck className="w-3 h-3" />
-          <span className="text-[9px] font-bold uppercase tracking-tight">Válido</span>
+          <span className="text-xs font-bold uppercase tracking-tight">Válido</span>
         </div>
       );
     }
@@ -119,7 +120,7 @@ function ElectricityBillTable({ bills, customOCs, onUpdateBills, onUpdateOCs, on
       return (
         <div className="flex items-center gap-1 text-red-500" title={getValidationMessage(result)}>
           <AlertTriangle className="w-3 h-3" />
-          <span className="text-[9px] font-bold uppercase tracking-tight">{result.discrepancy.toFixed(2)}€</span>
+          <span className="text-xs font-bold uppercase tracking-tight">{result.discrepancy.toFixed(2)}€</span>
         </div>
       );
     }
@@ -127,7 +128,7 @@ function ElectricityBillTable({ bills, customOCs, onUpdateBills, onUpdateOCs, on
     return (
       <div className="flex items-center gap-1 text-amber-500" title={getValidationMessage(result)}>
         <Shield className="w-3 h-3" />
-        <span className="text-[9px] font-bold uppercase tracking-tight">{result.discrepancy.toFixed(2)}€</span>
+        <span className="text-xs font-bold uppercase tracking-tight">{result.discrepancy.toFixed(2)}€</span>
       </div>
     );
   };
@@ -141,9 +142,9 @@ function ElectricityBillTable({ bills, customOCs, onUpdateBills, onUpdateOCs, on
 
   const renderRow = (label: string, field: keyof ExtractedBill, isNumber = false) => (
     <tr className="border-b border-white/5 hover:bg-white/5 transition-colors group">
-      <td className="p-2 md:p-3 font-bold text-[9px] md:text-[10px] text-slate-500 uppercase tracking-wider sticky left-0 bg-slate-950/80 backdrop-blur-md group-hover:bg-slate-900/80 z-10 mobile-table-cell">
+      <td className="p-2 md:p-3 font-bold text-xs text-slate-500 uppercase tracking-wider sticky left-0 bg-slate-950/80 backdrop-blur-md group-hover:bg-slate-900/80 z-10 mobile-table-cell">
         <span className="hidden md:inline">{label}</span>
-        <span className="md:hidden">{label.length > 12 ? label.substring(0, 12) + '...' : label}</span>
+        <span className="md:hidden">{getMobileLabel(label)}</span>
       </td>
       {bills.map(bill => (
         <td key={bill.id} className="p-2 md:p-3 text-xs md:text-sm border-l border-white/5 whitespace-nowrap mobile-table-cell">
@@ -173,17 +174,17 @@ function ElectricityBillTable({ bills, customOCs, onUpdateBills, onUpdateOCs, on
 
   const renderConsumoRow = (periodo: string) => (
     <tr key={`cons-${periodo}`} className="border-b border-white/5 hover:bg-white/5 transition-colors group text-slate-500">
-      <td className="p-2 md:p-3 pl-4 md:pl-8 text-[8px] md:text-[9px] font-bold uppercase tracking-wider sticky left-0 bg-slate-950/80 backdrop-blur-md group-hover:bg-slate-900/80 z-10 flex items-center gap-1 md:gap-2 mobile-table-cell">
+      <td className="p-2 md:p-3 pl-4 md:pl-8 text-xs font-bold uppercase tracking-wider sticky left-0 bg-slate-950/80 backdrop-blur-md group-hover:bg-slate-900/80 z-10 flex items-center gap-1 md:gap-2 mobile-table-cell">
         <div className="w-1 h-1 rounded-full bg-slate-700 hidden md:block" /> Consumo {periodo}
       </td>
       {bills.map(bill => {
         const item = bill.consumo?.find(c => c.periodo === periodo);
         return (
-          <td key={bill.id} className="p-2 md:p-3 text-[10px] md:text-xs border-l border-white/5 whitespace-nowrap opacity-70 mobile-table-cell">
+          <td key={bill.id} className="p-2 md:p-3 text-xs border-l border-white/5 whitespace-nowrap opacity-70 mobile-table-cell">
             {item ? (
               <div className="flex flex-col gap-0.5 md:gap-1">
                 <span className="font-medium text-slate-300">{item.kwh.toLocaleString('es-ES', { maximumFractionDigits: 1 })} kWh</span>
-                <span className={`text-[8px] md:text-[10px] uppercase font-bold tracking-wider ${item.precioEstimated ? 'text-red-400' : 'text-slate-500'}`}>
+                <span className={`text-xs uppercase font-bold tracking-wider ${item.precioEstimated ? 'text-red-400' : 'text-slate-500'}`}>
                   {item.precioKwh.toLocaleString('es-ES', { maximumFractionDigits: 4 })} €/kWh
                 </span>
               </div>
@@ -196,13 +197,13 @@ function ElectricityBillTable({ bills, customOCs, onUpdateBills, onUpdateOCs, on
 
   const renderPotenciaRow = (periodo: string) => (
     <tr key={`pot-${periodo}`} className="border-b border-white/5 hover:bg-white/5 transition-colors group text-slate-500">
-      <td className="p-2 md:p-3 pl-4 md:pl-8 text-[8px] md:text-[9px] font-bold uppercase tracking-wider sticky left-0 bg-slate-950/80 backdrop-blur-md group-hover:bg-slate-900/80 z-10 flex items-center gap-1 md:gap-2 mobile-table-cell">
+      <td className="p-2 md:p-3 pl-4 md:pl-8 text-xs font-bold uppercase tracking-wider sticky left-0 bg-slate-950/80 backdrop-blur-md group-hover:bg-slate-900/80 z-10 flex items-center gap-1 md:gap-2 mobile-table-cell">
         <div className="w-1 h-1 rounded-full bg-slate-700 hidden md:block" /> Potencia {periodo}
       </td>
       {bills.map(bill => {
         const item = bill.potencia?.find(c => c.periodo === periodo);
         return (
-          <td key={bill.id} className="p-2 md:p-3 text-[10px] md:text-xs border-l border-white/5 whitespace-nowrap opacity-70 mobile-table-cell">
+          <td key={bill.id} className="p-2 md:p-3 text-xs border-l border-white/5 whitespace-nowrap opacity-70 mobile-table-cell">
              {item ? `${item.total.toLocaleString('es-ES', { maximumFractionDigits: 2 })} €` : '-'}
           </td>
         );
@@ -260,21 +261,21 @@ function ElectricityBillTable({ bills, customOCs, onUpdateBills, onUpdateOCs, on
     <div className="mb-8">
       <div className="flex items-center gap-2 mb-4 px-2">
         <Zap className="w-4 h-4 text-blue-400" />
-        <h3 className="text-[11px] font-black text-blue-400 uppercase tracking-widest">Electricidad</h3>
+        <h3 className="text-xs font-black text-blue-400 uppercase tracking-widest">Electricidad</h3>
       </div>
       <div className="overflow-x-auto relative z-0 custom-scrollbar pb-6 text-slate-200 mobile-table-scroll -mx-4 px-4 sm:mx-0 sm:px-0">
         <table className="w-full min-w-[600px] sm:min-w-max text-left border-collapse">
           <thead>
             <tr>
-              <th className="p-2 md:p-4 w-36 md:w-64 bg-[#0a0f1c] text-blue-500 font-black text-[8px] md:text-xs uppercase tracking-[0.2em] sticky left-0 z-20 border-b border-white/10 shadow-[4px_0_24px_-10px_rgba(0,0,0,0.5)]">
+              <th className="p-2 md:p-4 w-28 md:w-64 bg-[#0a0f1c] text-blue-500 font-black text-xs uppercase tracking-[0.2em] sticky left-0 z-20 border-b border-white/10 shadow-[4px_0_24px_-10px_rgba(0,0,0,0.5)]">
                 <span className="hidden md:inline">Concepto / Periodo</span>
                 <span className="md:hidden">Concepto</span>
               </th>
               {bills.map((bill, idx) => (
-                <th key={bill.id} className={`p-2 md:p-4 bg-[#0a0f1c] border-b border-white/10 border-l border-white/5 w-36 md:w-64 ${bill.includeInReport === false ? 'opacity-40' : ''}`}>
+                <th key={bill.id} className={`p-2 md:p-4 bg-[#0a0f1c] border-b border-white/10 border-l border-white/5 w-28 md:w-64 ${bill.includeInReport === false ? 'opacity-40' : ''}`}>
                   <div className="flex flex-col gap-1">
                     <div className="flex items-center justify-between">
-                      <span className="text-[8px] md:text-[10px] font-bold text-slate-500 uppercase tracking-widest">Fact {idx + 1}</span>
+                      <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">Fact {idx + 1}</span>
                       <div className="flex items-center gap-0.5 md:gap-1">
                          <button
                            onClick={() => handleValidate(bill)}
@@ -308,7 +309,7 @@ function ElectricityBillTable({ bills, customOCs, onUpdateBills, onUpdateOCs, on
                          </button>
                       </div>
                     </div>
-                    <span className="text-[11px] md:text-sm font-bold text-white truncate block max-w-[120px] md:max-w-none" title={bill.fileName}>{bill.fileName}</span>
+                    <span className="text-xs md:text-sm font-bold text-white truncate block max-w-[120px] md:max-w-none" title={bill.fileName}>{bill.fileName}</span>
                      {bill.status !== 'error' ? (
                        <div className="flex items-center gap-2 mt-1">
                          <span className="text-[9px] md:text-[10px] text-emerald-400 flex items-center gap-1"><div className="w-1.5 h-1.5 rounded-full bg-emerald-400" /> Extraído</span>
@@ -336,20 +337,20 @@ function ElectricityBillTable({ bills, customOCs, onUpdateBills, onUpdateOCs, on
           </thead>
           <tbody>
             {renderRow('Compañía', 'comercializadora')}
-            {renderRow('Titular', 'titular')}
-            {renderRow('Tarifa', 'tarifa')}
-            {renderRow('Fecha Inicio', 'fechaInicio')}
-             {renderRow('Fecha Fin', 'fechaFin')}
-             
-             <tr className="border-b border-white/10 bg-blue-500/5 hover:bg-blue-500/10 transition-colors group">
-               <td className="p-3 font-black text-[9px] text-blue-400 uppercase tracking-[0.2em] sticky left-0 bg-[#0a1122] z-10 shadow-[4px_0_24px_-10px_rgba(0,0,0,0.5)] flex items-center gap-2">
-                 <Calendar className="w-3 h-3" /> Mes Liquidación
+             {renderRow('Titular', 'titular')}
+             {renderRow('Tarifa', 'tarifa')}
+             {renderRow('Fecha Inicio', 'fechaInicio')}
+              {renderRow('Fecha Fin', 'fechaFin')}
+              
+              <tr className="border-b border-white/10 bg-blue-500/5 hover:bg-blue-500/10 transition-colors group">
+               <td className="p-3 font-black text-xs text-blue-400 uppercase tracking-[0.2em] sticky left-0 bg-[#0a1122] z-10 shadow-[4px_0_24px_-10px_rgba(0,0,0,0.5)] flex items-center gap-2">
+                 <Calendar className="w-3 h-3 hidden md:inline" /> <span className="md:hidden">{getMobileLabel('Mes Liquidación')}</span><span className="hidden md:inline">Mes Liquidación</span>
                </td>
                {bills.map(bill => {
                  const { month, year } = getAssignedMonth(bill.fechaInicio, bill.fechaFin);
                  const monthNames = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
                  return (
-                   <td key={bill.id} className="p-3 text-[10px] font-black text-blue-300/80 border-l border-white/5 whitespace-nowrap uppercase tracking-widest">
+                   <td key={bill.id} className="p-3 text-xs font-black text-blue-300/80 border-l border-white/5 whitespace-nowrap uppercase tracking-widest">
                      {monthNames[month]} {year}
                    </td>
                  );
@@ -377,7 +378,7 @@ function ElectricityBillTable({ bills, customOCs, onUpdateBills, onUpdateOCs, on
                  <td className="p-2 md:p-3 sticky left-0 bg-[#0f172a] group-hover:bg-[#15203b] z-10 shadow-[4px_0_24px_-10px_rgba(0,0,0,0.5)] mobile-table-cell">
                    <div className="flex items-center gap-1 md:gap-2">
                      <GripVertical className="w-3 h-3 md:w-4 md:h-4 text-slate-600 opacity-30 group-hover:opacity-100 transition-opacity cursor-grab hidden md:block" />
-                     <span className="font-semibold text-[10px] md:text-xs text-slate-400 uppercase tracking-widest truncate max-w-[80px] md:max-w-none">
+                     <span className="font-semibold text-xs text-slate-400 uppercase tracking-widest truncate max-w-[80px] md:max-w-none">
                        {group.displayName}
                      </span>
                      <button
@@ -413,10 +414,11 @@ function ElectricityBillTable({ bills, customOCs, onUpdateBills, onUpdateOCs, on
              ))}
             
             <tr className="bg-white/5 border-y border-white/10"><td colSpan={bills.length + 1} className="h-4"></td></tr>
-            
+             
              <tr className="bg-blue-900/10 border-b border-blue-500/20 group">
                <td className="p-3 md:p-4 font-black text-xs md:text-sm text-blue-400 uppercase tracking-widest sticky left-0 bg-[#0a1122] z-10 shadow-[4px_0_24px_-10px_rgba(0,0,0,0.5)] mobile-table-cell">
-                 TOTAL FACTURA (€)
+                 <span className="hidden md:inline">TOTAL FACTURA (€)</span>
+                 <span className="md:hidden">{getMobileLabel('TOTAL FACTURA (€)')}</span>
                </td>
                {bills.map(bill => {
                   const energia = bill.costeTotalConsumo || 0;
@@ -502,7 +504,7 @@ function GasBillTable({ bills, customOCs, onUpdateBills, onUpdateOCs, onRefine, 
       return (
         <div className="flex items-center gap-1 text-emerald-500" title={getValidationMessage(result)}>
           <ShieldCheck className="w-3 h-3" />
-          <span className="text-[9px] font-bold uppercase tracking-tight">Válido</span>
+          <span className="text-xs font-bold uppercase tracking-tight">Válido</span>
         </div>
       );
     }
@@ -511,7 +513,7 @@ function GasBillTable({ bills, customOCs, onUpdateBills, onUpdateOCs, onRefine, 
       return (
         <div className="flex items-center gap-1 text-red-500" title={getValidationMessage(result)}>
           <AlertTriangle className="w-3 h-3" />
-          <span className="text-[9px] font-bold uppercase tracking-tight">{result.discrepancy.toFixed(2)}€</span>
+          <span className="text-xs font-bold uppercase tracking-tight">{result.discrepancy.toFixed(2)}€</span>
         </div>
       );
     }
@@ -519,7 +521,7 @@ function GasBillTable({ bills, customOCs, onUpdateBills, onUpdateOCs, onRefine, 
     return (
       <div className="flex items-center gap-1 text-amber-500" title={getValidationMessage(result)}>
         <Shield className="w-3 h-3" />
-        <span className="text-[9px] font-bold uppercase tracking-tight">{result.discrepancy.toFixed(2)}€</span>
+        <span className="text-xs font-bold uppercase tracking-tight">{result.discrepancy.toFixed(2)}€</span>
       </div>
     );
   };
@@ -533,9 +535,9 @@ function GasBillTable({ bills, customOCs, onUpdateBills, onUpdateOCs, onRefine, 
 
   const renderRow = (label: string, field: keyof ExtractedBill, isNumber = false) => (
     <tr className="border-b border-white/5 hover:bg-white/5 transition-colors group">
-      <td className="p-2 md:p-3 font-bold text-[9px] md:text-[10px] text-slate-500 uppercase tracking-wider sticky left-0 bg-slate-950/80 backdrop-blur-md group-hover:bg-slate-900/80 z-10 mobile-table-cell">
+      <td className="p-2 md:p-3 font-bold text-xs text-slate-500 uppercase tracking-wider sticky left-0 bg-slate-950/80 backdrop-blur-md group-hover:bg-slate-900/80 z-10 mobile-table-cell">
         <span className="hidden md:inline">{label}</span>
-        <span className="md:hidden">{label.length > 12 ? label.substring(0, 12) + '...' : label}</span>
+        <span className="md:hidden">{getMobileLabel(label)}</span>
       </td>
       {bills.map(bill => (
         <td key={bill.id} className="p-2 md:p-3 text-xs md:text-sm border-l border-white/5 whitespace-nowrap mobile-table-cell">
@@ -568,21 +570,21 @@ function GasBillTable({ bills, customOCs, onUpdateBills, onUpdateOCs, onRefine, 
     <div className="mb-8">
       <div className="flex items-center gap-2 mb-4 px-2">
         <Flame className="w-4 h-4 text-orange-400" />
-        <h3 className="text-[11px] font-black text-orange-400 uppercase tracking-widest">Gas</h3>
+        <h3 className="text-xs font-black text-orange-400 uppercase tracking-widest">Gas</h3>
       </div>
       <div className="overflow-x-auto relative z-0 custom-scrollbar pb-6 text-slate-200 mobile-table-scroll -mx-4 px-4 sm:mx-0 sm:px-0">
         <table className="w-full min-w-[600px] sm:min-w-max text-left border-collapse">
           <thead>
             <tr>
-              <th className="p-2 md:p-4 w-36 md:w-64 bg-[#0a0f1c] text-orange-500 font-black text-[8px] md:text-xs uppercase tracking-[0.2em] sticky left-0 z-20 border-b border-white/10 shadow-[4px_0_24px_-10px_rgba(0,0,0,0.5)]">
+              <th className="p-2 md:p-4 w-28 md:w-64 bg-[#0a0f1c] text-orange-500 font-black text-xs uppercase tracking-[0.2em] sticky left-0 z-20 border-b border-white/10 shadow-[4px_0_24px_-10px_rgba(0,0,0,0.5)]">
                 <span className="hidden md:inline">Concepto / Periodo</span>
                 <span className="md:hidden">Concepto</span>
               </th>
               {bills.map((bill, idx) => (
-                <th key={bill.id} className={`p-2 md:p-4 bg-[#0a0f1c] border-b border-white/10 border-l border-white/5 w-36 md:w-64 ${bill.includeInReport === false ? 'opacity-40' : ''}`}>
+                <th key={bill.id} className={`p-2 md:p-4 bg-[#0a0f1c] border-b border-white/10 border-l border-white/5 w-28 md:w-64 ${bill.includeInReport === false ? 'opacity-40' : ''}`}>
                   <div className="flex flex-col gap-1">
                     <div className="flex items-center justify-between">
-                      <span className="text-[8px] md:text-[10px] font-bold text-slate-500 uppercase tracking-widest">Fact {idx + 1}</span>
+                      <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">Fact {idx + 1}</span>
                       <div className="flex items-center gap-0.5 md:gap-1">
                          <button
                            onClick={() => handleValidate(bill)}
@@ -616,7 +618,7 @@ function GasBillTable({ bills, customOCs, onUpdateBills, onUpdateOCs, onRefine, 
                          </button>
                       </div>
                     </div>
-                    <span className="text-[11px] md:text-sm font-bold text-white truncate block max-w-[120px] md:max-w-none" title={bill.fileName}>{bill.fileName}</span>
+                    <span className="text-xs md:text-sm font-bold text-white truncate block max-w-[120px] md:max-w-none" title={bill.fileName}>{bill.fileName}</span>
                      {bill.status !== 'error' ? (
                        <div className="flex items-center gap-2 mt-1">
                          <span className="text-[9px] md:text-[10px] text-emerald-400 flex items-center gap-1"><div className="w-1.5 h-1.5 rounded-full bg-emerald-400" /> Extraído</span>
@@ -651,7 +653,7 @@ function GasBillTable({ bills, customOCs, onUpdateBills, onUpdateOCs, onRefine, 
             
             <tr className="border-b border-white/10 bg-orange-500/5 hover:bg-orange-500/10 transition-colors group">
               <td className="p-3 font-black text-[9px] text-orange-400 uppercase tracking-[0.2em] sticky left-0 bg-[#0a1122] z-10 shadow-[4px_0_24px_-10px_rgba(0,0,0,0.5)] flex items-center gap-2">
-                <Calendar className="w-3 h-3" /> Mes Liquidación
+                <Calendar className="w-3 h-3 hidden md:inline" /> <span className="md:hidden">{getMobileLabel('Mes Liquidación')}</span><span className="hidden md:inline">Mes Liquidación</span>
               </td>
               {bills.map(bill => {
                 const { month, year } = getAssignedMonth(bill.fechaInicio, bill.fechaFin);
@@ -668,7 +670,8 @@ function GasBillTable({ bills, customOCs, onUpdateBills, onUpdateOCs, onRefine, 
             
             <tr className="border-b border-white/5 hover:bg-white/5 transition-colors group">
               <td className="p-2 md:p-3 font-semibold text-[10px] md:text-xs text-slate-400 uppercase tracking-widest sticky left-0 bg-[#0f172a] group-hover:bg-[#15203b] z-10 shadow-[4px_0_24px_-10px_rgba(0,0,0,0.5)] mobile-table-cell">
-                Consumo kWh
+                <span className="hidden md:inline">Consumo kWh</span>
+                <span className="md:hidden">{getMobileLabel('Consumo kWh')}</span>
               </td>
               {bills.map(bill => (
                 <td key={bill.id} className="p-2 md:p-3 text-xs md:text-sm border-l border-white/5 mobile-table-cell">
@@ -679,7 +682,8 @@ function GasBillTable({ bills, customOCs, onUpdateBills, onUpdateOCs, onRefine, 
 
             <tr className="border-b border-white/5 hover:bg-white/5 transition-colors group">
               <td className="p-2 md:p-3 font-semibold text-[10px] md:text-xs text-slate-400 uppercase tracking-widest sticky left-0 bg-[#0f172a] group-hover:bg-[#15203b] z-10 shadow-[4px_0_24px_-10px_rgba(0,0,0,0.5)] mobile-table-cell">
-                Volumen (m³)
+                <span className="hidden md:inline">Volumen (m³)</span>
+                <span className="md:hidden">{getMobileLabel('Volumen (m³)')}</span>
               </td>
               {bills.map(bill => (
                 <td key={bill.id} className="p-2 md:p-3 text-[10px] md:text-xs border-l border-white/5 mobile-table-cell">
@@ -690,7 +694,8 @@ function GasBillTable({ bills, customOCs, onUpdateBills, onUpdateOCs, onRefine, 
 
             <tr className="border-b border-white/5 hover:bg-white/5 transition-colors group">
               <td className="p-2 md:p-3 font-semibold text-[10px] md:text-xs text-slate-400 uppercase tracking-widest sticky left-0 bg-[#0f172a] group-hover:bg-[#15203b] z-10 shadow-[4px_0_24px_-10px_rgba(0,0,0,0.5)] mobile-table-cell">
-                Precio €/kWh
+                <span className="hidden md:inline">Precio €/kWh</span>
+                <span className="md:hidden">{getMobileLabel('Precio €/kWh')}</span>
               </td>
               {bills.map(bill => (
                 <td key={bill.id} className="p-2 md:p-3 text-xs md:text-sm border-l border-white/5 mobile-table-cell">
@@ -704,7 +709,8 @@ function GasBillTable({ bills, customOCs, onUpdateBills, onUpdateOCs, onRefine, 
 
             <tr className="border-b border-white/5 hover:bg-white/5 transition-colors group">
               <td className="p-2 md:p-3 font-semibold text-[10px] md:text-xs text-slate-400 uppercase tracking-widest sticky left-0 bg-[#0f172a] group-hover:bg-[#15203b] z-10 shadow-[4px_0_24px_-10px_rgba(0,0,0,0.5)] mobile-table-cell">
-                Término Fijo
+                <span className="hidden md:inline">Término Fijo</span>
+                <span className="md:hidden">{getMobileLabel('Término Fijo')}</span>
               </td>
               {bills.map(bill => (
                 <td key={bill.id} className="p-2 md:p-3 text-xs md:text-sm border-l border-white/5 mobile-table-cell">
@@ -719,7 +725,8 @@ function GasBillTable({ bills, customOCs, onUpdateBills, onUpdateOCs, onRefine, 
 
             <tr className="border-b border-white/5 hover:bg-white/5 transition-colors group">
               <td className="p-2 md:p-3 font-semibold text-[10px] md:text-xs text-slate-400 uppercase tracking-widest sticky left-0 bg-[#0f172a] group-hover:bg-[#15203b] z-10 shadow-[4px_0_24px_-10px_rgba(0,0,0,0.5)] mobile-table-cell">
-                Impuesto Hidrocarb.
+                <span className="hidden md:inline">Impuesto Hidrocarb.</span>
+                <span className="md:hidden">{getMobileLabel('Impuesto Hidrocarb.')}</span>
               </td>
               {bills.map(bill => (
                 <td key={bill.id} className="p-2 md:p-3 text-xs md:text-sm border-l border-white/5 mobile-table-cell">
@@ -734,7 +741,8 @@ function GasBillTable({ bills, customOCs, onUpdateBills, onUpdateOCs, onRefine, 
 
             <tr className="border-b border-white/5 hover:bg-white/5 transition-colors group">
               <td className="p-2 md:p-3 font-semibold text-[10px] md:text-xs text-slate-400 uppercase tracking-widest sticky left-0 bg-[#0f172a] group-hover:bg-[#15203b] z-10 shadow-[4px_0_24px_-10px_rgba(0,0,0,0.5)] mobile-table-cell">
-                Alquiler Contador
+                <span className="hidden md:inline">Alquiler Contador</span>
+                <span className="md:hidden">{getMobileLabel('Alquiler Contador')}</span>
               </td>
               {bills.map(bill => (
                 <td key={bill.id} className="p-2 md:p-3 text-xs md:text-sm border-l border-white/5 mobile-table-cell">
@@ -787,7 +795,8 @@ function GasBillTable({ bills, customOCs, onUpdateBills, onUpdateOCs, onRefine, 
             
             <tr className="bg-orange-900/10 border-b border-orange-500/20 group">
               <td className="p-3 md:p-4 font-black text-xs md:text-sm text-orange-400 uppercase tracking-widest sticky left-0 bg-[#0a1122] z-10 shadow-[4px_0_24px_-10px_rgba(0,0,0,0.5)] mobile-table-cell">
-                TOTAL FACTURA (€)
+                <span className="hidden md:inline">TOTAL FACTURA (€)</span>
+                <span className="md:hidden">{getMobileLabel('TOTAL FACTURA (€)')}</span>
               </td>
               {bills.map(bill => (
                 <td key={bill.id} className="p-3 md:p-4 text-base md:text-lg font-black text-orange-400 border-l border-white/5 whitespace-nowrap mobile-table-cell">

@@ -52,7 +52,7 @@ export async function uploadOriginalDocument(
   userId: string,
   projectId: string,
   billId: string,
-  fileBuffer: Buffer,
+  fileBody: ArrayBuffer | Blob | File,
   fileName: string,
   mimeType: string
 ): Promise<StorageResult> {
@@ -64,7 +64,7 @@ export async function uploadOriginalDocument(
     
     const { data, error } = await supabase.storage
       .from(BUCKET_NAME)
-      .upload(storagePath, fileBuffer, {
+      .upload(storagePath, fileBody, {
         contentType: mimeType,
         upsert: true
       });
@@ -115,18 +115,19 @@ export async function getOriginalDocument(
 /**
  * Genera un hash del archivo para verificación
  */
-export async function generateFileHash(buffer: Buffer): Promise<string> {
+export async function generateFileHash(buffer: ArrayBuffer | Blob | File): Promise<string> {
   // Client-side: Simple hash using SubtleCrypto
   if (typeof window !== 'undefined' && window.crypto?.subtle) {
-    const uint8Array = new Uint8Array(buffer);
-    const hashBuffer = await window.crypto.subtle.digest('SHA-256', uint8Array);
+    const arrayBuffer = buffer instanceof Blob ? await buffer.arrayBuffer() : buffer;
+    const hashBuffer = await window.crypto.subtle.digest('SHA-256', arrayBuffer);
     const hashArray = Array.from(new Uint8Array(hashBuffer));
     return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
   }
   
   // Server-side fallback
   const nodeCrypto = await import('crypto');
-  return nodeCrypto.createHash('sha256').update(buffer).digest('hex');
+  const buf = buffer instanceof Buffer ? buffer : Buffer.from(buffer as any);
+  return nodeCrypto.createHash('sha256').update(buf).digest('hex');
 }
 
 /**
