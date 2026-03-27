@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Sparkles, ArrowRight, Smartphone, Zap, ShieldCheck, Lock, Eye, EyeOff } from 'lucide-react';
+import { Sparkles, ArrowRight, Smartphone, ShieldCheck, Lock, Eye, EyeOff } from 'lucide-react';
 
 interface LoginScreenProps {
   onLogin: (password: string) => void;
@@ -40,27 +40,24 @@ export default function LoginScreen({ onLogin, isLoading, error }: LoginScreenPr
             initial={{ scale: 0.8, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
             transition={{ delay: 0.2, duration: 0.8 }}
-            className="flex items-center justify-center gap-2 mb-6"
+            className="flex flex-col items-center gap-6 mb-8"
           >
+            <img 
+              src="/mascota-transparente.png" 
+              alt="Voltis Mascot" 
+              className="w-16 h-16 md:w-20 md:h-20 object-contain"
+            />
+            
             <div className="flex flex-col items-center">
-              <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center shadow-xl shadow-blue-500/20">
-                <Zap className="w-6 h-6 text-white fill-white" />
-              </div>
-              <motion.span 
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                className="mt-2 text-[10px] font-mono font-bold tracking-[0.3em] text-cyan-400 uppercase"
-              >
-                System V2.5.3 • Gemini LATEST (v1beta)
-              </motion.span>
+              <h1 className="text-6xl md:text-8xl font-black tracking-tighter uppercase italic leading-none">
+                Voltis
+              </h1>
+              <span className="text-xs md:text-sm font-bold tracking-[1em] text-slate-500/80 uppercase mt-4 pl-1">
+                Energia
+              </span>
             </div>
-            <span className="text-2xl font-black tracking-tighter uppercase italic">Voltis</span>
           </motion.div>
           
-          <h1 className="text-7xl font-black tracking-[-0.05em] leading-[0.85] uppercase italic">
-            Annual <br />
-            <span className="text-blue-500">Economics</span>
-          </h1>
           <p className="text-slate-500 font-medium tracking-tight text-lg max-w-sm mx-auto pt-4 leading-relaxed">
             Auditoría energética avanzada asistida por IA para comerciales expertos.
           </p>
