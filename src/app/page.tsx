@@ -7,7 +7,7 @@ import {
   CheckCircle, Plus, FolderOpen, Edit2, 
   BarChart3, LayoutDashboard, Settings, LogOut,
   ChevronRight, Sparkles, Zap, Smartphone, Layers, X, Search,
-  Loader, FileSpreadsheet, Check, AlertCircle, RefreshCw
+  Loader, FileSpreadsheet, Check, AlertCircle, RefreshCw, Package
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { ExtractedBill, ProjectWorkspace, QueueItem, isGasBill, ProjectFolder } from '@/lib/types';
@@ -27,6 +27,7 @@ import {
 import ReportView from '@/components/ReportView';
 import { GasReportView } from '@/components/GasReportView';
 import { MobileUploadButton } from '@/components/MobileUploadButton';
+import PoolUpload from '@/components/PoolUpload';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   fetchAllProjectsFromDB, 
@@ -115,10 +116,11 @@ function EnergyBillsAppContent() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearchActive, setIsSearchActive] = useState(false);
+  const [showPool, setShowPool] = useState(false);
 
   // Scroll lock when any modal is open
   useEffect(() => {
-    const anyModalOpen = showNewProjectModal || showNewFolderModal || previewBillId || refiningBill || showCorrectionModal || showDiag || showReport;
+    const anyModalOpen = showNewProjectModal || showNewFolderModal || previewBillId || refiningBill || showCorrectionModal || showDiag || showReport || showPool;
     if (anyModalOpen) {
       document.body.style.overflow = 'hidden';
     } else {
@@ -127,7 +129,7 @@ function EnergyBillsAppContent() {
     return () => {
       document.body.style.overflow = '';
     };
-  }, [showNewProjectModal, showNewFolderModal, previewBillId, refiningBill, showCorrectionModal, showDiag, showReport]);
+  }, [showNewProjectModal, showNewFolderModal, previewBillId, refiningBill, showCorrectionModal, showDiag, showReport, showPool]);
 
   // Sync search input with current project name
   useEffect(() => {
@@ -925,6 +927,43 @@ function EnergyBillsAppContent() {
     });
   };
 
+  const handlePoolComplete = async (projects: { name: string; bills: ExtractedBill[] }[]) => {
+    const userId = 'voltis_user_global';
+    setCloudSyncStatus('syncing');
+
+    try {
+      for (const proj of projects) {
+        const newId = (typeof crypto !== 'undefined' && crypto.randomUUID) 
+          ? crypto.randomUUID() 
+          : `proj-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+        const project: ProjectWorkspace = {
+          id: newId,
+          name: proj.name,
+          folderId: undefined,
+          bills: proj.bills,
+          customOCs: {},
+          updatedAt: Date.now()
+        };
+
+        // Add to local state
+        setSavedProjects(prev => [...prev, project]);
+        setAllBills(prev => ({ ...prev, [newId]: proj.bills }));
+        setAllCustomOCs(prev => ({ ...prev, [newId]: {} }));
+
+        // Sync to database
+        await syncProjectToDB(project, userId);
+      }
+
+      setCloudSyncStatus('synced');
+      toast.success(`${projects.length} proyecto${projects.length > 1 ? 's' : ''} creado${projects.length > 1 ? 's' : ''} desde Pool`);
+    } catch (err) {
+      console.error('Pool creation error:', err);
+      setCloudSyncStatus('error');
+      toast.error('Error al crear proyectos desde Pool');
+    }
+  };
+
   const repairProjects = () => {
     if (!confirm('Esta acción intentará mover facturas mal ubicadas a su proyecto correspondiente basándose en su CUPS. ¿Continuar?')) return;
     
@@ -1459,6 +1498,13 @@ function EnergyBillsAppContent() {
                   title="Nuevo Proyecto"
                 >
                   <Plus className="w-3.5 h-3.5" />
+                </button>
+                <button 
+                  onClick={() => setShowPool(true)}
+                  className="p-1 hover:bg-purple-500/20 text-slate-500 hover:text-purple-400 rounded transition-all"
+                  title="Pool - Carga Masiva"
+                >
+                  <Package className="w-3.5 h-3.5" />
                 </button>
               </div>
             </div>
@@ -2254,6 +2300,25 @@ function EnergyBillsAppContent() {
               </div>
             </motion.div>
           </div>
+        )}
+      </AnimatePresence>
+
+      {/* POOL UPLOAD MODAL */}
+      <AnimatePresence>
+        {showPool && (
+          <PoolUpload
+            onClose={() => setShowPool(false)}
+            onComplete={(projects) => {
+              handlePoolComplete(projects);
+              setShowPool(false);
+            }}
+            existingCups={new Set(
+              Object.values(allBills)
+                .flat()
+                .filter(b => b.cups)
+                .map(b => b.cups!.replace(/\s+/g, '').toUpperCase())
+            )}
+          />
         )}
       </AnimatePresence>
 

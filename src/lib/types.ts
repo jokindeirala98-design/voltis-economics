@@ -256,3 +256,35 @@ export interface ConceptNormalization {
   created_at: string;
   created_by?: string;
 }
+
+// ============================================================
+// POOL TYPES
+// ============================================================
+
+export interface PoolFile {
+  id: string;
+  file: File;
+  status: 'pending' | 'processing' | 'classified' | 'error';
+  error?: string;
+  extractedBill?: ExtractedBill;
+}
+
+export interface PoolGroup {
+  id: string;
+  key: string; // e.g., "electricity-ES123456789"
+  supplyType: EnergyType;
+  cups: string;
+  bills: PoolFile[];
+  projectName: string;
+  projectId?: string;
+}
+
+export interface PoolSession {
+  id: string;
+  startedAt: number;
+  files: PoolFile[];
+  groups: PoolGroup[];
+  unassigned: PoolFile[]; // Files without valid CUPS
+  status: 'uploading' | 'processing' | 'grouping' | 'ready' | 'error';
+  error?: string;
+}
