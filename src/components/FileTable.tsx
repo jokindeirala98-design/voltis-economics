@@ -262,30 +262,30 @@ function ElectricityBillTable({ bills, customOCs, onUpdateBills, onUpdateOCs, on
         <Zap className="w-4 h-4 text-blue-400" />
         <h3 className="text-[11px] font-black text-blue-400 uppercase tracking-widest">Electricidad</h3>
       </div>
-      <div className="overflow-x-auto relative z-0 custom-scrollbar pb-6 text-slate-200 mobile-table-scroll">
-        <table className="w-full min-w-max text-left border-collapse">
+      <div className="overflow-x-auto relative z-0 custom-scrollbar pb-6 text-slate-200 mobile-table-scroll -mx-4 px-4 sm:mx-0 sm:px-0">
+        <table className="w-full min-w-[600px] sm:min-w-max text-left border-collapse">
           <thead>
             <tr>
-              <th className="p-2 md:p-4 w-48 md:w-64 bg-[#0a0f1c] text-blue-500 font-black text-[9px] md:text-xs uppercase tracking-[0.2em] sticky left-0 z-20 border-b border-white/10 shadow-[4px_0_24px_-10px_rgba(0,0,0,0.5)]">
+              <th className="p-2 md:p-4 w-36 md:w-64 bg-[#0a0f1c] text-blue-500 font-black text-[8px] md:text-xs uppercase tracking-[0.2em] sticky left-0 z-20 border-b border-white/10 shadow-[4px_0_24px_-10px_rgba(0,0,0,0.5)]">
                 <span className="hidden md:inline">Concepto / Periodo</span>
                 <span className="md:hidden">Concepto</span>
               </th>
               {bills.map((bill, idx) => (
-                <th key={bill.id} className={`p-2 md:p-4 bg-[#0a0f1c] border-b border-white/10 border-l border-white/5 w-48 md:w-64 ${bill.includeInReport === false ? 'opacity-40' : ''}`}>
+                <th key={bill.id} className={`p-2 md:p-4 bg-[#0a0f1c] border-b border-white/10 border-l border-white/5 w-36 md:w-64 ${bill.includeInReport === false ? 'opacity-40' : ''}`}>
                   <div className="flex flex-col gap-1">
                     <div className="flex items-center justify-between">
-                      <span className="text-[9px] md:text-[10px] font-bold text-slate-500 uppercase tracking-widest">Factura {idx + 1}</span>
-                      <div className="flex items-center gap-1">
+                      <span className="text-[8px] md:text-[10px] font-bold text-slate-500 uppercase tracking-widest">Fact {idx + 1}</span>
+                      <div className="flex items-center gap-0.5 md:gap-1">
                          <button
                            onClick={() => handleValidate(bill)}
                            disabled={validatingBill === bill.id}
-                           className="p-1.5 md:p-1 rounded-lg hover:bg-emerald-500/20 text-slate-600 hover:text-emerald-400 transition-all disabled:opacity-50 touch-target"
-                           title="Validar matemáticamente"
+                           className="p-1 md:p-1.5 rounded-lg hover:bg-emerald-500/20 text-slate-600 hover:text-emerald-400 transition-all disabled:opacity-50 touch-target"
+                           title="Validar"
                          >
                            {validatingBill === bill.id ? (
-                             <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                             <RefreshCw className="w-3 md:w-3.5 animate-spin" />
                            ) : (
-                             <Shield className="w-3.5 h-3.5" />
+                             <Shield className="w-3 md:w-3.5" />
                            )}
                          </button>
                          <button
@@ -570,30 +570,30 @@ function GasBillTable({ bills, customOCs, onUpdateBills, onUpdateOCs, onRefine, 
         <Flame className="w-4 h-4 text-orange-400" />
         <h3 className="text-[11px] font-black text-orange-400 uppercase tracking-widest">Gas</h3>
       </div>
-      <div className="overflow-x-auto relative z-0 custom-scrollbar pb-6 text-slate-200 mobile-table-scroll">
-        <table className="w-full min-w-max text-left border-collapse">
+      <div className="overflow-x-auto relative z-0 custom-scrollbar pb-6 text-slate-200 mobile-table-scroll -mx-4 px-4 sm:mx-0 sm:px-0">
+        <table className="w-full min-w-[600px] sm:min-w-max text-left border-collapse">
           <thead>
             <tr>
-              <th className="p-2 md:p-4 w-48 md:w-64 bg-[#0a0f1c] text-orange-500 font-black text-[9px] md:text-xs uppercase tracking-[0.2em] sticky left-0 z-20 border-b border-white/10 shadow-[4px_0_24px_-10px_rgba(0,0,0,0.5)]">
+              <th className="p-2 md:p-4 w-36 md:w-64 bg-[#0a0f1c] text-orange-500 font-black text-[8px] md:text-xs uppercase tracking-[0.2em] sticky left-0 z-20 border-b border-white/10 shadow-[4px_0_24px_-10px_rgba(0,0,0,0.5)]">
                 <span className="hidden md:inline">Concepto / Periodo</span>
                 <span className="md:hidden">Concepto</span>
               </th>
               {bills.map((bill, idx) => (
-                <th key={bill.id} className={`p-2 md:p-4 bg-[#0a0f1c] border-b border-white/10 border-l border-white/5 w-48 md:w-64 ${bill.includeInReport === false ? 'opacity-40' : ''}`}>
+                <th key={bill.id} className={`p-2 md:p-4 bg-[#0a0f1c] border-b border-white/10 border-l border-white/5 w-36 md:w-64 ${bill.includeInReport === false ? 'opacity-40' : ''}`}>
                   <div className="flex flex-col gap-1">
                     <div className="flex items-center justify-between">
-                      <span className="text-[9px] md:text-[10px] font-bold text-slate-500 uppercase tracking-widest">Factura {idx + 1}</span>
-                      <div className="flex items-center gap-1">
+                      <span className="text-[8px] md:text-[10px] font-bold text-slate-500 uppercase tracking-widest">Fact {idx + 1}</span>
+                      <div className="flex items-center gap-0.5 md:gap-1">
                          <button
                            onClick={() => handleValidate(bill)}
                            disabled={validatingBill === bill.id}
-                           className="p-1.5 md:p-1 rounded-lg hover:bg-emerald-500/20 text-slate-600 hover:text-emerald-400 transition-all disabled:opacity-50 touch-target"
-                           title="Validar matemáticamente"
+                           className="p-1 md:p-1.5 rounded-lg hover:bg-emerald-500/20 text-slate-600 hover:text-emerald-400 transition-all disabled:opacity-50 touch-target"
+                           title="Validar"
                          >
                            {validatingBill === bill.id ? (
-                             <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                             <RefreshCw className="w-3 md:w-3.5 animate-spin" />
                            ) : (
-                             <Shield className="w-3.5 h-3.5" />
+                             <Shield className="w-3 md:w-3.5" />
                            )}
                          </button>
                          <button

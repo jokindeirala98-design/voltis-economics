@@ -3,6 +3,7 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { Camera, Image, FileText, X, AlertCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import CameraFlowModal from './CameraFlowModal';
 
 interface MobileUploadOptions {
   onFilesSelected: (files: File[]) => void;
@@ -15,10 +16,10 @@ const HEIC_TYPES = ['image/heic', 'image/heif', 'image/heic-sequence', 'image/he
 
 export function MobileUploadButton({ onFilesSelected, maxFiles = 10, accept, disabled }: MobileUploadOptions) {
   const [showOptions, setShowOptions] = useState(false);
+  const [showCameraFlow, setShowCameraFlow] = useState(false);
   const [heicWarning, setHeicWarning] = useState<string | null>(null);
   const [isMobile, setIsMobile] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const cameraInputRef = useRef<HTMLInputElement>(null);
   const galleryInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -41,7 +42,6 @@ export function MobileUploadButton({ onFilesSelected, maxFiles = 10, accept, dis
       const isHeic = HEIC_TYPES.includes(file.type) || /\.heic$/i.test(file.name);
       
       if (isHeic) {
-        // Try to load image to check HEIC support
         const img = document.createElement('img');
         const objectUrl = URL.createObjectURL(file);
         
@@ -59,7 +59,6 @@ export function MobileUploadButton({ onFilesSelected, maxFiles = 10, accept, dis
       }
     });
 
-    // Delay to allow async HEIC checks
     setTimeout(() => {
       if (warnings.length > 0) {
         setHeicWarning(warnings.slice(0, 3).join('\n'));
@@ -75,16 +74,26 @@ export function MobileUploadButton({ onFilesSelected, maxFiles = 10, accept, dis
     setShowOptions(false);
   }, [onFilesSelected, maxFiles]);
 
-  const handleCameraSelect = () => {
-    cameraInputRef.current?.click();
-  };
-
   const handleGallerySelect = () => {
     galleryInputRef.current?.click();
   };
 
   const handleFileSelect = () => {
     fileInputRef.current?.click();
+  };
+
+  const handleCameraSelect = () => {
+    setShowOptions(false);
+    setShowCameraFlow(true);
+  };
+
+  const handleCameraFlowClose = () => {
+    setShowCameraFlow(false);
+  };
+
+  const handleFilesFromCameraFlow = (files: File[]) => {
+    onFilesSelected(files);
+    setShowCameraFlow(false);
   };
 
   // Desktop: Return hidden input only (desktop uses dropzone)
@@ -102,25 +111,21 @@ export function MobileUploadButton({ onFilesSelected, maxFiles = 10, accept, dis
     );
   }
 
-  // Standard file types for documents
   const standardAccept = accept || '.pdf,.jpg,.jpeg,.png,.webp,.heic,.heif,.xlsx,.xls';
-  // Image types for gallery
   const imageAccept = 'image/jpeg,image/png,image/webp,image/heic,image/heif';
-  // Camera capture
-  const cameraAccept = 'image/*';
 
   return (
-    <div className="w-full">
-      {/* Hidden file inputs */}
-      <input
-        ref={cameraInputRef}
-        type="file"
-        accept={cameraAccept}
-        capture="environment"
-        onChange={handleFileSelection}
-        className="hidden"
-        disabled={disabled}
+    <>
+      {/* Camera Flow Modal - Full screen camera experience */}
+      <CameraFlowModal
+        isOpen={showCameraFlow}
+        onClose={handleCameraFlowClose}
+        onFilesSelected={handleFilesFromCameraFlow}
+        maxFiles={maxFiles}
       />
+      
+      <div className="w-full">
+        {/* Hidden file inputs */}
       <input
         ref={galleryInputRef}
         type="file"
@@ -187,7 +192,7 @@ export function MobileUploadButton({ onFilesSelected, maxFiles = 10, accept, dis
               </h3>
 
               <div className="grid grid-cols-3 gap-3">
-                {/* Camera Option */}
+                {/* Camera Option - Opens CameraFlowModal */}
                 <button
                   onClick={handleCameraSelect}
                   disabled={disabled}
@@ -249,5 +254,6 @@ export function MobileUploadButton({ onFilesSelected, maxFiles = 10, accept, dis
         <span>Subir factura</span>
       </button>
     </div>
+    </>
   );
 }

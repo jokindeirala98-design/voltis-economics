@@ -1473,10 +1473,10 @@ function EnergyBillsAppContent() {
       <motion.aside 
         initial={false}
         animate={{ 
-          x: isSidebarOpen ? 0 : -320,
+          x: isSidebarOpen ? 0 : -400,
         }}
         transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-        className="fixed inset-y-0 left-0 z-50 w-80 md:w-80 bg-black border-r border-white/5 flex flex-col shadow-2xl mobile-sidebar"
+        className="fixed inset-y-0 left-0 z-50 w-[85vw] sm:w-80 md:w-80 bg-black border-r border-white/5 flex flex-col shadow-2xl mobile-sidebar max-w-[400px]"
       >
         <div className="absolute top-0 left-0 w-full h-[300px] bg-blue-600/5 blur-[100px] pointer-events-none" />
         

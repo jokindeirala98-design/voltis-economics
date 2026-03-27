@@ -626,35 +626,37 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
                   </div>
                 </div>
 
-                {/* Centered Month Selector */}
+                {/* Centered Month Selector - Mobile Optimized */}
                 <div className="flex flex-col items-center gap-4 py-6 border-y border-white/5 w-full max-w-2xl">
-                   <div className="flex items-center gap-1.5 flex-wrap justify-center">
-                    <button 
-                      onClick={selectAllMonths}
-                      className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
-                        isAnnual 
-                          ? 'bg-white text-black shadow-xl shadow-white/10' 
-                          : 'bg-white/5 text-slate-500 hover:bg-white/10 hover:text-slate-300 border border-white/5'
-                      }`}
-                    >
-                      ANUAL
-                    </button>
-                    <div className="w-px h-4 bg-white/10 mx-2" />
-                    {MONTH_LABELS.map((label, idx) => (
-                      <button 
-                        key={idx}
-                        onClick={() => toggleMonth(idx)}
-                        className={`w-9 h-9 rounded-xl text-[10px] font-bold transition-all border ${
-                          selectedMonths.has(idx)
-                            ? 'bg-blue-600/20 border-blue-500/40 text-blue-400 shadow-[0_0_15px_rgba(59,130,246,0.1)]' 
-                            : 'bg-white/5 border-white/5 text-slate-500 hover:bg-white/10 hover:text-slate-300'
-                        }`}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
+                   <div className="flex items-center gap-1 flex-wrap justify-center px-2">
+                     <button 
+                       onClick={selectAllMonths}
+                       className={`px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all touch-target ${
+                         isAnnual 
+                           ? 'bg-white text-black shadow-xl shadow-white/10' 
+                           : 'bg-white/5 text-slate-500 hover:bg-white/10 hover:text-slate-300 border border-white/5'
+                       }`}
+                     >
+                       ANUAL
+                     </button>
+                     <div className="w-px h-4 bg-white/10 mx-1" />
+                     <div className="flex flex-wrap justify-center gap-1">
+                       {MONTH_LABELS.map((label, idx) => (
+                         <button 
+                           key={idx}
+                           onClick={() => toggleMonth(idx)}
+                           className={`w-8 h-8 rounded-lg text-[9px] font-bold transition-all border touch-target ${
+                             selectedMonths.has(idx)
+                               ? 'bg-blue-600/20 border-blue-500/40 text-blue-400 shadow-[0_0_10px_rgba(59,130,246,0.1)]' 
+                               : 'bg-white/5 border-white/5 text-slate-500 hover:bg-white/10 hover:text-slate-300'
+                           }`}
+                         >
+                           {label}
+                         </button>
+                       ))}
+                     </div>
+                   </div>
+                 </div>
                 
                 <div className="hero-content text-center space-y-6 relative z-10" style={{ opacity: 1 }}>
                   <h2 className="text-6xl md:text-7xl font-black tracking-tighter text-white uppercase">{projectName}</h2>
