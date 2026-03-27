@@ -402,8 +402,12 @@ export function GasReportView({ bills, onBack, projectName = 'PROYECTO', project
                       {row.total.toFixed(2)}€
                       {onPreviewBill && (
                         <button 
-                          onClick={(e) => { e.stopPropagation(); onPreviewBill(row.id); }}
-                          className="p-1.5 rounded-lg bg-orange-500/10 text-orange-400 hover:bg-orange-500/20 transition-all opacity-0 group-hover:opacity-100"
+                          onClick={(e) => { 
+                            e.stopPropagation(); 
+                            console.log(`[PREVIEW_DEBUG][CLICK] Gas Table Clicked. Bill ID: ${row.id}`);
+                            onPreviewBill(row.id); 
+                          }}
+                          className="p-1.5 rounded-lg bg-orange-500/10 text-orange-400 hover:bg-orange-500/20 transition-all ml-2"
                           title="Ver Factura Original"
                         >
                           <FileText className="w-3.5 h-3.5" />

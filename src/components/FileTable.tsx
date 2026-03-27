@@ -3,7 +3,7 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import { ExtractedBill, isGasBill } from '@/lib/types';
 import { getMobileLabel } from '@/lib/label-utils';
-import { AlertTriangle, GripVertical, Calendar, Sparkles, CheckCircle2, XCircle, Edit3, Save, X, Shield, ShieldAlert, ShieldCheck, RefreshCw, Pencil, Zap, Flame } from 'lucide-react';
+import { AlertTriangle, GripVertical, Calendar, Sparkles, CheckCircle2, XCircle, Edit3, Save, X, Shield, ShieldAlert, ShieldCheck, RefreshCw, Pencil, Zap, Flame, FileText } from 'lucide-react';
 import { getAssignedMonth } from '@/lib/date-utils';
 import { validateBill, getValidationMessage, ValidationResult } from '@/lib/bill-validator';
 import { getOrderedConcepts, getBillCanonicalTotal, getCanonicalName, CANONICAL_GROUPS } from '@/lib/concept-utils';
@@ -14,6 +14,7 @@ interface FileTableProps {
   customOCs: Record<string, { concepto: string; total: number }[]>;
   onUpdateOCs: (billId: string, ocs: { concepto: string; total: number }[]) => void;
   onRefine: (bill: ExtractedBill) => void;
+  onPreviewBill?: (billId: string) => void;
 }
 
 const CANONICAL_OPTIONS = [
@@ -29,7 +30,7 @@ const CANONICAL_OPTIONS = [
   { value: CANONICAL_GROUPS.OTROS, label: 'Otros' },
 ];
 
-function ElectricityBillTable({ bills, customOCs, onUpdateBills, onUpdateOCs, onRefine, validationResults, setValidationResults, validatingBill, editingCell, setEditingCell, editingConcept, setEditingConcept, editConceptName, setEditConceptName, editConceptValue, setEditConceptValue, editCanonicalGroup, setEditCanonicalGroup }: {
+function ElectricityBillTable({ bills, customOCs, onUpdateBills, onUpdateOCs, onRefine, validationResults, setValidationResults, validatingBill, editingCell, setEditingCell, editingConcept, setEditingConcept, editConceptName, setEditConceptName, editConceptValue, setEditConceptValue, editCanonicalGroup, setEditCanonicalGroup, onPreviewBill }: {
   bills: ExtractedBill[];
   customOCs: Record<string, { concepto: string; total: number }[]>;
   onUpdateBills: (bills: ExtractedBill[]) => void;
@@ -48,6 +49,7 @@ function ElectricityBillTable({ bills, customOCs, onUpdateBills, onUpdateOCs, on
   setEditConceptValue: React.Dispatch<React.SetStateAction<number>>;
   editCanonicalGroup: string;
   setEditCanonicalGroup: React.Dispatch<React.SetStateAction<string>>;
+  onPreviewBill?: (billId: string) => void;
 }) {
   const [draggedConcept, setDraggedConcept] = useState<string | null>(null);
 
@@ -93,45 +95,6 @@ function ElectricityBillTable({ bills, customOCs, onUpdateBills, onUpdateOCs, on
     });
     onUpdateBills(updated);
   }, [bills, onUpdateBills]);
-
-  const getValidationStatus = useCallback((bill: ExtractedBill) => {
-    if (validationResults[bill.id]) {
-      return validationResults[bill.id];
-    }
-    return validateBill(bill);
-  }, [validationResults]);
-
-  const getValidationBadge = (bill: ExtractedBill) => {
-    const result = getValidationStatus(bill);
-    if (result.printedTotal === 0) {
-      return null;
-    }
-    
-    if (result.isValid) {
-      return (
-        <div className="flex items-center gap-1 text-emerald-500" title={getValidationMessage(result)}>
-          <ShieldCheck className="w-3 h-3" />
-          <span className="text-xs font-bold uppercase tracking-tight">Válido</span>
-        </div>
-      );
-    }
-    
-    if (result.discrepancyPercent > 5) {
-      return (
-        <div className="flex items-center gap-1 text-red-500" title={getValidationMessage(result)}>
-          <AlertTriangle className="w-3 h-3" />
-          <span className="text-xs font-bold uppercase tracking-tight">{result.discrepancy.toFixed(2)}€</span>
-        </div>
-      );
-    }
-    
-    return (
-      <div className="flex items-center gap-1 text-amber-500" title={getValidationMessage(result)}>
-        <Shield className="w-3 h-3" />
-        <span className="text-xs font-bold uppercase tracking-tight">{result.discrepancy.toFixed(2)}€</span>
-      </div>
-    );
-  };
 
   const cellValue = (bill: ExtractedBill, field: keyof ExtractedBill): string => {
     const val = bill[field];
@@ -228,35 +191,6 @@ function ElectricityBillTable({ bills, customOCs, onUpdateBills, onUpdateOCs, on
     setEditCanonicalGroup(canonicalName);
   };
 
-  const saveEditConcept = () => {
-    if (!editingConcept) return;
-
-    const { canonicalName, billId } = editingConcept;
-    
-    if (billId) {
-      const bill = bills.find(b => b.id === billId);
-      if (!bill) return;
-
-      let currentOCs = [...(customOCs[billId] || [])];
-      currentOCs = currentOCs.filter(c => getCanonicalName(c.concepto) !== getCanonicalName(canonicalName));
-      if (editConceptValue !== 0) {
-        currentOCs.push({ concepto: editConceptName, total: editConceptValue });
-      }
-      onUpdateOCs(billId, currentOCs);
-    } else {
-      bills.forEach(bill => {
-        let currentOCs = [...(customOCs[bill.id] || [])];
-        currentOCs = currentOCs.filter(c => getCanonicalName(c.concepto) !== getCanonicalName(canonicalName));
-        if (editConceptValue !== 0) {
-          currentOCs.push({ concepto: editConceptName, total: editConceptValue });
-        }
-        onUpdateOCs(bill.id, currentOCs);
-      });
-    }
-
-    setEditingConcept(null);
-  };
-
   return (
     <div className="mb-8">
       <div className="flex items-center gap-2 mb-4 px-2">
@@ -296,6 +230,15 @@ function ElectricityBillTable({ bills, customOCs, onUpdateBills, onUpdateOCs, on
                          >
                            <Sparkles className="w-3.5 h-3.5" />
                          </button>
+                         {onPreviewBill && (
+                           <button
+                             onClick={() => onPreviewBill(bill.id)}
+                             className="p-1.5 md:p-1 rounded-lg hover:bg-white/10 text-slate-500 hover:text-white transition-all touch-target"
+                             title="Ver factura original"
+                           >
+                             <FileText className="w-3.5 h-3.5" />
+                           </button>
+                         )}
                          <button
                            onClick={() => {
                              if (confirm(`¿Eliminar la factura "${bill.fileName}" del proyecto?`)) {
@@ -441,7 +384,7 @@ function ElectricityBillTable({ bills, customOCs, onUpdateBills, onUpdateOCs, on
   );
 }
 
-function GasBillTable({ bills, customOCs, onUpdateBills, onUpdateOCs, onRefine, validationResults, setValidationResults, validatingBill, editingCell, setEditingCell }: {
+function GasBillTable({ bills, customOCs, onUpdateBills, onUpdateOCs, onRefine, validationResults, setValidationResults, validatingBill, editingCell, setEditingCell, onPreviewBill }: {
   bills: ExtractedBill[];
   customOCs: Record<string, { concepto: string; total: number }[]>;
   onUpdateBills: (bills: ExtractedBill[]) => void;
@@ -452,6 +395,7 @@ function GasBillTable({ bills, customOCs, onUpdateBills, onUpdateOCs, onRefine, 
   validatingBill: string | null;
   editingCell: { billId: string, field: string } | null;
   setEditingCell: React.Dispatch<React.SetStateAction<{ billId: string, field: string } | null>>;
+  onPreviewBill?: (billId: string) => void;
 }) {
   const handleToggleIncludeInReport = useCallback((bill: ExtractedBill) => {
     const updated = bills.map<ExtractedBill>(b => {
@@ -486,45 +430,6 @@ function GasBillTable({ bills, customOCs, onUpdateBills, onUpdateOCs, onRefine, 
     });
     onUpdateBills(updated);
   }, [bills, onUpdateBills]);
-
-  const getValidationStatus = useCallback((bill: ExtractedBill) => {
-    if (validationResults[bill.id]) {
-      return validationResults[bill.id];
-    }
-    return validateBill(bill);
-  }, [validationResults]);
-
-  const getValidationBadge = (bill: ExtractedBill) => {
-    const result = getValidationStatus(bill);
-    if (result.printedTotal === 0) {
-      return null;
-    }
-    
-    if (result.isValid) {
-      return (
-        <div className="flex items-center gap-1 text-emerald-500" title={getValidationMessage(result)}>
-          <ShieldCheck className="w-3 h-3" />
-          <span className="text-xs font-bold uppercase tracking-tight">Válido</span>
-        </div>
-      );
-    }
-    
-    if (result.discrepancyPercent > 5) {
-      return (
-        <div className="flex items-center gap-1 text-red-500" title={getValidationMessage(result)}>
-          <AlertTriangle className="w-3 h-3" />
-          <span className="text-xs font-bold uppercase tracking-tight">{result.discrepancy.toFixed(2)}€</span>
-        </div>
-      );
-    }
-    
-    return (
-      <div className="flex items-center gap-1 text-amber-500" title={getValidationMessage(result)}>
-        <Shield className="w-3 h-3" />
-        <span className="text-xs font-bold uppercase tracking-tight">{result.discrepancy.toFixed(2)}€</span>
-      </div>
-    );
-  };
 
   const cellValue = (bill: ExtractedBill, field: keyof ExtractedBill): string => {
     const val = bill[field];
@@ -605,6 +510,15 @@ function GasBillTable({ bills, customOCs, onUpdateBills, onUpdateOCs, onRefine, 
                          >
                            <Sparkles className="w-3.5 h-3.5" />
                          </button>
+                         {onPreviewBill && (
+                           <button
+                             onClick={() => onPreviewBill(bill.id)}
+                             className="p-1.5 md:p-1 rounded-lg hover:bg-white/10 text-slate-500 hover:text-white transition-all touch-target"
+                             title="Ver factura original"
+                           >
+                             <FileText className="w-3.5 h-3.5" />
+                           </button>
+                         )}
                          <button
                            onClick={() => {
                              if (confirm(`¿Eliminar la factura "${bill.fileName}" del proyecto?`)) {
@@ -811,7 +725,7 @@ function GasBillTable({ bills, customOCs, onUpdateBills, onUpdateOCs, onRefine, 
   );
 }
 
-export default function FileTable({ bills, onUpdateBills, customOCs, onUpdateOCs, onRefine }: FileTableProps) {
+export default function FileTable({ bills, onUpdateBills, customOCs, onUpdateOCs, onRefine, onPreviewBill }: FileTableProps) {
   const [editingCell, setEditingCell] = useState<{ billId: string, field: string } | null>(null);
   const [validatingBill, setValidatingBill] = useState<string | null>(null);
   const [validationResults, setValidationResults] = useState<Record<string, ValidationResult>>({});
@@ -951,6 +865,7 @@ export default function FileTable({ bills, onUpdateBills, customOCs, onUpdateOCs
           setEditConceptValue={setEditConceptValue}
           editCanonicalGroup={editCanonicalGroup}
           setEditCanonicalGroup={setEditCanonicalGroup}
+          onPreviewBill={onPreviewBill}
         />
       )}
       
@@ -966,6 +881,7 @@ export default function FileTable({ bills, onUpdateBills, customOCs, onUpdateOCs
           validatingBill={validatingBill}
           editingCell={editingCell}
           setEditingCell={setEditingCell}
+          onPreviewBill={onPreviewBill}
         />
       )}
     </div>

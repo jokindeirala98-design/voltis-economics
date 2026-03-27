@@ -21,6 +21,16 @@ export default function DocumentViewer({ src, type, fileName, onClose }: Documen
   const [isFullScreen, setIsFullScreen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
+  React.useEffect(() => {
+    console.log(`[PREVIEW_DEBUG][VIEWER] DocumentViewer mounted.`, {
+      type,
+      fileName,
+      srcLength: src?.length || 0,
+      isBase64: src?.startsWith('data:'),
+      hasSemicolon: src?.includes(';')
+    });
+  }, [src, type, fileName]);
+
   const handleZoomIn = () => setScale(prev => Math.min(prev + 0.25, 3));
   const handleZoomOut = () => setScale(prev => Math.max(prev - 0.25, 0.5));
   const handleReset = () => {
@@ -132,14 +142,26 @@ export default function DocumentViewer({ src, type, fileName, onClose }: Documen
               src={`${src}#toolbar=0&navpanes=0&scrollbar=0`}
               className="w-full h-full min-h-[60vh] md:min-h-[80vh] rounded-xl shadow-2xl bg-white border-none"
               title="PDF Viewer"
-              onLoad={() => setIsLoading(false)}
+              onLoad={() => {
+                console.log(`[PREVIEW_DEBUG][VIEWER] iframe PDF loaded successfully`);
+                setIsLoading(false);
+              }}
+              onError={(e) => {
+                console.error(`[PREVIEW_DEBUG][VIEWER] iframe PDF load error:`, e);
+              }}
             />
           ) : (
             <img 
               src={src} 
               alt={fileName || 'Document preview'} 
               className="max-w-full max-h-[80vh] rounded-xl shadow-2xl object-contain border border-white/10 bg-white"
-              onLoad={() => setIsLoading(false)}
+              onLoad={() => {
+                console.log(`[PREVIEW_DEBUG][VIEWER] img preview loaded successfully`);
+                setIsLoading(false);
+              }}
+              onError={(e) => {
+                console.error(`[PREVIEW_DEBUG][VIEWER] img preview load error:`, e);
+              }}
             />
           )}
         </div>

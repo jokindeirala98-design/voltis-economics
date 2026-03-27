@@ -180,27 +180,43 @@ export async function getDocumentForPreview(
   fallbackBase64?: string
 ): Promise<string | null> {
   try {
-    const { data, error } = await getOriginalDocument(storagePath);
+    console.log(`[STORAGE_DEBUG] getDocumentForPreview(path: ${storagePath})`);
     
-    if (error || !data) {
-      // Fallback a Base64 en memoria
-      return fallbackBase64 || null;
+    // If we have base64 already, use it
+    if (fallbackBase64) {
+      console.log(`[STORAGE_DEBUG] using provided fallbackBase64`);
+      return fallbackBase64;
+    }
+
+    console.log(`[PREVIEW_DEBUG][STORAGE] Starting download for path: ${storagePath}`);
+    const { data, error } = await supabase.storage
+      .from(BUCKET_NAME) // Changed from 'invoices' to BUCKET_NAME to match original
+      .download(storagePath);
+
+    if (error) {
+      console.error('[PREVIEW_DEBUG][STORAGE] Supabase download error:', error);
+      // Original code returned null, new code threw error. Sticking to original behavior for now.
+      return null;
     }
     
-    // Obtener mime type del path
-    const extension = storagePath.split('.').pop()?.toLowerCase();
-    const mimeTypes: Record<string, string> = {
-      'pdf': 'application/pdf',
-      'png': 'image/png',
-      'jpg': 'image/jpeg',
-      'jpeg': 'image/jpeg',
-      'webp': 'image/webp'
-    };
-    const mimeType = mimeTypes[extension || 'pdf'] || 'application/pdf';
+    if (!data) {
+      console.error('[PREVIEW_DEBUG][STORAGE] Supabase download returned null data');
+      return null;
+    }
+
+    console.log(`[PREVIEW_DEBUG][STORAGE] Download successful. Blob size: ${data.size}, type: ${data.type}`);
     
-    return arrayBufferToBase64(data, mimeType);
+    // Get mime type from extension if not provided
+    const extension = storagePath.split('.').pop()?.toLowerCase();
+    const mimeType = extension === 'pdf' ? 'application/pdf' : `image/${extension === 'png' ? 'png' : 'jpeg'}`;
+    
+    const arrayBuffer = await data.arrayBuffer(); // Convert Blob to ArrayBuffer
+    
+    const dataUrl = arrayBufferToBase64(arrayBuffer, mimeType);
+    console.log(`[PREVIEW_DEBUG][STORAGE] Conversion to data URL successful. Type: ${mimeType}, Length: ${dataUrl.length}`);
+    return dataUrl;
   } catch (e) {
-    console.error('Error getting document for preview:', e);
+    console.error(`[STORAGE_DEBUG] Fatal error in getDocumentForPreview:`, e);
     return fallbackBase64 || null;
   }
 }

@@ -122,6 +122,7 @@ function EnergyBillsAppContent() {
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearchActive, setIsSearchActive] = useState(false);
   const [showPool, setShowPool] = useState(false);
+  const [activeSidebarWidth, setActiveSidebarWidth] = useState(320);
 
   // Scroll lock when any modal is open
   useEffect(() => {
@@ -176,14 +177,17 @@ function EnergyBillsAppContent() {
       const am = getAssignedMonth(a.fechaInicio, a.fechaFin);
       const bm = getAssignedMonth(b.fechaInicio, b.fechaFin);
       if (am.year !== bm.year) return am.year - bm.year;
-      if (am.month !== bm.month) return am.month - bm.month;
       return (a.fileName || '').localeCompare(b.fileName || '');
     });
   }, [allBills, currentProjectId]);
 
+  const allBillsFlat = useMemo(() => Object.values(allBills).flat(), [allBills]);
+
   // Load preview document
   useEffect(() => {
     const loadPreview = async () => {
+      console.log(`[PREVIEW_DEBUG][EFFECT] loadPreview trigger for billId: ${previewBillId || 'NULL'}`);
+      
       if (!previewBillId) {
         setPreviewUrl(null);
         return;
@@ -194,8 +198,10 @@ function EnergyBillsAppContent() {
       try {
         // 1. Check in-memory session Refs first (fastest)
         if (fileRefs[previewBillId]) {
+          console.log(`[PREVIEW_DEBUG][FILE_REF] Found matching File object in memory (fileRefs)`);
           const file = fileRefs[previewBillId];
           const url = URL.createObjectURL(file);
+          console.log(`[PREVIEW_DEBUG][PAYLOAD] Preview source: Blob URL generated from memory. type: ${file.type}`);
           setPreviewUrl(url);
           setPreviewType(file.type === 'application/pdf' ? 'pdf' : 'image');
           setIsPreviewLoading(false);
@@ -203,31 +209,54 @@ function EnergyBillsAppContent() {
         }
 
         // 2. Fetch from storage or memory backup
-        const bill = bills.find(b => b.id === previewBillId);
+        console.log(`[PREVIEW_DEBUG][LOOKUP] Searching for billId: ${previewBillId} in allBillsFlat (${allBillsFlat.length} bills total)`);
+        
+        const bill = allBillsFlat.find(b => b.id === previewBillId);
+        
         if (bill) {
+          console.log(`[PREVIEW_DEBUG][FILE_REF] Bill object found with following keys:`, {
+            id: bill.id,
+            fileName: bill.fileName,
+            storagePath: bill.storagePath,
+            originalFileUrl: (bill as any).originalFileUrl || 'NOT_PRESENT',
+            originalFileName: (bill as any).originalFileName || 'NOT_PRESENT',
+            hasBase64: !!bill.originalFileBase64
+          });
+          
           const type = (bill.fileMimeType === 'application/pdf' || bill.fileName?.toLowerCase().endsWith('.pdf')) ? 'pdf' : 'image';
           setPreviewType(type as 'pdf' | 'image');
           
           if (bill.storagePath) {
-            console.log(`[PREVIEW] Fetching from storage: ${bill.storagePath}`);
+            console.log(`[PREVIEW_DEBUG][STORAGE] Initiating Supabase Storage fetch for: ${bill.storagePath}`);
             const result = await getDocumentForPreview(bill.storagePath, bill.originalFileBase64);
+            
             if (result) {
+              console.log(`[PREVIEW_DEBUG][PAYLOAD] Preview source: Supabase Storage data URL (length: ${result.length})`);
               setPreviewUrl(result);
+            } else {
+              console.error(`[PREVIEW_DEBUG][STORAGE] Failed to fetch or convert document from: ${bill.storagePath}`);
             }
           } else if (bill.originalFileBase64) {
-            console.log(`[PREVIEW] Using cached Base64`);
+            console.log(`[PREVIEW_DEBUG][PAYLOAD] Preview source: Falling back to local Base64 (length: ${bill.originalFileBase64.length})`);
             setPreviewUrl(bill.originalFileBase64);
+          } else {
+            console.error(`[PREVIEW_DEBUG][FILE_REF] CRITICAL: Bill found but lacks both storagePath and base64.`, {
+              requestedId: previewBillId,
+              availableKeys: Object.keys(bill)
+            });
           }
+        } else {
+          console.error(`[PREVIEW_DEBUG][LOOKUP] CRITICAL: Bill with ID ${previewBillId} NOT FOUND in allBillsFlat. Check state synchronization.`);
         }
       } catch (err) {
-        console.error('Error loading preview:', err);
+        console.error('[PREVIEW_DEBUG][ERROR] Fatal error in loadPreview chain:', err);
       } finally {
         setIsPreviewLoading(false);
       }
     };
 
     loadPreview();
-  }, [previewBillId, fileRefs, bills]);
+  }, [previewBillId, fileRefs, allBillsFlat]);
 
   const extractionQueue = allExtractionQueues[currentProjectId] || [];
   const customOCs = allCustomOCs[currentProjectId] || {};
@@ -1309,7 +1338,10 @@ function EnergyBillsAppContent() {
             onBack={() => setShowReport(false)}
             projectName={projectName}
             projectId={currentProjectId}
-            onPreviewBill={(id) => setPreviewBillId(id)}
+            onPreviewBill={(id) => {
+              console.log(`[PREVIEW_DEBUG][STATE] setPreviewBillId (Gas Only): ${previewBillId} -> ${id}`);
+              setPreviewBillId(id);
+            }}
           />
         )}
         
@@ -1321,7 +1353,10 @@ function EnergyBillsAppContent() {
             onBack={() => setShowReport(false)} 
             projectName={projectName}
             projectId={currentProjectId}
-            onPreviewBill={(id) => setPreviewBillId(id)}
+            onPreviewBill={(id) => {
+              console.log(`[PREVIEW_DEBUG][STATE] setPreviewBillId (Elec Only): ${previewBillId} -> ${id}`);
+              setPreviewBillId(id);
+            }}
           />
         )}
         
@@ -1333,7 +1368,10 @@ function EnergyBillsAppContent() {
             onBack={() => setShowReport(false)} 
             projectName={`${projectName} - Electricidad`}
             projectId={currentProjectId}
-            onPreviewBill={(id) => setPreviewBillId(id)}
+            onPreviewBill={(id) => {
+              console.log(`[PREVIEW_DEBUG][STATE] setPreviewBillId (Mixed Elec): ${previewBillId} -> ${id}`);
+              setPreviewBillId(id);
+            }}
           />
         )}
         
@@ -1343,7 +1381,10 @@ function EnergyBillsAppContent() {
             onBack={() => setShowReport(false)}
             projectName={`${projectName} - Gas`}
             projectId={currentProjectId}
-            onPreviewBill={(id) => setPreviewBillId(id)}
+            onPreviewBill={(id) => {
+              console.log(`[PREVIEW_DEBUG][STATE] setPreviewBillId (Mixed Gas): ${previewBillId} -> ${id}`);
+              setPreviewBillId(id);
+            }}
           />
         )}
       </div>
@@ -1508,15 +1549,22 @@ function EnergyBillsAppContent() {
          )}
        </AnimatePresence>
        
-       {/* Sidebar - separate for smooth slide-out */}
+       {/* Mobile Sidebar - Animated */}
        <AnimatePresence>
          {isSidebarOpen && (
            <motion.aside
-             initial={{ x: '-100%' }}
+             initial={{ x: -activeSidebarWidth }}
              animate={{ x: 0 }}
-             exit={{ x: '-100%' }}
+             exit={{ x: -activeSidebarWidth }}
+             onViewportEnter={(entry) => {
+               if (entry && entry.target instanceof HTMLElement) {
+                 const w = entry.target.offsetWidth;
+                 setActiveSidebarWidth(w);
+                 console.log(`[SIDEBAR_DEBUG] Mobile Sidebar Rendered. Width: ${w}`);
+               }
+             }}
              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-             className="fixed inset-y-0 left-0 z-50 w-[280px] bg-black border-r border-white/5 flex flex-col shadow-2xl mobile-sidebar md:hidden"
+             className="md:hidden fixed inset-y-0 left-0 z-50 w-80 bg-black border-r border-white/5 flex flex-col shadow-2xl"
            >
         <div className="absolute top-0 left-0 w-full h-[300px] bg-blue-600/5 blur-[100px] pointer-events-none" />
         
@@ -1768,7 +1816,12 @@ function EnergyBillsAppContent() {
 
        {/* Desktop Sidebar - Always visible when open */}
       {isSidebarOpen && (
-        <aside className="hidden md:flex fixed inset-y-0 left-0 z-50 w-80 bg-black border-r border-white/5 flex flex-col shadow-2xl">
+        <aside 
+          className="hidden md:flex fixed inset-y-0 left-0 z-50 w-80 bg-black border-r border-white/5 flex flex-col shadow-2xl"
+          ref={(el) => {
+            if (el) console.log(`[SIDEBAR_DEBUG] Desktop Sidebar Rendered. OffsetWidth: ${el.offsetWidth}`);
+          }}
+        >
           <div className="absolute top-0 left-0 w-full h-[300px] bg-blue-600/5 blur-[100px] pointer-events-none" />
           <div className="px-8 pt-10 pb-6 flex flex-col gap-8 relative z-10">
             <div className="flex items-center justify-between">
@@ -2020,6 +2073,10 @@ function EnergyBillsAppContent() {
                         setRefiningBill(bill);
                         setRefineInstruction('');
                       }}
+                      onPreviewBill={(id) => {
+                        console.log(`[PREVIEW_DEBUG][STATE] setPreviewBillId (Main Table): ${previewBillId} -> ${id}`);
+                        setPreviewBillId(id);
+                      }}
                     />
                   </div>
                 </motion.div>
@@ -2211,12 +2268,15 @@ function EnergyBillsAppContent() {
               
               <div className="flex-1 bg-black/40 overflow-hidden relative">
                 {previewUrl ? (
-                  <DocumentViewer 
-                    src={previewUrl} 
-                    type={previewType} 
-                    fileName={bills.find(b => b.id === previewBillId)?.fileName}
-                    onClose={() => setPreviewBillId(null)}
-                  />
+                  <>
+                    {console.log(`[PREVIEW_DEBUG][MODAL] Rendering DocumentViewer with valid previewUrl (length: ${previewUrl.length})`)}
+                    <DocumentViewer 
+                      src={previewUrl} 
+                      type={previewType} 
+                      fileName={bills.find(b => b.id === previewBillId)?.fileName}
+                      onClose={() => setPreviewBillId(null)}
+                    />
+                  </>
                 ) : isPreviewLoading ? (
                   <div className="w-full h-full flex flex-col items-center justify-center gap-4">
                     <Loader className="w-8 h-8 text-blue-500 animate-spin" />

@@ -897,13 +897,17 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
                               {row.periodSpend?.totalEur?.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
                             </td>
                             <td className="px-2 md:px-4 py-2 md:py-3 text-center no-print">
-                              <button
-                                onClick={(e) => { e.stopPropagation(); onPreviewBill?.(row.id); }}
-                                className="p-1.5 md:p-2 rounded-xl bg-white/5 hover:bg-blue-600/20 text-slate-500 hover:text-blue-400 transition-all border border-white/5 touch-target"
-                                title="Ver factura original"
-                              >
-                                <FileText className="w-3 h-3 md:w-3.5 md:h-3.5" />
-                              </button>
+                                <button 
+                                  onClick={(e) => { 
+                                    e.stopPropagation(); 
+                                    console.log(`[PREVIEW_DEBUG][CLICK] Matrix 2 Clicked. Bill ID: ${row.id}`);
+                                    onPreviewBill?.(row.id); 
+                                  }}
+                                  className="p-1.5 md:p-2 rounded-xl bg-white/5 hover:bg-blue-600/20 text-slate-500 hover:text-blue-400 transition-all border border-white/5 touch-target"
+                                  title="Ver factura original"
+                                >
+                                  <FileText className="w-3 h-3 md:w-3.5 md:h-3.5" />
+                                </button>
                             </td>
                           </tr>
                         ))}
@@ -1659,7 +1663,11 @@ function MatrixTable({ title, color, tableData, dataKey, unit, decimals, isTop3,
                     </td>
                     <td className="px-2 md:px-4 py-2 md:py-4 text-center no-print">
                       <button 
-                        onClick={(e) => { e.stopPropagation(); onPreviewBill?.(row.id); }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          console.log(`[PREVIEW_DEBUG][CLICK] Table Row Clicked. Bill ID: ${row.id}`);
+                          onPreviewBill?.(row.id);
+                        }}
                         className="p-1.5 md:p-2 rounded-xl bg-white/5 hover:bg-blue-600/20 text-slate-500 hover:text-blue-400 transition-all border border-white/5 touch-target"
                         title="Ver factura original"
                       >
