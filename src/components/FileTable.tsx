@@ -89,26 +89,26 @@ export default function FileTable({ bills, onUpdateBills, customOCs, onUpdateOCs
     
     if (result.isValid) {
       return (
-        <div className="flex items-center gap-1 text-emerald-400" title={getValidationMessage(result)}>
-          <ShieldCheck className="w-3.5 h-3.5" />
-          <span className="text-[9px] font-bold">VALIDADO</span>
+        <div className="flex items-center gap-1 text-emerald-500" title={getValidationMessage(result)}>
+          <ShieldCheck className="w-3 h-3" />
+          <span className="text-[9px] font-bold uppercase tracking-tight">Válido</span>
         </div>
       );
     }
     
     if (result.discrepancyPercent > 5) {
       return (
-        <div className="flex items-center gap-1 text-red-400" title={getValidationMessage(result)}>
-          <ShieldAlert className="w-3.5 h-3.5" />
-          <span className="text-[9px] font-bold">{result.discrepancy.toFixed(2)}€</span>
+        <div className="flex items-center gap-1 text-red-500" title={getValidationMessage(result)}>
+          <AlertTriangle className="w-3 h-3" />
+          <span className="text-[9px] font-bold uppercase tracking-tight">{result.discrepancy.toFixed(2)}€</span>
         </div>
       );
     }
     
     return (
-      <div className="flex items-center gap-1 text-amber-400" title={getValidationMessage(result)}>
-        <Shield className="w-3.5 h-3.5" />
-        <span className="text-[9px] font-bold">{result.discrepancy.toFixed(2)}€</span>
+      <div className="flex items-center gap-1 text-amber-500" title={getValidationMessage(result)}>
+        <Shield className="w-3 h-3" />
+        <span className="text-[9px] font-bold uppercase tracking-tight">{result.discrepancy.toFixed(2)}€</span>
       </div>
     );
   };
@@ -232,7 +232,7 @@ export default function FileTable({ bills, onUpdateBills, customOCs, onUpdateOCs
 
   const renderRow = (label: string, field: keyof ExtractedBill, isNumber = false) => (
     <tr className="border-b border-white/5 hover:bg-white/5 transition-colors group">
-      <td className="p-3 font-semibold text-xs text-slate-400 uppercase tracking-widest sticky left-0 bg-[#0f172a] group-hover:bg-[#15203b] z-10 shadow-[4px_0_24px_-10px_rgba(0,0,0,0.5)]">
+      <td className="p-3 font-bold text-[10px] text-slate-500 uppercase tracking-wider sticky left-0 bg-slate-950/80 backdrop-blur-md group-hover:bg-slate-900/80 z-10">
         {label}
       </td>
       {bills.map(bill => (
@@ -262,9 +262,9 @@ export default function FileTable({ bills, onUpdateBills, customOCs, onUpdateOCs
   );
 
   const renderConsumoRow = (periodo: string) => (
-    <tr key={`cons-${periodo}`} className="border-b border-white/5 hover:bg-white/5 transition-colors group text-slate-400">
-      <td className="p-3 pl-8 text-[11px] uppercase tracking-widest sticky left-0 bg-[#0f172a] group-hover:bg-[#15203b] z-10 shadow-[4px_0_24px_-10px_rgba(0,0,0,0.5)] flex items-center gap-2">
-        <div className="w-1.5 h-1.5 rounded-full bg-slate-700" /> Consumo {periodo}
+    <tr key={`cons-${periodo}`} className="border-b border-white/5 hover:bg-white/5 transition-colors group text-slate-500">
+      <td className="p-3 pl-8 text-[9px] font-bold uppercase tracking-wider sticky left-0 bg-slate-950/80 backdrop-blur-md group-hover:bg-slate-900/80 z-10 flex items-center gap-2">
+        <div className="w-1 h-1 rounded-full bg-slate-700" /> Consumo {periodo}
       </td>
       {bills.map(bill => {
         if (isGasBill(bill)) return <td key={bill.id} className="p-3 text-xs border-l border-white/5 text-slate-600">—</td>;
@@ -286,9 +286,9 @@ export default function FileTable({ bills, onUpdateBills, customOCs, onUpdateOCs
   );
 
   const renderPotenciaRow = (periodo: string) => (
-    <tr key={`pot-${periodo}`} className="border-b border-white/5 hover:bg-white/5 transition-colors group text-slate-400">
-      <td className="p-3 pl-8 text-[11px] uppercase tracking-widest sticky left-0 bg-[#0f172a] group-hover:bg-[#15203b] z-10 shadow-[4px_0_24px_-10px_rgba(0,0,0,0.5)] flex items-center gap-2">
-        <div className="w-1.5 h-1.5 rounded-full bg-slate-700" /> Potencia {periodo}
+    <tr key={`pot-${periodo}`} className="border-b border-white/5 hover:bg-white/5 transition-colors group text-slate-500">
+      <td className="p-3 pl-8 text-[9px] font-bold uppercase tracking-wider sticky left-0 bg-slate-950/80 backdrop-blur-md group-hover:bg-slate-900/80 z-10 flex items-center gap-2">
+        <div className="w-1 h-1 rounded-full bg-slate-700" /> Potencia {periodo}
       </td>
       {bills.map(bill => {
         if (isGasBill(bill)) return <td key={bill.id} className="p-3 text-xs border-l border-white/5 text-slate-600">—</td>;

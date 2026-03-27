@@ -6,7 +6,7 @@ import {
   FileText, Upload, Trash2, Download, AlertTriangle, 
   CheckCircle, Plus, FolderOpen, Edit2, 
   BarChart3, LayoutDashboard, Settings, LogOut,
-  ChevronRight, Sparkles, Zap, Smartphone, Layers, X,
+  ChevronRight, Sparkles, Zap, Smartphone, Layers, X, Search,
   Loader, FileSpreadsheet, Check, AlertCircle, RefreshCw
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -38,6 +38,8 @@ import {
 } from '@/lib/supabase-sync';
 import { getAssignedMonth } from '@/lib/date-utils';
 import LoginScreen from '@/components/LoginScreen';
+import { useFolderExport } from '@/hooks/useFolderExport';
+import { MascotaHero } from '@/components/MascotaHero';
 
 const fileToBase64 = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -101,6 +103,19 @@ function EnergyBillsAppContent() {
   const [correctionFile, setCorrectionFile] = useState<File | null>(null);
   const [correctionResult, setCorrectionResult] = useState<CorrectionResult | null>(null);
   const [isProcessingCorrection, setIsProcessingCorrection] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isSearchActive, setIsSearchActive] = useState(false);
+
+  // Sync search input with current project name
+  useEffect(() => {
+    const currentProject = savedProjects.find(p => p.id === currentProjectId);
+    if (currentProject && !isSearchActive) {
+      setSearchQuery(currentProject.name);
+    }
+  }, [currentProjectId, savedProjects, isSearchActive]);
+
+  const { progress: exportProgress, downloadFolderZIP } = useFolderExport();
 
   const parseDate = (d?: string) => {
     if (!d) return 0;
@@ -755,18 +770,35 @@ function EnergyBillsAppContent() {
     setRenamingFolderId(null);
   };
 
-  const moveProjectToFolder = async (projectId: string, folderId: string | null) => {
+  const moveProjectToFolder = async (projectId: string, folderId: any) => {
     const userId = 'voltis_user_global';
     
+    // Check if we need to create a new folder first
+    let targetFolderId = folderId;
+    if (folderId && typeof folderId === 'object' && folderId.createNew) {
+      const name = folderId.name;
+      const newId = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : `folder-${Date.now()}`;
+      const newFolder: ProjectFolder = {
+        id: newId,
+        name: name.toUpperCase(),
+        user_id: userId,
+        projectIds: [projectId],
+        updatedAt: Date.now()
+      };
+      setFolders(prev => [...prev, newFolder]);
+      await syncFolderToDB(newFolder, userId);
+      targetFolderId = newId;
+    }
+
     // Update local state
-    setSavedProjects(prev => prev.map(p => p.id === projectId ? { ...p, folderId: folderId || undefined } : p));
+    setSavedProjects(prev => prev.map(p => p.id === projectId ? { ...p, folderId: targetFolderId || undefined } : p));
     
     // Update folders state
     setFolders(prev => prev.map(f => {
       // Remove from old folder if present
       const withoutProject = f.projectIds.filter(id => id !== projectId);
       // Add to new folder if matches
-      if (f.id === folderId) {
+      if (f.id === targetFolderId) {
         return { ...f, projectIds: [...withoutProject, projectId] };
       }
       return { ...f, projectIds: withoutProject };
@@ -775,12 +807,12 @@ function EnergyBillsAppContent() {
     // Sync to DB
     const project = savedProjects.find(p => p.id === projectId);
     if (project) {
-      const updated = { ...project, folderId: folderId || undefined };
+      const updated = { ...project, folderId: targetFolderId || undefined };
       setCloudSyncStatus('syncing');
       const success = await syncProjectToDB(updated, userId);
       if (success) {
         setCloudSyncStatus('synced');
-        toast.success(folderId ? 'Proyecto movido a la carpeta' : 'Proyecto sacado de la carpeta');
+        toast.success(targetFolderId ? 'Proyecto movido a la carpeta' : 'Proyecto sacado de la carpeta');
       } else {
         setCloudSyncStatus('error');
       }
@@ -1013,6 +1045,33 @@ function EnergyBillsAppContent() {
   };
 
   if (!isAuthenticated) return <LoginScreen onLogin={handleLogin} error={authError} />;
+
+  const handleProjectSearch = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!searchQuery.trim()) {
+      setIsSearchActive(false);
+      return;
+    }
+
+    const matches = savedProjects.filter(p => 
+      p.name.toLowerCase().includes(searchQuery.toLowerCase())
+    );
+
+    if (matches.length === 1) {
+      loadWorkspace(matches[0]);
+      setIsSearchActive(false);
+      setSearchQuery(matches[0].name);
+      toast.success(`Cargando proyecto: ${matches[0].name}`);
+    } else if (matches.length > 1) {
+      setIsSearchActive(true);
+      setIsSidebarOpen(true);
+      toast.info(`Se han encontrado ${matches.length} coincidencias`);
+    } else {
+      setIsSearchActive(true);
+      setIsSidebarOpen(true); // Open to show "no results" in sidebar or just toast
+      toast.error('No se ha encontrado ningún proyecto');
+    }
+  };
 
   if (showReport) {
     const reportBills = bills.filter(b => b.includeInReport !== false);
@@ -1257,61 +1316,107 @@ function EnergyBillsAppContent() {
 
   return (
     <div className="flex h-screen bg-[#020617] overflow-hidden font-inter text-slate-100 selection:bg-blue-500/30">
-      
-      {/* SIDEBAR - HIGH END DARK */}
-      <aside className="w-80 bg-black flex flex-col border-r border-white/5 z-30 relative overflow-hidden">
+      {/* Sidebar Overlay Backdrop */}
+      <AnimatePresence>
+        {isSidebarOpen && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setIsSidebarOpen(false)}
+            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40"
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Sidebar */}
+      <motion.aside 
+        initial={false}
+        animate={{ 
+          x: isSidebarOpen ? 0 : -320,
+        }}
+        transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+        className="fixed inset-y-0 left-0 z-50 w-80 bg-black border-r border-white/5 flex flex-col shadow-2xl"
+      >
         <div className="absolute top-0 left-0 w-full h-[300px] bg-blue-600/5 blur-[100px] pointer-events-none" />
         
         <div className="px-8 pt-10 pb-6 flex flex-col gap-8 relative z-10">
-          <div className="flex items-center gap-4">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-blue-500/20">
-              <Zap className="w-6 h-6 text-white" />
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 flex items-center justify-center relative">
+                <img 
+                  src="/mascota-transparente.png" 
+                  alt="Voltis Mascot" 
+                  className="w-8 h-8 object-contain"
+                />
+              </div>
+              <div className="flex flex-col">
+                <h2 className="text-base font-black tracking-tighter text-white uppercase italic leading-none">Voltis</h2>
+                <span className="text-[8px] font-bold tracking-[0.3em] text-slate-500 uppercase mt-0.5">Energy</span>
+              </div>
             </div>
-            <div className="flex flex-col">
-              <h2 className="text-xl font-black tracking-tighter italic text-white flex items-center gap-2">VOLTIS</h2>
-              <span className="text-[10px] font-bold text-blue-400 tracking-[0.2em] uppercase opacity-60">Anual Economics</span>
-            </div>
+            <button 
+              onClick={() => setIsSidebarOpen(false)}
+              className="p-2 hover:bg-white/5 text-slate-500 rounded-lg md:hidden"
+            >
+              <X className="w-5 h-5" />
+            </button>
           </div>
 
           <div className="flex flex-col gap-2">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-[11px] font-black text-slate-500 uppercase tracking-widest pl-1 flex items-center gap-2">
-                <Layers className="w-3 h-3" /> Organización
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-1">
+                Proyectos
               </h3>
               <div className="flex items-center gap-1">
                 <button 
                   onClick={() => { setShowNewFolderModal(true); setNewFolderName(''); }}
-                  className="p-1.5 hover:bg-white/5 text-slate-400 hover:text-white rounded-lg transition-all"
+                  className="p-1 hover:bg-white/5 text-slate-500 hover:text-white rounded transition-all"
                   title="Nueva Carpeta"
                 >
-                  <FolderOpen className="w-4 h-4" />
+                  <FolderOpen className="w-3.5 h-3.5" />
                 </button>
                 <button 
                   onClick={() => { setShowNewProjectModal(true); setNewProjectName(''); }}
-                  className="p-1.5 hover:bg-white/5 text-blue-500 rounded-lg transition-all"
+                  className="p-1 hover:bg-white/5 text-slate-500 hover:text-white rounded transition-all"
                   title="Nuevo Proyecto"
                 >
-                  <Plus className="w-4 h-4" />
+                  <Plus className="w-3.5 h-3.5" />
                 </button>
               </div>
             </div>
             
             <div className="flex flex-col gap-4 overflow-y-auto max-h-[65vh] pr-2 custom-scrollbar">
               {/* FOLDERS SECTION */}
-              {folders.sort((a,b) => b.updatedAt - a.updatedAt).map(folder => {
-                const folderProjects = savedProjects.filter(p => p.folderId === folder.id);
-                const isExpanded = activeFolderId === folder.id;
+              {folders
+                .filter(f => {
+                  if (!isSearchActive || !searchQuery) return true;
+                  const folderMatches = f.name.toLowerCase().includes(searchQuery.toLowerCase());
+                  const hasMatchingProject = savedProjects.some(p => 
+                    p.folderId === f.id && p.name.toLowerCase().includes(searchQuery.toLowerCase())
+                  );
+                  return folderMatches || hasMatchingProject;
+                })
+                .sort((a,b) => b.updatedAt - a.updatedAt)
+                .map(folder => {
+                  const folderProjects = savedProjects.filter(p => {
+                    const isChild = p.folderId === folder.id;
+                    if (!isSearchActive || !searchQuery) return isChild;
+                    return isChild && p.name.toLowerCase().includes(searchQuery.toLowerCase());
+                  });
+                  const isExpanded = activeFolderId === folder.id || (isSearchActive && searchQuery !== '');
                 
                 return (
                   <div key={folder.id} className="flex flex-col gap-1">
                     <div 
                       onClick={() => setActiveFolderId(isExpanded ? null : folder.id)}
-                      className={`group flex items-center justify-between p-3 rounded-xl cursor-pointer transition-all border ${
-                        isExpanded ? 'bg-white/5 border-white/10' : 'bg-transparent border-transparent hover:bg-white/5'
+                      className={`group flex items-center justify-between py-1.5 px-2 rounded-lg cursor-pointer transition-all ${
+                        isExpanded ? 'text-white' : 'text-slate-500 hover:text-slate-300 hover:bg-white/5'
                       }`}
                     >
-                      <div className="flex items-center gap-3 overflow-hidden">
-                        <FolderOpen className={`w-4 h-4 ${isExpanded ? 'text-blue-400' : 'text-slate-500'}`} />
+                      <div className="flex items-center gap-2 overflow-hidden">
+                        <ChevronRight className={`w-3 h-3 transition-transform ${isExpanded ? 'rotate-90 text-blue-400' : 'text-slate-600'}`} />
+                        <FolderOpen className={`w-3.5 h-3.5 ${isExpanded ? 'text-blue-400' : 'text-slate-600'}`} />
                         {renamingFolderId === folder.id ? (
                           <input
                             autoFocus
@@ -1325,12 +1430,20 @@ function EnergyBillsAppContent() {
                             className="bg-transparent border-b border-blue-500 text-blue-300 font-bold text-[11px] uppercase focus:outline-none"
                           />
                         ) : (
-                          <span className={`font-bold truncate text-[11px] uppercase tracking-wider ${isExpanded ? 'text-white' : 'text-slate-500'}`}>
+                          <span className={`font-bold truncate text-[11px] uppercase tracking-tight ${isExpanded ? 'text-white' : 'text-slate-500'}`}>
                             {folder.name}
                           </span>
                         )}
                       </div>
                       <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button 
+                          onClick={(e) => { e.stopPropagation(); downloadFolderZIP(folder.name, folderProjects); }}
+                          className={`p-1.5 hover:bg-emerald-500/20 text-emerald-400 rounded-lg transition-all ${exportProgress.status !== 'idle' ? 'opacity-30 cursor-wait' : ''}`}
+                          title="Descargar todos los informes PDF"
+                          disabled={exportProgress.status !== 'idle'}
+                        >
+                          <Download className="w-3 h-3" />
+                        </button>
                         <button 
                           onClick={(e) => { e.stopPropagation(); setRenamingFolderId(folder.id); setNewFolderName(folder.name); }}
                           className="p-1.5 hover:bg-blue-500/20 text-blue-400 rounded-lg"
@@ -1379,42 +1492,49 @@ function EnergyBillsAppContent() {
               {/* PROJECTS WITHOUT FOLDER */}
               <div className="mt-4 flex flex-col gap-2">
                 <h4 className="text-[9px] font-black text-slate-600 uppercase tracking-[0.2em] pl-1">Sin Carpeta</h4>
-                {savedProjects.filter(p => !p.folderId).sort((a,b) => b.updatedAt - a.updatedAt).map(proj => (
-                  <ProjectItem 
-                    key={proj.id} 
-                    proj={proj} 
-                    isActive={proj.id === currentProjectId} 
-                    onLoad={() => loadWorkspace(proj)}
-                    onRename={() => { setRenamingProjectId(proj.id); setRenameValue(proj.name); }}
-                    onDelete={(e: React.MouseEvent) => deleteProject(proj.id, e)}
-                    onMove={(fid: string | null) => moveProjectToFolder(proj.id, fid)}
-                    folders={folders}
-                  />
-                ))}
+                {savedProjects
+                  .filter(p => {
+                    const noFolder = !p.folderId;
+                    if (!isSearchActive || !searchQuery) return noFolder;
+                    return noFolder && p.name.toLowerCase().includes(searchQuery.toLowerCase());
+                  })
+                  .sort((a,b) => b.updatedAt - a.updatedAt)
+                  .map(proj => (
+                    <ProjectItem 
+                      key={proj.id} 
+                      proj={proj} 
+                      isActive={proj.id === currentProjectId} 
+                      onLoad={() => loadWorkspace(proj)}
+                      onRename={() => { setRenamingProjectId(proj.id); setRenameValue(proj.name); }}
+                      onDelete={(e: React.MouseEvent) => deleteProject(proj.id, e)}
+                      onMove={(fid: string | null) => moveProjectToFolder(proj.id, fid)}
+                      folders={folders}
+                    />
+                  ))}
+                
+                {isSearchActive && searchQuery && 
+                 savedProjects.filter(p => p.name.toLowerCase().includes(searchQuery.toLowerCase())).length === 0 && (
+                  <div className="flex flex-col items-center justify-center py-10 px-4 text-center gap-3 bg-white/5 rounded-2xl border border-dashed border-white/10">
+                    <Search className="w-5 h-5 text-slate-600 opacity-50" />
+                    <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest leading-relaxed">
+                      No se han encontrado proyectos que coincidan con "{searchQuery}"
+                    </p>
+                  </div>
+                )}
               </div>
             </div>
           </div>
         </div>
 
           <div className="mt-auto px-8 pb-10 flex flex-col gap-4 relative z-10">
-            <button 
-              onClick={() => { setShowDiag(true); runDiagnostic(); }}
-              className="glass p-3 rounded-2xl border border-white/5 flex items-center justify-between group hover:bg-white/10 transition-all"
-            >
-              <div className="flex items-center gap-3">
-                <Settings className="w-4 h-4 text-slate-500 group-hover:text-blue-400" />
-                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Sistema</span>
-              </div>
-              <div className={`w-1.5 h-1.5 rounded-full ${cloudSyncStatus === 'synced' ? 'bg-emerald-500' : 'bg-red-500 animate-pulse'}`} />
-            </button>
             <div className="glass p-4 rounded-2xl border border-white/5 flex items-center justify-between group relative">
-                <div className="flex items-center gap-4">
-                  <div className="w-8 h-8 rounded-full bg-slate-800 border border-white/10 flex items-center justify-center">
-                    <Zap className="w-4 h-4 text-blue-500" />
+                <div className="flex items-center gap-3">
+                  <div className="w-7 h-7 rounded-full bg-slate-800 flex items-center justify-center">
+                    <Zap className="w-3.5 h-3.5 text-blue-500" />
                   </div>
-                  <div className="flex flex-col overflow-hidden max-w-[120px]">
-                    <span className="text-xs font-bold text-white uppercase tracking-tight truncate">COMERCIAL</span>
-                    <span className="text-[10px] text-slate-500 tracking-wider truncate">Plan Expert</span>
+                  <div className="flex flex-col">
+                    <span className="text-[11px] font-bold text-white uppercase tracking-tight">COMERCIAL</span>
+                    <span className="text-[9px] text-slate-500 uppercase tracking-wider">Plan Expert</span>
                   </div>
                 </div>
                 <button 
@@ -1426,92 +1546,73 @@ function EnergyBillsAppContent() {
                 </button>
              </div>
           </div>
-      </aside>
+      </motion.aside>
 
-      {/* MAIN CONTENT CANVAS */}
-      <main className="flex-1 relative overflow-y-auto overflow-x-hidden flex flex-col scroll-smooth">
-        
+      {/* Main Content */}
+      <main className="flex-1 overflow-y-auto relative bg-[#020617] scroll-smooth min-h-screen">
         {/* Animated Background Highlights */}
         <div className="absolute top-[-20%] left-[-10%] w-[60%] h-[60%] bg-blue-600/5 rounded-full blur-[140px] pointer-events-none" />
         <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-purple-600/5 rounded-full blur-[120px] pointer-events-none" />
 
-        {false ? (
-          <div className="p-20 text-center opacity-50 underline decoration-blue-500 cursor-pointer" onClick={() => setShowReport(false)}>
-            Cargando informe...
-          </div>
+        {!isAuthenticated ? (
+          <LoginScreen onLogin={() => setIsAuthenticated(true)} isLoading={isAuthLoading} error={authError} />
         ) : (
           <div className="px-8 md:px-16 py-12 flex flex-col gap-10 max-w-7xl mx-auto w-full relative z-10">
             
-            <header className="flex flex-col md:flex-row items-end justify-between gap-8">
-              <div className="flex flex-col gap-3">
-                <div className="flex items-center gap-3 mb-2">
-                   <div className={`w-2 h-2 rounded-full ${
-                    cloudSyncStatus === 'synced' ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' :
-                    cloudSyncStatus === 'syncing' ? 'bg-blue-500 animate-pulse' :
-                    cloudSyncStatus === 'error' ? 'bg-red-500' : 'bg-slate-500'
-                  }`} />
-                  <span className="text-[10px] font-black tracking-[0.2em] text-white/40 uppercase">
-                    {cloudSyncStatus === 'synced' ? 'Cloud Synced' :
-                     cloudSyncStatus === 'syncing' ? 'Syncing...' :
-                     cloudSyncStatus === 'error' ? 'Cloud Error' : 
-                     cloudSyncStatus === 'local' ? 'Datos Locales' : 'Offline Mode'}
-                  </span>
-                  {cloudSyncStatus === 'local' && (
-                    <button 
-                      onClick={handleManualSync}
-                      className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-blue-500/10 border border-blue-500/20 text-[9px] font-black text-blue-400 hover:bg-blue-500/20 transition-all uppercase animate-pulse"
-                      title="Sincronizar datos locales con la nube ahora"
-                    >
-                      <RefreshCw className="w-2.5 h-2.5" />
-                      Sincronizar ahora
-                    </button>
-                  )}
-                </div>
-                <h1 className="text-5xl font-black tracking-tighter bg-clip-text text-transparent bg-gradient-to-r from-white via-white to-blue-500 leading-none py-2">
-                  VOLTIS ANUAL <br/> ECONOMICS
-                </h1>
-                <div className="flex items-center gap-3">
-                   <div className="h-1 w-12 bg-blue-500 rounded-full" />
-                   <span className="text-sm font-bold text-blue-400 tracking-[0.3em] uppercase opacity-80 flex items-center gap-3">
-                     {savedProjects.find(p => p.id === currentProjectId)?.name}
-                     <button 
-                       onClick={clearProjectBills}
-                       className="p-1 hover:bg-white/10 rounded-md transition-colors text-slate-500 hover:text-red-400"
-                       title="Vaciar todas las facturas de este proyecto"
-                     >
-                       <Trash2 className="w-4 h-4" />
-                     </button>
-                   </span>
-                </div>
+            <header className="flex items-center justify-between border-b border-white/5 pb-6">
+              <div className="flex items-center gap-4">
+                <button 
+                  onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+                  className="p-2.5 bg-white/5 hover:bg-white/10 text-white rounded-xl border border-white/5 transition-all group"
+                  title={isSidebarOpen ? "Cerrar menú" : "Abrir menú"}
+                >
+                  <LayoutDashboard className={`w-5 h-5 transition-transform duration-300 ${isSidebarOpen ? 'rotate-90 text-blue-400' : 'text-slate-400 group-hover:text-white'}`} />
+                </button>
+                <form 
+                  onSubmit={handleProjectSearch}
+                  className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white/5 border border-white/10 group focus-within:border-blue-500/50 focus-within:bg-white/10 transition-all w-full max-w-[240px]"
+                >
+                  <Search className="w-3.5 h-3.5 text-slate-500 group-focus-within:text-blue-400" />
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => {
+                      setSearchQuery(e.target.value);
+                      if (!e.target.value) setIsSearchActive(false);
+                    }}
+                    placeholder="Buscar proyecto..."
+                    className="bg-transparent border-none text-[10px] font-bold text-white placeholder-slate-600 focus:outline-none w-full uppercase tracking-tight"
+                  />
+                  <div className="w-1 h-1 rounded-full bg-slate-600 shrink-0" />
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <div className={`w-1.5 h-1.5 rounded-full ${
+                      cloudSyncStatus === 'synced' ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' :
+                      cloudSyncStatus === 'syncing' ? 'bg-blue-500 animate-pulse' : 'bg-slate-500'
+                    }`} />
+                  </div>
+                </form>
               </div>
 
-              <div className="flex items-center gap-4 no-print">
+              <div className="flex items-center gap-3 no-print">
                 <button 
-                  onClick={() => { 
-                    console.log('[DEBUG-REPORT-BTN] Clicked report button'); 
-                    console.log('[DEBUG-STATE] showNewProjectModal before:', showNewProjectModal); 
-                    console.log('[DEBUG-STATE] showReport before:', showReport); 
-                    setShowReport(true); 
-                    console.log('[DEBUG-STATE] showReport after setShowReport(true)'); 
-                  }}
+                  onClick={() => setShowReport(true)}
                   disabled={bills.length === 0}
-                  className="group relative px-8 py-4 bg-white text-black font-black text-xs uppercase tracking-widest rounded-full hover:scale-105 transition-all disabled:opacity-20 flex items-center gap-3 overflow-hidden"
+                  className="btn-primary h-10 px-6"
                 >
-                  <div className="absolute inset-0 bg-gradient-to-r from-blue-500 to-indigo-500 opacity-0 group-hover:opacity-10 transition-opacity" />
-                  <Sparkles className="w-4 h-4 text-blue-500" />
-                  Informe Visual IA
+                  <Sparkles className="w-3.5 h-3.5" />
+                  Generar informe
                 </button>
                 <button 
                   onClick={handleExport}
                   disabled={bills.length === 0}
-                  className="px-8 py-4 bg-slate-900 border border-white/10 text-white font-black text-xs uppercase tracking-widest rounded-full hover:bg-slate-800 transition-all disabled:opacity-20 flex items-center gap-3"
+                  className="btn-secondary h-10 px-5"
                 >
-                  <Download className="w-4 h-4 text-emerald-400" />
-                  Exportar Excel
+                  <Download className="w-3.5 h-3.5 text-emerald-400" />
+                  Excel
                 </button>
                 <label 
-                  className="px-6 py-4 bg-emerald-900/30 border border-emerald-500/20 text-emerald-400 font-black text-xs uppercase tracking-widest rounded-full hover:bg-emerald-900/50 transition-all disabled:opacity-20 flex items-center gap-2 cursor-pointer"
-                  title="Subir correcciones desde Excel"
+                  className="btn-outline h-10 px-5 cursor-pointer"
+                  title="Importar correcciones"
                 >
                   <input
                     type="file"
@@ -1524,8 +1625,8 @@ function EnergyBillsAppContent() {
                     }}
                     disabled={bills.length === 0}
                   />
-                  <FileSpreadsheet className="w-4 h-4" />
-                  Importar Correcciones
+                  <FileSpreadsheet className="w-3.5 h-3.5 text-blue-400" />
+                  Importar
                 </label>
               </div>
             </header>
@@ -1534,29 +1635,21 @@ function EnergyBillsAppContent() {
             <div 
               {...getRootProps()} 
               className={`
-                relative group cursor-pointer transition-all duration-500
-                ${isDragActive ? 'scale-[1.02]' : 'hover:scale-[1.01]'}
+                premium-card p-8 group cursor-pointer text-center flex flex-col items-center gap-4
+                ${isDragActive ? 'border-blue-500/50 bg-blue-500/5' : ''}
               `}
             >
               <input {...getInputProps()} />
-              <div className={`
-                glass-card p-14 rounded-[40px] border text-center flex flex-col items-center gap-6 overflow-hidden
-                ${isDragActive ? 'border-blue-500/50 bg-blue-500/5' : 'border-white/5 hover:border-white/10'}
-              `}>
-                {isDragActive && (
-                  <div className="absolute inset-0 bg-gradient-to-t from-blue-500/10 to-transparent animate-scan pointer-events-none" />
-                )}
-                <div className="w-20 h-20 rounded-3xl bg-blue-600/10 flex items-center justify-center group-hover:scale-110 transition-transform duration-500 mb-2">
-                   {isExtracting ? (
-                     <Loader className="w-10 h-10 text-blue-400 animate-spin" />
-                   ) : (
-                     <Upload className={`w-10 h-10 transition-colors ${isDragActive ? 'text-blue-400' : 'text-slate-400'}`} />
-                   )}
-                </div>
-                <div className="flex flex-col gap-2">
-                   <h3 className="text-xl font-black text-white tracking-tight">ARRASTRA TUS FACTURAS</h3>
-                   <p className="text-slate-500 text-sm font-medium tracking-wide">Compatible con PDF y Excel sincronizado</p>
-                </div>
+              <div className="w-12 h-12 rounded-xl bg-blue-600/10 flex items-center justify-center group-hover:scale-110 transition-transform duration-300">
+                 {isExtracting ? (
+                   <Loader className="w-6 h-6 text-blue-400 animate-spin" />
+                 ) : (
+                   <Upload className={`w-6 h-6 transition-colors ${isDragActive ? 'text-blue-400' : 'text-slate-500'}`} />
+                 )}
+              </div>
+              <div className="flex flex-col gap-1">
+                 <h3 className="text-sm font-bold text-white uppercase tracking-tight">Cargar Facturas</h3>
+                 <p className="text-slate-500 text-[10px] font-medium uppercase tracking-wider">PDF o Excel • Arrastra o haz clic para subir</p>
               </div>
             </div>
             
@@ -1583,75 +1676,51 @@ function EnergyBillsAppContent() {
                      </button>
                   </div>
                   
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
                     {extractionQueue.map((item) => (
                       <motion.div 
                         key={item.id}
                         layout
-                        initial={{ opacity: 0, scale: 0.9 }}
+                        initial={{ opacity: 0, scale: 0.95 }}
                         animate={{ opacity: 1, scale: 1 }}
-                        className={`glass p-4 rounded-2xl border flex items-center justify-between transition-all ${
-                          item.status === 'loading' ? 'border-blue-500/20 bg-blue-500/5' :
-                          item.status === 'success' ? 'border-emerald-500/20 bg-emerald-500/5' :
-                          'border-red-500/20 bg-red-500/5'
+                        className={`premium-card p-3 flex items-center justify-between ${
+                          item.status === 'loading' ? 'border-blue-500/20' :
+                          item.status === 'success' ? 'border-emerald-500/20' : 'border-red-500/20'
                         }`}
                       >
                         <div className="flex items-center gap-3 overflow-hidden">
-                          <div className={`p-2 rounded-lg ${
-                            item.status === 'loading' ? 'bg-blue-500/10 text-blue-400' :
-                            item.status === 'success' ? 'bg-emerald-500/10 text-emerald-400' :
-                            'bg-red-500/10 text-red-400'
-                          }`}>
-                            {item.status === 'loading' ? <Loader className="w-4 h-4 animate-spin" /> :
-                             item.status === 'success' ? <CheckCircle className="w-4 h-4" /> :
-                             <X className="w-4 h-4" />}
-                          </div>
                           <div className="flex flex-col overflow-hidden">
-                            <span className="text-xs font-bold text-white truncate">{item.fileName}</span>
-                            {item.error && <span className="text-[10px] text-red-400 font-medium truncate">{item.error}</span>}
-                            {item.status === 'success' && <span className="text-[10px] text-emerald-400 font-medium">Extraída correctamente</span>}
-                            {item.status === 'loading' && <span className="text-[10px] text-blue-400 font-medium animate-pulse">Analizando con Voltis AI...</span>}
+                            <span className="text-[11px] font-bold text-white truncate">{item.fileName}</span>
+                            <span className={`text-[9px] font-bold uppercase ${
+                              item.status === 'loading' ? 'text-blue-400 animate-pulse' :
+                              item.status === 'success' ? 'text-emerald-500' : 'text-red-400'
+                            }`}>
+                              {item.status === 'loading' ? 'Procesando...' :
+                               item.status === 'success' ? 'Completado' : 'Error'}
+                            </span>
                           </div>
                         </div>
                         
                         <div className="flex items-center gap-2">
-                          {item.status === 'error' && fileRefs[item.id] && (
-                            <button 
-                              onClick={() => {
-                                setAllExtractionQueues(prev => ({
-                                  ...prev,
-                                  [currentProjectId]: (prev[currentProjectId] || []).map(q => 
-                                    q.id === item.id ? { ...q, status: 'loading' as const, error: undefined } : q
-                                  )
-                                }));
-                                processFile(fileRefs[item.id], item.id, currentProjectId);
-                              }}
-                              className="px-3 py-1 bg-blue-600/20 text-blue-400 text-[10px] font-bold rounded-lg border border-blue-500/30 hover:bg-blue-600/40 transition-all uppercase tracking-tighter"
-                            >
-                              Reintentar
-                            </button>
-                          )}
-                          {item.status !== 'loading' && (
-                            <button 
-                              onClick={() => {
-                                if (item.status === 'success') {
-                                  const linked = bills.find(b => b.fileName === item.fileName);
-                                  if (linked) { 
-                                    const nb = bills.filter(b => b.id !== linked.id); 
-                                    setAllBills(prev => ({ ...prev, [currentProjectId]: nb }));
-                                    saveToDisk(nb, customOCs, currentProjectId); 
-                                  }
+                          <button 
+                            onClick={() => {
+                              if (item.status === 'success') {
+                                const linked = bills.find(b => b.fileName === item.fileName);
+                                if (linked) { 
+                                  const nb = bills.filter(b => b.id !== linked.id); 
+                                  setAllBills(prev => ({ ...prev, [currentProjectId]: nb }));
+                                  saveToDisk(nb, customOCs, currentProjectId); 
                                 }
-                                setAllExtractionQueues(prev => ({
-                                  ...prev,
-                                  [currentProjectId]: (prev[currentProjectId] || []).filter(q => q.id !== item.id)
-                                }));
-                              }}
-                              className="p-1 hover:bg-white/10 rounded-md text-slate-500 transition-colors"
-                            >
-                              <X className="w-3 h-3" />
-                            </button>
-                          )}
+                              }
+                              setAllExtractionQueues(prev => ({
+                                ...prev,
+                                [currentProjectId]: (prev[currentProjectId] || []).filter(q => q.id !== item.id)
+                              }));
+                            }}
+                            className="p-1 hover:bg-white/10 rounded text-slate-500 transition-colors"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
                         </div>
                       </motion.div>
                     ))}
@@ -1667,13 +1736,21 @@ function EnergyBillsAppContent() {
                   animate={{ opacity: 1, y: 0 }}
                   className="flex flex-col gap-6 mb-20"
                 >
-                  <div className="flex items-center justify-between border-b border-white/5 pb-6">
-                     <h2 className="text-2xl font-black tracking-tight flex items-center gap-4">
-                       DATOS EXTRAÍDOS <span className="bg-white/5 text-blue-400 text-sm px-4 py-1 rounded-full">{bills.length}</span>
+                  <div className="flex items-center justify-between border-b border-white/5 pb-4 relative">
+                     <h2 className="text-xl font-bold tracking-tight flex items-center gap-3">
+                       Datos Extraídos <span className="text-[10px] bg-white/5 text-blue-400 px-2 py-0.5 rounded-full border border-white/5">{bills.length}</span>
                      </h2>
-                     <div className="text-[10px] items-center gap-6 text-slate-500 font-bold tracking-widest hidden md:flex">
-                        <span className="flex items-center gap-2"><CheckCircle className="w-3 h-3 text-emerald-500" /> AI VERIFIED</span>
-                        <span className="flex items-center gap-2"><Smartphone className="w-3 h-3 text-blue-500" /> MOBILE SYNC</span>
+
+                     {/* Project Name - Centered Refinement */}
+                     <div className="absolute left-1/2 -translate-x-1/2 hidden md:block">
+                        <span className="text-[11px] font-semibold text-slate-400/80 uppercase tracking-[0.2em]">
+                          {savedProjects.find(p => p.id === currentProjectId)?.name}
+                        </span>
+                     </div>
+
+                     <div className="flex items-center gap-4 text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                        <span className="flex items-center gap-1.5"><CheckCircle className="w-3.5 h-3.5 text-emerald-500" /> AI Verified</span>
+                        <span className="flex items-center gap-1.5"><Smartphone className="w-3.5 h-3.5 text-blue-500" /> Sync Safe</span>
                      </div>
                   </div>
 
@@ -2072,6 +2149,38 @@ function EnergyBillsAppContent() {
         )}
       </AnimatePresence>
 
+      <AnimatePresence>
+        {exportProgress.status !== 'idle' && exportProgress.status !== 'completed' && (
+          <motion.div 
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 20 }}
+            className="fixed bottom-8 left-1/2 -translate-x-1/2 z-[100] px-6 py-4 glass-card border border-blue-500/30 shadow-2xl flex items-center gap-4 min-w-[300px]"
+          >
+            <div className={`p-2 rounded-xl ${exportProgress.status === 'error' ? 'bg-red-500/20' : 'bg-blue-500/20'}`}>
+              {exportProgress.status === 'error' ? (
+                <AlertCircle className="w-5 h-5 text-red-400" />
+              ) : (
+                <Loader className="w-5 h-5 text-blue-400 animate-spin" />
+              )}
+            </div>
+            <div className="flex flex-col flex-1 min-w-0">
+               <span className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-400">Exportando Carpeta</span>
+               <span className="text-xs font-bold text-white truncate">{exportProgress.message}</span>
+               {exportProgress.total > 0 && (
+                 <div className="w-full h-1 bg-white/5 rounded-full mt-2 overflow-hidden">
+                   <motion.div 
+                     className="h-full bg-blue-500"
+                     initial={{ width: 0 }}
+                     animate={{ width: `${(exportProgress.current / exportProgress.total) * 100}%` }}
+                   />
+                 </div>
+               )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <style jsx global>{`
         .custom-scrollbar::-webkit-scrollbar { width: 4px; }
         .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
@@ -2091,56 +2200,82 @@ const ProjectItem = ({ proj, isActive, onLoad, onRename, onDelete, onMove, folde
 
   return (
     <div className="relative">
-      <motion.div 
-        whileHover={{ x: 2 }}
+      <div 
         onClick={onLoad}
-        className={`group flex items-center justify-between p-3 rounded-xl cursor-pointer transition-all border ${
+        className={`sidebar-item group ${
           isActive 
-            ? 'bg-blue-600/10 border-blue-500/30 text-white' 
-            : 'bg-transparent border-transparent text-slate-400 hover:bg-white/5 hover:text-white'
+            ? 'sidebar-item-active' 
+            : 'sidebar-item-inactive'
         }`}
       >
         <div className="flex flex-col gap-0.5 overflow-hidden flex-1 min-w-0">
-          <span className={`font-bold truncate text-[10px] uppercase tracking-wider ${isActive ? 'text-blue-400' : ''}`}>{proj.name}</span>
-          <span className="text-[9px] opacity-40 font-medium tracking-tight">{(proj.bills || []).length} Facturas</span>
+          <span className="truncate">{proj.name}</span>
+          <span className="text-[9px] opacity-50 font-medium tracking-tight">{(proj.bills || []).length} items</span>
         </div>
         
-        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
           <button 
             onClick={(e) => { e.stopPropagation(); setShowMoveMenu(!showMoveMenu); }}
-            className={`p-1.5 rounded-lg transition-colors ${showMoveMenu ? 'bg-white/10 text-white' : 'hover:bg-white/5 text-slate-500 hover:text-white'}`}
-            title="Mover a carpeta"
+            className={`p-1 rounded transition-colors ${showMoveMenu ? 'bg-white/10 text-white' : 'hover:bg-white/10 text-slate-500 hover:text-white'}`}
+            title="Mover"
           >
             <Layers className="w-3 h-3" />
           </button>
-          <button onClick={(e) => { e.stopPropagation(); onDelete(e); }} className="p-1.5 hover:bg-red-500/20 text-red-500/60 hover:text-red-500 rounded-lg">
+          <button onClick={(e) => { e.stopPropagation(); onDelete(e); }} className="p-1 hover:bg-red-500/10 text-slate-500 hover:text-red-500 rounded">
             <Trash2 className="w-3 h-3" />
           </button>
         </div>
-      </motion.div>
+      </div>
 
       {showMoveMenu && (
         <div 
-          className="absolute left-full ml-2 top-0 z-50 w-48 glass-card border border-white/10 rounded-xl p-2 shadow-2xl"
+          className="absolute left-full ml-2 top-0 z-50 w-56 glass-card border border-white/20 rounded-2xl p-3 shadow-2xl overflow-hidden"
           onMouseLeave={() => setShowMoveMenu(false)}
         >
-          <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest px-2 py-1 border-b border-white/5 mb-1">Mover a...</p>
-          <div className="flex flex-col gap-1 max-h-40 overflow-y-auto custom-scrollbar">
+          <div className="absolute top-0 left-0 w-full h-[60px] bg-blue-600/5 blur-xl pointer-events-none" />
+          <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest px-1 py-1 border-b border-white/5 mb-2 relative z-10">Mover a carpeta</p>
+          
+          <div className="flex flex-col gap-1 max-h-56 overflow-y-auto custom-scrollbar relative z-10">
             <button 
               onClick={(e) => { e.stopPropagation(); onMove(null); setShowMoveMenu(false); }}
-              className={`text-left px-2 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-tight transition-colors ${!proj.folderId ? 'text-blue-400 bg-blue-500/10' : 'text-slate-400 hover:bg-white/5'}`}
+              className={`flex items-center gap-2 px-3 py-2 rounded-xl text-[10px] font-bold uppercase tracking-tight transition-all ${!proj.folderId ? 'text-blue-400 bg-blue-500/10' : 'text-slate-400 hover:bg-white/5'}`}
             >
-              Sin Carpeta
+              <X className="w-3 h-3 opacity-40" /> Sin Carpeta
             </button>
+            <div className="h-px bg-white/5 my-1" />
             {folders.map((f: any) => (
               <button 
                 key={f.id}
                 onClick={(e) => { e.stopPropagation(); onMove(f.id); setShowMoveMenu(false); }}
-                className={`text-left px-2 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-tight transition-colors ${proj.folderId === f.id ? 'text-blue-400 bg-blue-500/10' : 'text-slate-400 hover:bg-white/5'}`}
+                className={`flex items-center gap-2 px-3 py-2 rounded-xl text-[10px] font-bold uppercase tracking-tight transition-all ${proj.folderId === f.id ? 'text-blue-400 bg-blue-500/10' : 'text-slate-400 hover:bg-white/5'}`}
               >
-                {f.name}
+                <FolderOpen className={`w-3 h-3 ${proj.folderId === f.id ? 'text-blue-400' : 'opacity-40'}`} />
+                <span className="truncate">{f.name}</span>
+                {proj.folderId === f.id && <Check className="w-3 h-3 ml-auto text-blue-400" />}
               </button>
             ))}
+            
+            <div className="h-px bg-white/5 my-1" />
+            <button 
+              onClick={(e) => { 
+                e.stopPropagation(); 
+                // We'll open the main new folder modal
+                // but we could also do it inline. For now, let's keep it consistent
+                // or just trigger the parent state.
+                const name = prompt('Nombre de la nueva carpeta:');
+                if (name) {
+                  // We need to pass the createFolder function or use a specific callback
+                  // Simplified: we'll use a hack to call the parent's createFolder
+                  // or just find it via context/props if we had them.
+                  // Since ProjectItem is a helper, I'll update its props.
+                  onMove({ createNew: true, name });
+                }
+                setShowMoveMenu(false);
+              }}
+              className="flex items-center gap-2 px-3 py-2 rounded-xl text-[10px] font-bold uppercase tracking-tight text-blue-400 hover:bg-blue-500/10 transition-all border border-blue-500/10"
+            >
+              <Plus className="w-3 h-3" /> Crear Carpeta
+            </button>
           </div>
         </div>
       )}

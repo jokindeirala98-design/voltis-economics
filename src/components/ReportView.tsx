@@ -14,8 +14,8 @@ import gsap from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
 import { toast } from 'sonner';
 import { getAssignedMonth, parseSpanishDate, getMonthlyAggregatedData, CANONICAL_MONTHS } from '@/lib/date-utils';
-import { MascotaHero } from './MascotaHero';
 import { HeroTitle } from './HeroTitle';
+import { MascotaHero } from './MascotaHero';
 
 gsap.registerPlugin(ScrollTrigger);
 
@@ -540,35 +540,6 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
             <button onClick={onBack} className="back-btn" title="Volver">
               <ArrowLeft className="w-5 h-5" />
             </button>
-            <span className="text-[8px] text-white/20 uppercase tracking-widest px-2 py-1 border border-white/10 rounded-md">V-SYNC-AUDIT-01</span>
-            
-            {/* Month Selector - Individual month toggles */}
-            <div className="flex items-center gap-1">
-              <button 
-                onClick={selectAllMonths}
-                className={`px-3 py-2 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all ${
-                  isAnnual 
-                    ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/30' 
-                    : 'bg-white/5 text-white/50 hover:bg-white/10 hover:text-white'
-                }`}
-              >
-                ANUAL
-              </button>
-              <div className="w-px h-6 bg-white/10 mx-1" />
-              {MONTH_LABELS.map((label, idx) => (
-                <button 
-                  key={idx}
-                  onClick={() => toggleMonth(idx)}
-                  className={`w-8 h-8 rounded-lg text-[10px] font-black transition-all ${
-                    selectedMonths.has(idx)
-                      ? 'bg-blue-600/80 text-white' 
-                      : 'bg-white/5 text-white/40 hover:bg-white/10 hover:text-white/60'
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
           </div>
           
           {/* Top-right buttons removed to keep focus on the final call-to-action */}
@@ -590,22 +561,71 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
               <GlowOrb className="top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 opacity-20 parallax-bg" size="xl" />
               <GlowOrb className="-bottom-20 -right-20 opacity-30 parallax-bg" size="xl" />
               
-              <div className="max-w-5xl w-full flex flex-col items-center text-center relative z-10">
-                <HeroTitle subtitle={isAnnual ? 'ANUAL' : `${selectedMonths.size} MESES`}>
-                  VOLTIS
-                </HeroTitle>
+              <div className="max-w-5xl w-full flex flex-col items-center text-center relative z-10 gap-8">
+                <div className="flex flex-col md:flex-row items-center gap-6 md:gap-10">
+                  {/* Mascot Left */}
+                  <img 
+                    src="/mascota-transparente.png" 
+                    alt="Voltis Mascot" 
+                    className="w-32 h-32 md:w-40 md:h-40 object-contain"
+                  />
+                  
+                  {/* Branding Right */}
+                  <div className="flex flex-col items-center md:items-start">
+                    <h1 className="text-6xl md:text-8xl font-black tracking-tighter italic leading-none text-white drop-shadow-2xl selection:text-blue-500">
+                      VOLTIS
+                    </h1>
+                    <span className="text-[10px] md:text-xs font-bold tracking-[1em] text-slate-500/80 uppercase mt-4 pl-1">
+                      ENERGIA
+                    </span>
+                  </div>
+                </div>
+
+                {/* Centered Month Selector */}
+                <div className="flex flex-col items-center gap-4 py-6 border-y border-white/5 w-full max-w-2xl">
+                   <div className="flex items-center gap-1.5 flex-wrap justify-center">
+                    <button 
+                      onClick={selectAllMonths}
+                      className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${
+                        isAnnual 
+                          ? 'bg-white text-black shadow-xl shadow-white/10' 
+                          : 'bg-white/5 text-slate-500 hover:bg-white/10 hover:text-slate-300 border border-white/5'
+                      }`}
+                    >
+                      ANUAL
+                    </button>
+                    <div className="w-px h-4 bg-white/10 mx-2" />
+                    {MONTH_LABELS.map((label, idx) => (
+                      <button 
+                        key={idx}
+                        onClick={() => toggleMonth(idx)}
+                        className={`w-9 h-9 rounded-xl text-[10px] font-bold transition-all border ${
+                          selectedMonths.has(idx)
+                            ? 'bg-blue-600/20 border-blue-500/40 text-blue-400 shadow-[0_0_15px_rgba(59,130,246,0.1)]' 
+                            : 'bg-white/5 border-white/5 text-slate-500 hover:bg-white/10 hover:text-slate-300'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
                 
-                <div className="hero-content text-center space-y-4 relative z-10 mt-4" style={{ opacity: 1 }}>
-                  <div className="space-y-2">
-                    <div className="h-0.5 w-12 bg-blue-500 mx-auto rounded-full shadow-[0_0_15px_rgba(59,130,246,0.6)]" />
-                    <h3 className="text-5xl font-black tracking-tighter text-blue-500 uppercase">{projectName}</h3>
-                    <div className="flex flex-col items-center">
-                      <p className="inline-block text-sm text-white font-black tracking-[0.2em] uppercase glass-immersion px-10 py-3 rounded-full border border-white/10 shadow-[0_0_30px_rgba(59,130,246,0.2)] min-w-[320px]">
-                        CUPS · {projectCups}
-                      </p>
-                      <p className="text-[10px] text-blue-400/60 font-black tracking-[0.5em] uppercase mt-2">
-                        TARIFA {filteredValidBills[0]?.tarifa || '3.0TD'}
-                      </p>
+                <div className="hero-content text-center space-y-6 relative z-10" style={{ opacity: 1 }}>
+                  <h2 className="text-6xl md:text-7xl font-black tracking-tighter text-white uppercase">{projectName}</h2>
+                  
+                  <div className="flex flex-col items-center gap-4">
+                    <div className="flex items-center gap-3 px-6 py-2.5 rounded-2xl bg-white/5 border border-white/10">
+                      <FileText className="w-4 h-4 text-blue-500" />
+                      <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">CUPS</span>
+                      <span className="text-xs font-black text-white">{projectCups}</span>
+                    </div>
+                    
+                    <div className="flex items-center gap-2 opacity-60">
+                      <div className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                      <span className="text-[10px] text-blue-400 font-bold tracking-[0.3em] uppercase">
+                        Tarifa {filteredValidBills[0]?.tarifa || '3.0TD'}
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -868,9 +888,6 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
               <div className={`max-w-3xl w-full flex flex-col items-center text-center relative z-10 ${isExportMode ? 'space-y-8' : 'space-y-12'}`}>
                 {/* Voltis Logo */}
                 <div className="flex flex-col items-center gap-6">
-                  <div className="relative mb-4 scale-110">
-                    <MascotaHero isHovered={true} />
-                  </div>
                   <h3 className="text-7xl md:text-[100px] font-black uppercase tracking-tighter leading-[0.7] text-glow-pulse">LISTO PARA OPTIMIZAR</h3>
                   <p className="text-xl text-slate-400 font-medium opacity-50">Auditoría de Precisión Finalizada</p>
                 </div>

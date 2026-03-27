@@ -6,10 +6,11 @@ import { Sparkles, ArrowRight, Smartphone, Zap, ShieldCheck, Lock, Eye, EyeOff }
 
 interface LoginScreenProps {
   onLogin: (password: string) => void;
+  isLoading?: boolean;
   error: string | null;
 }
 
-export default function LoginScreen({ onLogin, error }: LoginScreenProps) {
+export default function LoginScreen({ onLogin, isLoading, error }: LoginScreenProps) {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
 
