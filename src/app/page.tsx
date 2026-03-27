@@ -344,7 +344,7 @@ function EnergyBillsAppContent() {
       } catch (e: any) {
         console.error(`[LOCAL_FALLBACK_TRACE] Error en sincronización inicial:`, e.message);
         setCloudSyncStatus('error');
-        toast.error('Error de conexión con la nube. Operando en modo local.');
+        toast.error(`Conexión limitada: ${e.message || 'Error de base de datos'}. Operando en modo local.`);
       }
     };
     initStorage();
@@ -1764,7 +1764,7 @@ function EnergyBillsAppContent() {
                 </div>
                 <div className="flex flex-col">
                   <h2 className="text-base font-black tracking-tighter text-white uppercase italic leading-none">Voltis</h2>
-                  <span className="text-[10px] font-bold tracking-[0.3em] text-slate-500 uppercase mt-0.5">Energy</span>
+                  <span className="text-[10px] font-bold tracking-[0.3em] text-slate-500 uppercase mt-0.5">Energy • v2.0-SUPABASE</span>
                 </div>
               </div>
               <button onClick={() => setIsSidebarOpen(false)} className="p-2 hover:bg-white/5 text-slate-500 rounded-lg transition-colors">
