@@ -15,7 +15,6 @@ import { ScrollTrigger } from 'gsap/ScrollTrigger';
 import { toast } from 'sonner';
 import { getAssignedMonth, parseSpanishDate, getMonthlyAggregatedData, CANONICAL_MONTHS } from '@/lib/date-utils';
 import { HeroTitle } from './HeroTitle';
-import { MascotaHero } from './MascotaHero';
 
 gsap.registerPlugin(ScrollTrigger);
 
