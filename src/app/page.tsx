@@ -81,13 +81,20 @@ function EnergyBillsAppContent() {
   const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set()); // Track expanded folders
   
-  // Debug: log when showNewProjectModal changes to true
+  // Reset activeReportTab when opening a new report or switching projects
   useEffect(() => {
-    if (showNewProjectModal === true) {
-      console.log('[DEBUG-MODAL-OPEN] showNewProjectModal changed to TRUE');
-      console.trace('[DEBUG-MODAL-OPEN] Stack trace for modal open');
+    if (showReport) {
+      const projectBills = allBills[currentProjectId] || [];
+      const hasGas = projectBills.some(b => isGasBill(b));
+      const hasElec = projectBills.some(b => !isGasBill(b));
+      
+      if (hasGas && !hasElec) {
+        setActiveReportTab('gas');
+      } else {
+        setActiveReportTab('electricity');
+      }
     }
-  }, [showNewProjectModal]);
+  }, [showReport, currentProjectId, allBills]);
   
   const [fileRefs, setFileRefs] = useState<Record<string, File>>({}); 
   const [cloudSyncStatus, setCloudSyncStatus] = useState<'synced' | 'syncing' | 'error' | 'local'>('local');
