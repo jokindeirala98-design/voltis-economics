@@ -221,6 +221,7 @@ export interface ProjectFolder {
   user_id?: string;
   projectIds: string[];
   updatedAt: number;
+  isExpanded?: boolean; // Client-side only, not persisted
 }
 
 export interface ProjectWorkspace {

@@ -79,6 +79,7 @@ function EnergyBillsAppContent() {
   const [showNewFolderModal, setShowNewFolderModal] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
   const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set()); // Track expanded folders
   
   // Debug: log when showNewProjectModal changes to true
   useEffect(() => {
@@ -1473,18 +1474,34 @@ function EnergyBillsAppContent() {
                     if (!isSearchActive || !searchQuery) return isChild;
                     return isChild && p.name.toLowerCase().includes(searchQuery.toLowerCase());
                   });
-                  const isExpanded = activeFolderId === folder.id || (isSearchActive && searchQuery !== '');
+                  const isExpanded = expandedFolders.has(folder.id) || (isSearchActive && searchQuery !== '');
+                  const toggleFolder = () => {
+                    setExpandedFolders(prev => {
+                      const next = new Set(prev);
+                      if (next.has(folder.id)) {
+                        next.delete(folder.id);
+                      } else {
+                        next.add(folder.id);
+                      }
+                      return next;
+                    });
+                  };
                 
                 return (
                   <div key={folder.id} className="flex flex-col gap-1">
                     <div 
-                      onClick={() => setActiveFolderId(isExpanded ? null : folder.id)}
+                      onClick={toggleFolder}
                       className={`group flex items-center justify-between py-1.5 px-2 rounded-lg cursor-pointer transition-all ${
                         isExpanded ? 'text-white' : 'text-slate-500 hover:text-slate-300 hover:bg-white/5'
                       }`}
                     >
                       <div className="flex items-center gap-2 overflow-hidden">
-                        <ChevronRight className={`w-3 h-3 transition-transform ${isExpanded ? 'rotate-90 text-blue-400' : 'text-slate-600'}`} />
+                        <motion.div
+                          animate={{ rotate: isExpanded ? 90 : 0 }}
+                          transition={{ duration: 0.2, ease: 'easeOut' }}
+                        >
+                          <ChevronRight className={`w-3 h-3 ${isExpanded ? 'text-blue-400' : 'text-slate-600'}`} />
+                        </motion.div>
                         <FolderOpen className={`w-3.5 h-3.5 ${isExpanded ? 'text-blue-400' : 'text-slate-600'}`} />
                         {renamingFolderId === folder.id ? (
                           <input
