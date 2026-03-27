@@ -849,45 +849,52 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
               </div>
             </section>
 
-            {/* ── PAGE 6: MATRIZ DE GASTO POR PERIODO (ORIGINAL SIMPLE FORMAT) ── */}
+            {/* ── PAGE 6: MATRIZ DE GASTO POR PERIODO (ORIGINAL FORMAT) ── */}
             <section id="scene-6" className={`report-page flex flex-col justify-start px-4 md:px-10 ${isExportMode ? 'pt-10' : 'pt-16 md:pt-20'}`}>
               <div className="max-w-6xl w-full mx-auto space-y-6 md:space-y-8">
-                {/* Simplified economic matrix - original format */}
+                {/* Original economic matrix - spend by period and invoice */}
                 <div className="space-y-4 w-full">
                   <h4 className="text-[10px] md:text-[11px] font-black uppercase tracking-[0.6em] text-indigo-400 flex flex-col md:flex-row items-start md:items-center justify-between gap-2 px-2 md:px-4">
                     <div className="flex items-center gap-2 md:gap-3">
                       <Activity className="w-3 h-3 md:w-4 md:h-4" /> Matriz de Gasto por Periodo (€)
                     </div>
-                    <span className="text-[8px] opacity-30 lowercase tracking-normal font-medium no-print">Gasto en euros por periodo (precio neto)</span>
+                    <span className="text-[8px] opacity-30 lowercase tracking-normal font-medium no-print">Gasto en euros por periodo y factura</span>
                   </h4>
                   <div className="glass p-2 rounded-2xl md:rounded-[40px] border border-white/5 overflow-visible bg-slate-900/10">
                     <div className="overflow-x-auto mobile-table-scroll scrollable-matrix">
                     <table className="w-full text-left border-collapse text-[9px] md:text-[10px] matrix-table">
                       <thead className="bg-slate-900/30 font-black uppercase tracking-widest text-slate-500">
                         <tr>
-                          <th className="px-2 md:px-6 py-3 md:py-5">Mes</th>
-                          <th className="px-1 md:px-3 py-3 md:py-5 text-center hidden sm:table-cell">kWh</th>
-                          <th className="px-1 md:px-3 py-3 md:py-5 text-center text-blue-400">Energía (€)</th>
-                          <th className="px-1 md:px-3 py-3 md:py-5 text-center hidden lg:table-cell">Potencia</th>
-                          <th className="px-1 md:px-3 py-3 md:py-5 text-center hidden xl:table-cell">Otros</th>
-                          <th className="px-1 md:px-3 py-3 md:py-5 text-center">€/kWh</th>
-                          <th className="px-2 md:px-6 py-3 md:py-5 text-right">Total €</th>
+                          <th className="px-2 md:px-4 py-3 md:py-5">Mes</th>
+                          {(['P1','P2','P3','P4','P5','P6'] as const).map(p => (
+                            <th key={p} className="px-1 md:px-2 py-3 md:py-5 text-center">{p}</th>
+                          ))}
+                          <th className="px-2 md:px-4 py-3 md:py-5 text-right">Total €</th>
                           <th className="px-2 md:px-4 py-3 md:py-5 text-center no-print"></th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-white/[0.03]">
                         {tableData.map((row: any, idx: number) => (
                           <tr key={idx} className="hover:bg-white/[0.02] transition-all group cursor-pointer" onClick={() => setSelectedBillId(row.id)}>
-                            <td className="px-2 md:px-6 py-2 md:py-4 font-black text-white italic uppercase text-[9px] md:text-[11px]">{row.name}</td>
-                            <td className="px-1 md:px-3 py-2 md:py-4 text-center text-slate-400 font-bold hidden sm:table-cell">{row.totalKwh.toLocaleString('es-ES', { maximumFractionDigits: 0 })}</td>
-                            <td className="px-1 md:px-3 py-2 md:py-4 text-center text-blue-400 font-black">{row.energia.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €</td>
-                            <td className="px-1 md:px-3 py-2 md:py-4 text-center text-slate-500 font-bold hidden lg:table-cell">{row.potencia.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €</td>
-                            <td className="px-1 md:px-3 py-2 md:py-4 text-center text-slate-500 font-bold hidden xl:table-cell">{row.otros.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €</td>
-                            <td className="px-1 md:px-3 py-2 md:py-4 text-center text-cyan-400/80 font-black italic">{row.avgPrice.toLocaleString('es-ES', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}</td>
-                            <td className="px-2 md:px-6 py-2 md:py-4 text-right font-black text-indigo-400 text-[11px] md:text-[13px]">
-                              {row.totalFactura.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                            <td className="px-2 md:px-4 py-2 md:py-3 font-black text-white italic uppercase text-[9px] md:text-[11px]">{row.name}</td>
+                            {(['P1', 'P2', 'P3', 'P4', 'P5', 'P6'] as const).map(period => {
+                              const ps = row.periodSpend?.[period];
+                              const value = ps?.eur || 0;
+                              const isEstimated = ps?.isEstimated || false;
+                              return (
+                                <td key={period} className="px-1 md:px-2 py-2 md:py-3 text-center">
+                                  {value > 0 ? (
+                                    <span className={`font-bold ${isEstimated ? 'text-yellow-400' : 'text-slate-500'}`}>
+                                      {value.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                    </span>
+                                  ) : '-'}
+                                </td>
+                              );
+                            })}
+                            <td className="px-2 md:px-4 py-2 md:py-3 text-right font-black text-indigo-400 text-[11px] md:text-[13px]">
+                              {row.periodSpend?.totalEur?.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
                             </td>
-                            <td className="px-2 md:px-4 py-2 md:py-4 text-center no-print">
+                            <td className="px-2 md:px-4 py-2 md:py-3 text-center no-print">
                               <button
                                 onClick={(e) => { e.stopPropagation(); onPreviewBill?.(row.id); }}
                                 className="p-1.5 md:p-2 rounded-xl bg-white/5 hover:bg-blue-600/20 text-slate-500 hover:text-blue-400 transition-all border border-white/5 touch-target"
@@ -902,33 +909,25 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
                       {tableData && tableData.length > 0 && (
                         <tfoot>
                           <tr className="bg-indigo-500/10 border-t-2 border-indigo-500/40">
-                            <td className="px-2 md:px-6 py-2 md:py-4 font-black text-indigo-400 uppercase text-[9px] md:text-[11px]">TOTAL</td>
-                            <td className="px-1 md:px-3 py-2 md:py-4 text-center font-black text-indigo-400/80 hidden sm:table-cell">
-                              {tableData.reduce((sum: number, r: any) => sum + r.totalKwh, 0).toLocaleString('es-ES', { maximumFractionDigits: 0 })}
+                            <td className="px-2 md:px-4 py-2 md:py-3 font-black text-indigo-400 uppercase text-[9px] md:text-[11px]">TOTAL</td>
+                            {(['P1', 'P2', 'P3', 'P4', 'P5', 'P6'] as const).map((period, idx) => (
+                              <td key={period} className="px-1 md:px-2 py-2 md:py-3 text-center font-black text-indigo-400/80">
+                                {periodData[idx]?.totalEur > 0 ? (
+                                  <span>{periodData[idx]?.totalEur.toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                ) : '-'}
+                              </td>
+                            ))}
+                            <td className="px-2 md:px-4 py-2 md:py-3 text-right font-black text-indigo-400 text-[12px] md:text-[14px]">
+                              {periodData.reduce((sum: number, p: any) => sum + (p.totalEur || 0), 0).toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
                             </td>
-                            <td className="px-1 md:px-3 py-2 md:py-4 text-center font-black text-blue-400">
-                              {tableData.reduce((sum: number, r: any) => sum + r.energia, 0).toLocaleString('es-ES', { minimumFractionDigits: 2 })} €
-                            </td>
-                            <td className="px-1 md:px-3 py-2 md:py-4 text-center font-black text-indigo-400/80 hidden lg:table-cell">
-                              {tableData.reduce((sum: number, r: any) => sum + r.potencia, 0).toLocaleString('es-ES', { minimumFractionDigits: 2 })} €
-                            </td>
-                            <td className="px-1 md:px-3 py-2 md:py-4 text-center font-black text-indigo-400/80 hidden xl:table-cell">
-                              {tableData.reduce((sum: number, r: any) => sum + r.otros, 0).toLocaleString('es-ES', { minimumFractionDigits: 2 })} €
-                            </td>
-                            <td className="px-1 md:px-3 py-2 md:py-4 text-center font-black text-cyan-400 italic">
-                              {(tableData.reduce((sum: number, r: any) => sum + r.energia, 0) / (tableData.reduce((sum: number, r: any) => sum + r.totalKwh, 0) || 1)).toLocaleString('es-ES', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
-                            </td>
-                            <td className="px-2 md:px-6 py-2 md:py-4 text-right font-black text-indigo-400 text-[12px] md:text-[14px]">
-                              {tableData.reduce((sum: number, r: any) => sum + r.totalFactura, 0).toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
-                            </td>
-                            <td className="px-2 md:px-4 py-2 md:py-4 text-center no-print"></td>
+                            <td className="px-2 md:px-4 py-2 md:py-3 text-center no-print"></td>
                           </tr>
                         </tfoot>
                       )}
                     </table>
                     </div>
                   </div>
-                  <p className="text-center text-[10px] text-yellow-500/60 uppercase tracking-widest hidden md:block">Gasto energético calculado con precio neto (descuentos aplicados)</p>
+                  <p className="text-center text-[10px] text-yellow-500/60 uppercase tracking-widest hidden md:block">Los valores en amarillo son estimados (fallback: kWh × precio medio energia)</p>
                 </div>
 
                 {/* ── EXCESS TABLE: Only show if there are power excesses ── */}
