@@ -337,9 +337,11 @@ function EnergyBillsAppContent() {
           setCurrentProjectId(lastId);
           setCloudSyncStatus('synced');
           console.log(`[SYNC_TRACE] Estado de la aplicación sincronizado con la nube`);
-        } else {
           // Handle clean state or restored projects
           setCloudSyncStatus('synced');
+          if (dbProjects.length === 0) {
+            console.log(`[SYNC_TRACE] DB vacía, nada que cargar.`);
+          }
         }
       } catch (e: any) {
         console.error(`[LOCAL_FALLBACK_TRACE] Error en sincronización inicial:`, e.message);
@@ -1568,6 +1570,18 @@ function EnergyBillsAppContent() {
                   title="Pool - Carga Masiva"
                 >
                   <Package className="w-4 h-4" />
+                </button>
+                <button 
+                  onClick={handleManualSync}
+                  className={`p-2 rounded transition-all touch-target ${
+                    cloudSyncStatus === 'syncing' ? 'animate-spin text-blue-400' : 
+                    cloudSyncStatus === 'error' ? 'text-red-400 hover:bg-red-500/10' : 
+                    'text-slate-500 hover:bg-white/5 hover:text-white'
+                  }`}
+                  title="Sincronizar todo con la nube"
+                  disabled={cloudSyncStatus === 'syncing'}
+                >
+                  <RefreshCw className="w-4 h-4" />
                 </button>
               </div>
             </div>
