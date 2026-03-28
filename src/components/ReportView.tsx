@@ -988,15 +988,25 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
               </div>
             </section>
 
-            {/* ── PAGE 7: LISTO PARA OPTIMIZAR ── */}
+            {/* ── PAGE 7: MASCOT ── */}
             <section id="scene-7" className={`report-page relative flex flex-col items-center justify-center overflow-hidden ${isExportMode ? 'p-4 md:p-6 min-h-[400px]' : 'p-6 md:p-12 min-h-screen'}`}>
               <GlowOrb className="top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 opacity-30 parallax-bg" size="xl" />
               
-              <div className={`max-w-3xl w-full flex flex-col items-center text-center relative z-10 ${isExportMode ? 'space-y-6 md:space-y-8' : 'space-y-8 md:space-y-12'}`}>
-                {/* Voltis Logo */}
-                <div className="flex flex-col items-center gap-4 md:gap-6">
-                  <h3 className="text-4xl md:text-7xl lg:text-[100px] font-black uppercase tracking-tighter leading-[0.7] text-glow-pulse">LISTO PARA OPTIMIZAR</h3>
-                  <p className="text-base md:text-xl text-slate-400 font-medium opacity-50">Auditoría de Precisión Finalizada</p>
+              <motion.div 
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ duration: 0.8, ease: 'easeOut' }}
+                className={`max-w-3xl w-full flex flex-col items-center text-center relative z-10 ${isExportMode ? 'space-y-6 md:space-y-8' : 'space-y-8 md:space-y-12'}`}
+              >
+                {/* Mascot Image */}
+                <div className="flex flex-col items-center justify-center py-6 md:py-10">
+                  <motion.img 
+                    src="/mascota-transparente.png" 
+                    alt="Voltis Mascot" 
+                    className="w-full max-w-[260px] md:max-w-[360px] h-auto object-contain drop-shadow-2xl"
+                    animate={{ y: [0, -8, 0] }}
+                    transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
+                  />
                 </div>
 
                 {/* GENERAR PDF Button - Centered, Premium */}
@@ -1078,7 +1088,7 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
                      <Send className="w-4 h-4" />}
                   </button>
                 </form>
-              </div>
+              </motion.div>
             </section>
           </>
         )}
