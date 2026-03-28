@@ -593,10 +593,22 @@ export default function ReportView({ bills, customOCs, onBack, onPreviewBill, pr
 
       <div ref={contentRef} className={`relative z-10 report-container ${isPreviewMode || isExportMode ? 'preview-mode' : ''}`}>
         {!hasData ? (
-          <div className="min-h-screen flex flex-col items-center justify-center p-12 text-center space-y-6">
-            <AlertTriangle className="w-16 h-16 text-amber-500 animate-pulse" />
-            <h3 className="text-4xl font-black uppercase tracking-tighter">Sin datos{isAnnual ? '' : ` (${selectedMonths.size} mes${selectedMonths.size !== 1 ? 'es' : ''})`}</h3>
-            <p className="text-slate-500 max-w-md mx-auto">Sube una factura o cambia el filtro.</p>
+          <div className="min-h-screen flex flex-col items-center justify-center p-12">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ duration: 0.5, ease: 'easeOut' }}
+              className="flex flex-col items-center gap-6"
+            >
+              <img 
+                src="/mascota-transparente.png" 
+                alt="Voltis Mascot" 
+                className="w-full max-w-[280px] md:max-w-[350px] opacity-90 drop-shadow-2xl"
+              />
+              <p className="text-slate-500 text-center text-sm md:text-base max-w-md">
+                Selecciona meses con datos para ver el informe
+              </p>
+            </motion.div>
           </div>
         ) : (
           <>
