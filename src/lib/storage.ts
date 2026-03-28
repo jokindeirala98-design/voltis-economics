@@ -9,7 +9,7 @@
 
 import { supabase } from './supabase';
 
-const BUCKET_NAME = 'facturas-originales';
+const BUCKET_NAME = 'invoices';
 
 export interface StorageResult {
   success: boolean;
