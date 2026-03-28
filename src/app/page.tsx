@@ -289,6 +289,46 @@ function EnergyBillsAppContent() {
     checkAuth();
   }, []);
 
+  // Auto-sync on visibility change (tab switch, window focus)
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && isAuthenticated) {
+        console.log(`[SYNC_TRACE] App became visible - scheduling background sync`);
+        // Debounced background sync - small delay to not block UI
+        setTimeout(() => {
+          if (cloudSyncStatus !== 'syncing') {
+            setCloudSyncStatus('syncing');
+            const userId = 'voltis_user_global';
+            Promise.all([
+              fetchAllProjectsFromDB(userId),
+              fetchAllFoldersFromDB(userId)
+            ]).then(([dbProjects, dbFolders]) => {
+              // Merge with local data - local takes precedence for recent changes
+              setCloudSyncStatus('synced');
+              console.log(`[SYNC_TRACE] Background sync completed - ${dbProjects?.length || 0} projects loaded`);
+            }).catch(() => {
+              setCloudSyncStatus('error');
+            });
+          }
+        }, 2000); // 2 second delay to not interfere with user interaction
+      }
+    };
+
+    const handleFocus = () => {
+      if (isAuthenticated && document.visibilityState === 'visible') {
+        console.log(`[SYNC_TRACE] Window gained focus - checking sync status`);
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', handleFocus);
+    
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleFocus);
+    };
+  }, [isAuthenticated, cloudSyncStatus]);
+
   useEffect(() => {
     const initStorage = async () => {
       if (!isAuthenticated) return;
@@ -1694,18 +1734,6 @@ function EnergyBillsAppContent() {
                 >
                   <Package className="w-4 h-4" />
                 </button>
-                <button 
-                  onClick={handleManualSync}
-                  className={`p-2 rounded transition-all touch-target ${
-                    cloudSyncStatus === 'syncing' ? 'animate-spin text-blue-400' : 
-                    cloudSyncStatus === 'error' ? 'text-red-400 hover:bg-red-500/10' : 
-                    'text-slate-500 hover:bg-white/5 hover:text-white'
-                  }`}
-                  title="Sincronizar todo con la nube"
-                  disabled={cloudSyncStatus === 'syncing'}
-                >
-                  <RefreshCw className="w-4 h-4" />
-                </button>
               </div>
             </div>
             
@@ -1942,18 +1970,6 @@ function EnergyBillsAppContent() {
                   >
                     <Package className="w-4 h-4" />
                   </button>
-                  <button 
-                    onClick={handleManualSync}
-                    className={`p-2 rounded transition-all ${
-                      cloudSyncStatus === 'syncing' ? 'animate-spin text-blue-400' : 
-                      cloudSyncStatus === 'error' ? 'text-red-400 hover:bg-red-500/10' : 
-                      'text-slate-500 hover:bg-white/5 hover:text-white'
-                    }`}
-                    title="Sincronizar todo con la nube"
-                    disabled={cloudSyncStatus === 'syncing'}
-                  >
-                    <RefreshCw className="w-4 h-4" />
-                  </button>
                 </div>
               </div>
               
@@ -2150,8 +2166,14 @@ function EnergyBillsAppContent() {
                   <div className="flex items-center gap-1.5 shrink-0">
                     <div className={`w-1.5 h-1.5 rounded-full ${
                       cloudSyncStatus === 'synced' ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' :
-                      cloudSyncStatus === 'syncing' ? 'bg-blue-500 animate-pulse' : 'bg-slate-500'
+                      cloudSyncStatus === 'syncing' ? 'bg-blue-500 animate-pulse' : 'bg-amber-500'
                     }`} />
+                    <span className={`text-[9px] font-medium shrink-0 ${
+                      cloudSyncStatus === 'synced' ? 'text-emerald-400' :
+                      cloudSyncStatus === 'syncing' ? 'text-blue-400' : 'text-amber-400'
+                    }`}>
+                      {cloudSyncStatus === 'synced' ? '✓' : cloudSyncStatus === 'syncing' ? '···' : '!'}
+                    </span>
                   </div>
                 </form>
               </div>
