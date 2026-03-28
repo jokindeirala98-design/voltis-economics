@@ -6,6 +6,7 @@ export async function GET() {
     env: {
       has_supabase_url: !!process.env.NEXT_PUBLIC_SUPABASE_URL,
       has_supabase_key: !!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+      has_service_role: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
       has_gemini_key: !!process.env.GEMINI_API_KEY,
     },
     database: {
@@ -23,10 +24,28 @@ export async function GET() {
     if (bErr) throw new Error(`bills: ${bErr.message}`);
     if (cErr) throw new Error(`custom_concepts: ${cErr.message}`);
     
+    const { ensureStorageBucket } = await import('@/lib/storage');
+    await ensureStorageBucket();
+
     const { data: bucketList } = await supabase.storage.listBuckets();
     (diag as any).storage = {
       buckets: bucketList?.map(b => b.name) || [],
       count: bucketList?.length || 0
+    };
+    
+    const { data: bills } = await supabase.from('bills').select('id, storage_path, raw_data');
+    const billAudit = bills?.map(b => ({
+      id: b.id,
+      hasPath: !!b.storage_path,
+      hasBase64: !!(b.raw_data as any)?.originalFileBase64,
+      path: b.storage_path
+    })) || [];
+
+    (diag as any).bills = {
+      total: billAudit.length,
+      withPath: billAudit.filter(b => b.hasPath).length,
+      withBase64: billAudit.filter(b => b.hasBase64).length,
+      examples: billAudit.slice(0, 5)
     };
     
     diag.database.status = 'connected';
