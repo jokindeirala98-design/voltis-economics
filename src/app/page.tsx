@@ -2696,10 +2696,16 @@ function EnergyBillsAppContent() {
                     placeholder="CLIENTE - SEDE - AÑO..."
                     className="w-full bg-white/5 border border-white/10 rounded-xl p-4 text-white font-bold uppercase tracking-wider text-sm focus:outline-none focus:border-blue-500/50 transition-all"
                   />
-                  {activeFolderId && (
+                  {newProjectFolderId && (
                     <div className="flex items-center gap-2 mt-1 ml-1">
                       <FolderOpen className="w-3 h-3 text-blue-400" />
-                      <span className="text-[10px] text-blue-400/60 font-medium">Se creará dentro de: <span className="font-bold">{folders.find(f => f.id === activeFolderId)?.name}</span></span>
+                      <span className="text-[10px] text-blue-400/60 font-medium">En carpeta: <span className="font-bold">{folders.find(f => f.id === newProjectFolderId)?.name}</span></span>
+                    </div>
+                  )}
+                  {!newProjectFolderId && (
+                    <div className="flex items-center gap-2 mt-1 ml-1">
+                      <FolderOpen className="w-3 h-3 text-slate-500" />
+                      <span className="text-[10px] text-slate-500 font-medium">Proyecto independiente (sin carpeta)</span>
                     </div>
                   )}
                 </div>
