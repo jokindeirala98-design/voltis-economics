@@ -1803,7 +1803,7 @@ function EnergyBillsAppContent() {
                           </span>
                         )}
                       </div>
-                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity md:opacity-100 lg:opacity-0">
+                      <div className="flex items-center gap-1 opacity-100 md:opacity-100">
                         <button 
                           onClick={(e) => { e.stopPropagation(); downloadFolderZIP(folder.name, folderProjects); }}
                           className={`p-1.5 hover:bg-emerald-500/20 text-emerald-400 rounded-lg transition-all touch-target ${exportProgress.status !== 'idle' ? 'opacity-30 cursor-wait' : ''}`}
@@ -2068,13 +2068,20 @@ function EnergyBillsAppContent() {
                                     <Zap className={`w-3 h-3 flex-shrink-0 ${project.id === currentProjectId ? 'text-blue-400' : 'text-slate-600'}`} />
                                     <span className="text-xs font-medium truncate">{project.name}</span>
                                   </div>
-                                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                  <div className="flex items-center gap-1 opacity-100">
                                     <button 
                                       onClick={(e) => { e.stopPropagation(); setRenamingProjectId(project.id); setNewProjectName(project.name); }}
                                       className="p-1 hover:bg-white/10 rounded"
                                       title="Renombrar"
                                     >
                                       <Edit2 className="w-3 h-3" />
+                                    </button>
+                                    <button 
+                                      onClick={(e) => { e.stopPropagation(); deleteProject(project.id, e); }}
+                                      className="p-1 hover:bg-red-500/10 text-slate-500 hover:text-red-500 rounded"
+                                      title="Eliminar"
+                                    >
+                                      <Trash2 className="w-3 h-3" />
                                     </button>
                                   </div>
                                 </div>
@@ -2107,13 +2114,20 @@ function EnergyBillsAppContent() {
                         <Zap className={`w-3 h-3 flex-shrink-0 ${project.id === currentProjectId ? 'text-blue-400' : 'text-slate-600'}`} />
                         <span className="text-xs font-medium truncate">{project.name}</span>
                       </div>
-                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <div className="flex items-center gap-1 opacity-100">
                         <button 
                           onClick={(e) => { e.stopPropagation(); setRenamingProjectId(project.id); setNewProjectName(project.name); }}
                           className="p-1 hover:bg-white/10 rounded"
                           title="Renombrar"
                         >
                           <Edit2 className="w-3 h-3" />
+                        </button>
+                        <button 
+                          onClick={(e) => { e.stopPropagation(); deleteProject(project.id, e); }}
+                          className="p-1 hover:bg-red-500/10 text-slate-500 hover:text-red-500 rounded"
+                          title="Eliminar"
+                        >
+                          <Trash2 className="w-3 h-3" />
                         </button>
                       </div>
                     </div>
@@ -2868,7 +2882,7 @@ const ProjectItem = ({ proj, isActive, onLoad, onRename, onDelete, onMove, folde
           <span className="text-[9px] opacity-50 font-medium tracking-tight">{(proj.bills || []).length} items</span>
         </div>
         
-        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity md:opacity-100 lg:opacity-0">
+        <div className="flex items-center gap-1 opacity-100 md:opacity-100">
           <button 
             onClick={(e) => { e.stopPropagation(); setShowMoveMenu(!showMoveMenu); }}
             className={`p-1.5 rounded transition-colors touch-target ${showMoveMenu ? 'bg-white/10 text-white' : 'hover:bg-white/10 text-slate-500 hover:text-white'}`}
