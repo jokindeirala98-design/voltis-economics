@@ -76,6 +76,7 @@ function EnergyBillsAppContent() {
   const [renamingProjectId, setRenamingProjectId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [newProjectName, setNewProjectName] = useState('');
+  const [newProjectFolderId, setNewProjectFolderId] = useState<string | null>(null); // Track target folder for new project
   const [folders, setFolders] = useState<ProjectFolder[]>([]);
   const [showNewProjectModal, setShowNewProjectModal] = useState(false);
   const [activeFolderId, setActiveFolderId] = useState<string | null>(null);
@@ -897,12 +898,12 @@ function EnergyBillsAppContent() {
       ? crypto.randomUUID() 
       : `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
-    console.log('[Project Creation] Generando proyecto:', { newId, userId, folderId: folderId || activeFolderId });
+    console.log('[Project Creation] Generando proyecto:', { newId, userId, folderId: newProjectFolderId });
 
     const project: ProjectWorkspace = { 
       id: newId, 
       name: name.toUpperCase(), 
-      folderId: folderId || (activeFolderId || undefined), // NEW: Associate with active folder
+      folderId: newProjectFolderId || undefined, // Use the explicit target folder
       bills: [], 
       customOCs: {}, 
       updatedAt: Date.now() 
@@ -1721,7 +1722,7 @@ function EnergyBillsAppContent() {
                   <FolderOpen className="w-3.5 h-3.5" />
                 </button>
                 <button 
-                  onClick={() => { setShowNewProjectModal(true); setNewProjectName(''); }}
+                  onClick={() => { setNewProjectFolderId(null); setShowNewProjectModal(true); setNewProjectName(''); }}
                   className="p-1 hover:bg-white/5 text-slate-500 hover:text-white rounded transition-all"
                   title="Nuevo Proyecto"
                 >
@@ -1845,7 +1846,7 @@ function EnergyBillsAppContent() {
                           ))
                         )}
                         <button 
-                          onClick={() => { setShowNewProjectModal(true); setNewProjectName(''); }}
+                          onClick={() => { setNewProjectFolderId(folder.id); setShowNewProjectModal(true); setNewProjectName(''); }}
                           className="flex items-center gap-2 p-2 rounded-lg text-blue-500/60 hover:text-blue-400 hover:bg-blue-500/5 transition-all text-[10px] font-bold uppercase tracking-wider mt-1 touch-target"
                         >
                           <Plus className="w-3 h-3" /> Nuevo Proyecto
@@ -1957,7 +1958,7 @@ function EnergyBillsAppContent() {
                     <FolderOpen className="w-3.5 h-3.5" />
                   </button>
                   <button 
-                    onClick={() => { setShowNewProjectModal(true); setNewProjectName(''); }}
+                    onClick={() => { setNewProjectFolderId(null); setShowNewProjectModal(true); setNewProjectName(''); }}
                     className="p-1 hover:bg-white/5 text-slate-500 hover:text-white rounded transition-all"
                     title="Nuevo Proyecto"
                   >
@@ -2491,7 +2492,11 @@ function EnergyBillsAppContent() {
                 </div>
                 <div>
                   <h3 className="text-lg md:text-xl font-black tracking-tight text-white">Nuevo Proyecto</h3>
-                  <p className="text-[10px] md:text-[11px] text-slate-500 font-medium">Introduce un nombre identificador</p>
+                  <p className="text-[10px] md:text-[11px] text-slate-500 font-medium">
+                    {newProjectFolderId 
+                      ? `En carpeta: ${folders.find(f => f.id === newProjectFolderId)?.name || 'Desconocida'}`
+                      : 'Sin carpeta (proyecto independiente)'}
+                  </p>
                 </div>
               </div>
 
