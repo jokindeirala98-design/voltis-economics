@@ -1405,6 +1405,63 @@ function EnergyBillsAppContent() {
             }}
           />
         )}
+
+        {/* BILL PREVIEW MODAL - Rendered inside report view */}
+        <AnimatePresence>
+          {previewBillId && (
+            <div className="fixed inset-0 z-[300] flex items-center justify-center p-4 md:p-8 bg-black/95 backdrop-blur-xl no-print" onClick={() => setPreviewBillId(null)}>
+              <div className="absolute top-0 left-0 w-full h-[300px] bg-blue-600/10 blur-[120px] pointer-events-none" />
+              <motion.div 
+                initial={{ opacity: 0, scale: 0.95, y: 20 }} 
+                animate={{ opacity: 1, scale: 1, y: 0 }} 
+                exit={{ opacity: 0, scale: 0.95, y: 20 }}
+                className="bg-[#0f172a] border border-white/10 rounded-2xl md:rounded-[48px] w-full max-w-6xl h-[85vh] md:h-[90vh] flex flex-col overflow-hidden shadow-2xl relative z-10 mobile-modal"
+                onClick={e => e.stopPropagation()}
+              >
+                <div className="p-4 md:p-10 border-b border-white/5 flex items-center justify-between bg-white/5 gap-4">
+                  <div className="flex items-center gap-3 md:gap-5 min-w-0 flex-1">
+                    <div className="w-10 h-10 md:w-12 md:h-12 rounded-xl md:rounded-2xl bg-blue-500/20 flex items-center justify-center flex-shrink-0">
+                      <FileText className="w-5 h-5 md:w-6 md:h-6 text-blue-400" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <h3 className="text-base md:text-2xl font-black uppercase tracking-tight text-white truncate">
+                        {reportBills.find(b => b.id === previewBillId)?.fileName}
+                      </h3>
+                      <p className="text-[10px] md:text-xs text-slate-500 font-bold uppercase tracking-widest mt-0.5 md:mt-1 hidden sm:block">Audit Control • Original Document</p>
+                    </div>
+                  </div>
+                  <button onClick={() => setPreviewBillId(null)} className="w-10 h-10 md:w-12 md:h-12 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center transition-all border border-white/10 flex-shrink-0 touch-target">
+                    <X className="w-5 h-5 md:w-6 md:h-6" />
+                  </button>
+                </div>
+                
+                <div className="flex-1 bg-black/40 overflow-hidden relative">
+                  {previewUrl ? (
+                    <DocumentViewer 
+                      src={previewUrl} 
+                      type={previewType} 
+                      fileName={reportBills.find(b => b.id === previewBillId)?.fileName}
+                      onClose={() => setPreviewBillId(null)}
+                    />
+                  ) : isPreviewLoading ? (
+                    <div className="w-full h-full flex flex-col items-center justify-center gap-4">
+                      <Loader className="w-8 h-8 text-blue-500 animate-spin" />
+                      <p className="text-xs font-bold text-slate-500 uppercase tracking-widest">Recuperando documento...</p>
+                    </div>
+                  ) : (
+                    <div className="w-full h-full flex flex-col items-center justify-center gap-4 md:gap-6 text-slate-500 border-2 border-dashed border-white/5 rounded-2xl md:rounded-[40px] bg-white/[0.02] p-4 text-center">
+                      <AlertTriangle className="w-12 h-12 md:w-16 md:h-16 text-amber-500/50" />
+                      <div className="space-y-2">
+                        <p className="text-lg md:text-xl font-black text-white uppercase tracking-tight">Archivo no disponible</p>
+                        <p className="text-xs md:text-sm font-medium text-slate-500 max-w-xs mx-auto">Este documento histórico no tiene una copia digital vinculada o guardada en el almacenamiento persistente.</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
       </div>
     );
   }
@@ -1841,7 +1898,7 @@ function EnergyBillsAppContent() {
           }}
         >
           <div className="absolute top-0 left-0 w-full h-[300px] bg-blue-600/5 blur-[100px] pointer-events-none" />
-          <div className="px-8 pt-10 pb-6 flex flex-col gap-8 relative z-10">
+          <div className="px-8 pt-10 pb-6 flex flex-col gap-6 relative z-10">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <div className="w-8 h-8 flex items-center justify-center relative">
@@ -1855,6 +1912,200 @@ function EnergyBillsAppContent() {
               <button onClick={() => setIsSidebarOpen(false)} className="p-2 hover:bg-white/5 text-slate-500 rounded-lg transition-colors">
                 <X className="w-5 h-5" />
               </button>
+            </div>
+            
+            {/* Desktop Sidebar Content - Projects List */}
+            <div className="flex flex-col gap-2 flex-1 overflow-hidden">
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest pl-1">
+                  Proyectos
+                </h3>
+                <div className="flex items-center gap-1">
+                  <button 
+                    onClick={() => { setShowNewFolderModal(true); setNewFolderName(''); }}
+                    className="p-1 hover:bg-white/5 text-slate-500 hover:text-white rounded transition-all"
+                    title="Nueva Carpeta"
+                  >
+                    <FolderOpen className="w-3.5 h-3.5" />
+                  </button>
+                  <button 
+                    onClick={() => { setShowNewProjectModal(true); setNewProjectName(''); }}
+                    className="p-1 hover:bg-white/5 text-slate-500 hover:text-white rounded transition-all"
+                    title="Nuevo Proyecto"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                  </button>
+                  <button 
+                    onClick={() => setShowPool(true)}
+                    className="p-2 hover:bg-purple-500/20 text-slate-500 hover:text-purple-400 rounded transition-all"
+                    title="Pool - Carga Masiva"
+                  >
+                    <Package className="w-4 h-4" />
+                  </button>
+                  <button 
+                    onClick={handleManualSync}
+                    className={`p-2 rounded transition-all ${
+                      cloudSyncStatus === 'syncing' ? 'animate-spin text-blue-400' : 
+                      cloudSyncStatus === 'error' ? 'text-red-400 hover:bg-red-500/10' : 
+                      'text-slate-500 hover:bg-white/5 hover:text-white'
+                    }`}
+                    title="Sincronizar todo con la nube"
+                    disabled={cloudSyncStatus === 'syncing'}
+                  >
+                    <RefreshCw className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+              
+              <div className="flex flex-col gap-4 overflow-y-auto flex-1 pr-2 custom-scrollbar">
+                {/* FOLDERS SECTION */}
+                {folders
+                  .filter(f => {
+                    if (!isSearchActive || !searchQuery) return true;
+                    const folderMatches = f.name.toLowerCase().includes(searchQuery.toLowerCase());
+                    const hasMatchingProject = savedProjects.some(p => 
+                      p.folderId === f.id && p.name.toLowerCase().includes(searchQuery.toLowerCase())
+                    );
+                    return folderMatches || hasMatchingProject;
+                  })
+                  .sort((a,b) => b.updatedAt - a.updatedAt)
+                  .map(folder => {
+                    const folderProjects = savedProjects.filter(p => {
+                      const isChild = p.folderId === folder.id;
+                      if (!isSearchActive || !searchQuery) return isChild;
+                      return isChild && p.name.toLowerCase().includes(searchQuery.toLowerCase());
+                    });
+                    const isExpanded = expandedFolders.has(folder.id) || (isSearchActive && searchQuery !== '');
+                    const toggleFolder = () => {
+                      setExpandedFolders(prev => {
+                        const next = new Set(prev);
+                        if (next.has(folder.id)) {
+                          next.delete(folder.id);
+                        } else {
+                          next.add(folder.id);
+                        }
+                        return next;
+                      });
+                    };
+                  
+                    return (
+                      <div key={folder.id} className="flex flex-col gap-1">
+                        <div 
+                          onClick={toggleFolder}
+                          className={`group flex items-center justify-between py-1.5 px-2 rounded-lg cursor-pointer transition-all ${
+                            isExpanded ? 'text-white' : 'text-slate-500 hover:text-slate-300 hover:bg-white/5'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2 overflow-hidden">
+                            <motion.div
+                              animate={{ rotate: isExpanded ? 90 : 0 }}
+                              transition={{ duration: 0.2, ease: 'easeOut' }}
+                            >
+                              <ChevronRight className={`w-3 h-3 ${isExpanded ? 'text-blue-400' : 'text-slate-600'}`} />
+                            </motion.div>
+                            <FolderOpen className={`w-3.5 h-3.5 ${isExpanded ? 'text-blue-400' : 'text-slate-600'}`} />
+                            <span className={`font-bold truncate text-xs uppercase tracking-tight ${isExpanded ? 'text-white' : 'text-slate-500'}`}>
+                              {folder.name}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button 
+                              onClick={(e) => { e.stopPropagation(); downloadFolderZIP(folder.name, folderProjects); }}
+                              className="p-1.5 hover:bg-emerald-500/20 text-emerald-400 rounded-lg transition-all"
+                              title="Descargar ZIP"
+                            >
+                              <Download className="w-3 h-3" />
+                            </button>
+                            <button 
+                              onClick={(e) => { e.stopPropagation(); setRenamingFolderId(folder.id); setNewFolderName(folder.name); }}
+                              className="p-1.5 hover:bg-white/10 text-slate-500 hover:text-white rounded-lg transition-all"
+                              title="Renombrar"
+                            >
+                              <Edit2 className="w-3 h-3" />
+                            </button>
+                            <button 
+                              onClick={(e) => { e.stopPropagation(); deleteFolder(folder.id); }}
+                              className="p-1.5 hover:bg-red-500/20 text-slate-500 hover:text-red-400 rounded-lg transition-all"
+                              title="Eliminar"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </button>
+                          </div>
+                        </div>
+                        
+                        {isExpanded && (
+                          <div className="ml-6 flex flex-col gap-0.5">
+                            {folderProjects
+                              .sort((a, b) => b.updatedAt - a.updatedAt)
+                              .map(project => (
+                                <div
+                                  key={project.id}
+                                  onClick={() => loadWorkspace(project)}
+                                  className={`group py-1.5 px-2 rounded-lg cursor-pointer transition-all flex items-center justify-between ${
+                                    project.id === currentProjectId
+                                      ? 'bg-blue-500/20 text-blue-400'
+                                      : 'text-slate-400 hover:bg-white/5 hover:text-white'
+                                  }`}
+                                >
+                                  <div className="flex items-center gap-2 overflow-hidden">
+                                    <Zap className={`w-3 h-3 flex-shrink-0 ${project.id === currentProjectId ? 'text-blue-400' : 'text-slate-600'}`} />
+                                    <span className="text-xs font-medium truncate">{project.name}</span>
+                                  </div>
+                                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <button 
+                                      onClick={(e) => { e.stopPropagation(); setRenamingProjectId(project.id); setNewProjectName(project.name); }}
+                                      className="p-1 hover:bg-white/10 rounded"
+                                      title="Renombrar"
+                                    >
+                                      <Edit2 className="w-3 h-3" />
+                                    </button>
+                                  </div>
+                                </div>
+                              ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                
+                {/* UNFOLDERED PROJECTS */}
+                {savedProjects
+                  .filter(p => !p.folderId)
+                  .filter(p => {
+                    if (!isSearchActive || !searchQuery) return true;
+                    return p.name.toLowerCase().includes(searchQuery.toLowerCase());
+                  })
+                  .sort((a, b) => b.updatedAt - a.updatedAt)
+                  .map(project => (
+                    <div
+                      key={project.id}
+                      onClick={() => loadWorkspace(project)}
+                      className={`group py-1.5 px-2 rounded-lg cursor-pointer transition-all flex items-center justify-between ${
+                        project.id === currentProjectId
+                          ? 'bg-blue-500/20 text-blue-400'
+                          : 'text-slate-400 hover:bg-white/5 hover:text-white'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 overflow-hidden">
+                        <Zap className={`w-3 h-3 flex-shrink-0 ${project.id === currentProjectId ? 'text-blue-400' : 'text-slate-600'}`} />
+                        <span className="text-xs font-medium truncate">{project.name}</span>
+                      </div>
+                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button 
+                          onClick={(e) => { e.stopPropagation(); setRenamingProjectId(project.id); setNewProjectName(project.name); }}
+                          className="p-1 hover:bg-white/10 rounded"
+                          title="Renombrar"
+                        >
+                          <Edit2 className="w-3 h-3" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                
+                {savedProjects.filter(p => !p.folderId).length === 0 && !isSearchActive && (
+                  <span className="text-[10px] text-slate-600 italic py-2">Sin proyectos</span>
+                )}
+              </div>
             </div>
           </div>
         </aside>
