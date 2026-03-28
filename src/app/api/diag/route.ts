@@ -23,6 +23,12 @@ export async function GET() {
     if (bErr) throw new Error(`bills: ${bErr.message}`);
     if (cErr) throw new Error(`custom_concepts: ${cErr.message}`);
     
+    const { data: bucketList } = await supabase.storage.listBuckets();
+    (diag as any).storage = {
+      buckets: bucketList?.map(b => b.name) || [],
+      count: bucketList?.length || 0
+    };
+    
     diag.database.status = 'connected';
   } catch (err: any) {
     diag.database.status = 'error';
