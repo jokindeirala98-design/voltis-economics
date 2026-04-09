@@ -1,0 +1,3 @@
+#!/bin/zsh
+cd "/Users/jokindeirala/Desktop/Voltis anual economics"
+npm run dev

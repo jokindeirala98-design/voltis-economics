@@ -1,0 +1,1 @@
+{"files.exclude": {"**/.git": true, "**/.next": true},"search.exclude": {"**/.next": true}, "eslint.workingDirectories": [{"mode": "auto"}]}
