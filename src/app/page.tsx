@@ -597,16 +597,41 @@ function EnergyBillsAppContent() {
           newBill.fileMimeType = fileData.type;
         }
 
-        // Check for duplicate BEFORE setting state
-        const projectBills = allBills[targetProjectId] || [];
-        const isDuplicate = projectBills.some(b =>
-          b.cups && newBill.cups &&
-          b.cups === newBill.cups &&
-          b.fechaInicio === newBill.fechaInicio &&
-          b.fechaFin === newBill.fechaFin
-        );
+        // Use functional updater to avoid stale closure when processing concurrently
+        const billWithProject = { ...newBill, projectId: targetProjectId };
+        let wasDuplicate = false;
 
-        if (isDuplicate) {
+        setAllBills(prev => {
+          const projectBills = prev[targetProjectId] || [];
+
+          // Check for duplicate using the latest state
+          const isDuplicate = projectBills.some(b =>
+            b.cups && newBill.cups &&
+            b.cups === newBill.cups &&
+            b.fechaInicio === newBill.fechaInicio &&
+            b.fechaFin === newBill.fechaFin
+          );
+
+          if (isDuplicate) {
+            wasDuplicate = true;
+            return prev; // No changes
+          }
+
+          const nextBills = [...projectBills, billWithProject].sort((a, b) => {
+            const am = getAssignedMonth(a.fechaInicio, a.fechaFin);
+            const bm = getAssignedMonth(b.fechaInicio, b.fechaFin);
+            if (am.year !== bm.year) return am.year - bm.year;
+            return am.month - bm.month;
+          });
+
+          // Schedule saveToDisk with the freshly computed bills
+          const projectCustomOCs = allCustomOCs[targetProjectId] || {};
+          setTimeout(() => saveToDisk(nextBills, projectCustomOCs, targetProjectId), 0);
+
+          return { ...prev, [targetProjectId]: nextBills };
+        });
+
+        if (wasDuplicate) {
           console.log(`[REPORT ROUTING][${file.name}] Duplicate detected`);
           setAllExtractionQueues(q => ({
             ...q,
@@ -617,20 +642,6 @@ function EnergyBillsAppContent() {
           toast.warning(`Factura "${file.name}" ya existe en este proyecto`);
           return 'duplicate';
         }
-
-        // Update project-keyed bills
-        const billWithProject = { ...newBill, projectId: targetProjectId };
-        const nextBills = [...projectBills, billWithProject].sort((a, b) => {
-          const am = getAssignedMonth(a.fechaInicio, a.fechaFin);
-          const bm = getAssignedMonth(b.fechaInicio, b.fechaFin);
-          if (am.year !== bm.year) return am.year - bm.year;
-          return am.month - bm.month;
-        });
-
-        setAllBills(prev => ({ ...prev, [targetProjectId]: nextBills }));
-
-        const projectCustomOCs = allCustomOCs[targetProjectId] || {};
-        saveToDisk(nextBills, projectCustomOCs, targetProjectId);
 
         setAllExtractionQueues(prev => ({
           ...prev,
@@ -676,7 +687,7 @@ function EnergyBillsAppContent() {
       toast.error(`Error de red en ${file.name}`);
       return 'error';
     }
-  }, [allBills, allCustomOCs, saveToDisk]);
+  }, [allCustomOCs, saveToDisk]);
   const handleRefine = async () => {
     if (!refiningBill || !refineInstruction.trim()) return;
     
