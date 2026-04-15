@@ -23,6 +23,7 @@
     "next": "16.2.1",
     "next-auth": "^4.24.13",
     "nodemailer": "^7.0.7",
+    "pdf-lib": "^1.17.1",
     "pdf2json": "^4.0.2",
     "playwright": "^1.58.2",
     "puppeteer-core": "^24.40.0",

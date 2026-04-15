@@ -10,6 +10,7 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 import { PoolFile, PoolGroup, PoolSession, ExtractedBill, isGasBill } from '@/lib/types';
 import { importFlexibleExcel } from '@/lib/import-flexible';
+import { preSplitMultiInvoicePdfs } from '@/lib/pdf-split';
 import JSZip from 'jszip';
 
 interface PoolUploadProps {
@@ -114,6 +115,13 @@ export default function PoolUpload({ onClose, onComplete, existingCups }: PoolUp
   const [totalFilesToProcess, setTotalFilesToProcess] = useState(0);
   const [currentFileName, setCurrentFileName] = useState('');
   const [extractingZip, setExtractingZip] = useState(false);
+  // While true, we're pre-analysing PDFs to detect multi-invoice documents
+  // and splitting them into one Sub-PDF per factura BEFORE the normal
+  // extraction pipeline starts. Mirrors the "extractingZip" UX.
+  const [splittingPdfs, setSplittingPdfs] = useState(false);
+  const [splittingProgress, setSplittingProgress] = useState<{
+    current: number; total: number; fileName: string;
+  }>({ current: 0, total: 0, fileName: '' });
   // NEW: ask for the parent project (folder) name before the user can drop anything.
   // Every supply detected in the pool will land inside this folder.
   const [folderName, setFolderName] = useState('');
@@ -194,7 +202,45 @@ export default function PoolUpload({ onClose, onComplete, existingCups }: PoolUp
       }
     }
 
-    const regularPoolFiles: PoolFile[] = nonExcelFiles.map((file, idx) => ({
+    // NEW — Multi-invoice PDF pre-split:
+    // Before creating PoolFiles for the regular (non-Excel) pipeline, walk
+    // the PDFs and ask the backend whether each one contains multiple
+    // invoices. If so, slice it into N single-invoice sub-PDFs on the
+    // client using pdf-lib. Non-PDFs (images) pass through untouched.
+    //
+    // This is intentionally the ONLY new step in the flow: the resulting
+    // Files enter the existing per-file /api/extract pipeline exactly as
+    // before, so extraction / classification / grouping logic is unchanged.
+    let preparedFiles: File[] = nonExcelFiles;
+    const pdfCount = nonExcelFiles.filter(f =>
+      f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf')
+    ).length;
+    if (pdfCount > 0) {
+      setSplittingPdfs(true);
+      setSplittingProgress({ current: 0, total: pdfCount, fileName: '' });
+      try {
+        preparedFiles = await preSplitMultiInvoicePdfs(nonExcelFiles, info => {
+          setSplittingProgress({
+            current: info.index,
+            total: info.total,
+            fileName: info.fileName,
+          });
+          if (info.detectedCount && info.detectedCount > 1) {
+            console.log(`[Pool] ${info.fileName} contiene ${info.detectedCount} facturas → dividiendo`);
+          }
+        });
+        console.log(`[Pool] Pre-split: ${nonExcelFiles.length} archivo(s) → ${preparedFiles.length} archivo(s) tras dividir`);
+      } catch (err) {
+        // If anything goes wrong we simply fall back to the original files
+        // — preserves the pre-existing behaviour (1 PDF = 1 factura).
+        console.error('[Pool] Pre-split failed, using originals:', err);
+        preparedFiles = nonExcelFiles;
+      } finally {
+        setSplittingPdfs(false);
+      }
+    }
+
+    const regularPoolFiles: PoolFile[] = preparedFiles.map((file, idx) => ({
       id: `file-${Date.now()}-${idx}`,
       file,
       status: 'pending' as const,
@@ -218,7 +264,7 @@ export default function PoolUpload({ onClose, onComplete, existingCups }: PoolUp
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop: handleDrop,
     accept: ACCEPTED_TYPES,
-    disabled: session?.status === 'processing' || extractingZip
+    disabled: session?.status === 'processing' || extractingZip || splittingPdfs
   });
 
   // Process files with batch processing
@@ -560,6 +606,20 @@ export default function PoolUpload({ onClose, onComplete, existingCups }: PoolUp
                       </div>
                       <h3 className="text-lg font-bold text-white mb-2">Extrayendo archivos del ZIP...</h3>
                       <p className="text-sm text-slate-500">Esto puede tardar unos segundos</p>
+                    </>
+                  ) : splittingPdfs ? (
+                    <>
+                      <div className="w-16 h-16 rounded-2xl bg-purple-600/10 flex items-center justify-center mx-auto mb-4">
+                        <Layers className="w-8 h-8 text-purple-400 animate-pulse" />
+                      </div>
+                      <h3 className="text-lg font-bold text-white mb-2">
+                        Analizando PDFs en busca de múltiples facturas...
+                      </h3>
+                      <p className="text-sm text-slate-500">
+                        {splittingProgress.total > 0
+                          ? `${splittingProgress.current} / ${splittingProgress.total}${splittingProgress.fileName ? ` · ${splittingProgress.fileName}` : ''}`
+                          : 'Preparando archivos'}
+                      </p>
                     </>
                   ) : (
                     <>
