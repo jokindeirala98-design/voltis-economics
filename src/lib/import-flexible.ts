@@ -887,6 +887,18 @@ function importTransposedFormat(
     }
   }
 
+  // Detect gas vs electricity by presence of gas-specific labels anywhere in the sheet
+  const gasLabelSet = new Set([
+    'Impuesto sobre Hidrocarburos',
+    'Término Fijo Total',
+    'Término Fijo Diario',
+    'Consumo M3',
+    'Tarifa RL',
+    'Factor Conversión',
+    'Alquiler de Contador',
+  ]);
+  const isGasSheet = rows.some(r => gasLabelSet.has(labelOf(r)));
+
   const bills: ExtractedBill[] = invoiceKeys.map((invKey, idx) => {
     const fechaInicio = getCell('Fecha Inicio', invKey) || getCell('Fecha', invKey);
     const fechaFin = getCell('Fecha Fin', invKey) || getCell('Fecha', invKey);
@@ -895,21 +907,80 @@ function importTransposedFormat(
       id: `import_${Date.now()}_${idx}`,
       fileName: getCell('Nombre Archivo', invKey) || `Factura_Excel_${idx + 1}`,
       status: 'success',
-      energyType: 'electricity',
+      energyType: isGasSheet ? 'gas' : 'electricity',
       fechaInicio: fechaInicio ? String(fechaInicio).substring(0, 10) : undefined,
       fechaFin: fechaFin ? String(fechaFin).substring(0, 10) : undefined,
       cups: getCell('CUPS', invKey) || undefined,
-      tarifa: getCell('Tarifa', invKey) || '3.0TD',
+      tarifa: isGasSheet
+        ? (getCell('Tarifa', invKey) || getCell('Tarifa RL', invKey) || undefined)
+        : (getCell('Tarifa', invKey) || '3.0TD'),
       comercializadora: getCell('Compañía', invKey) || getCell('Empresa', invKey) || undefined,
       titular: getCell('Titular', invKey) || undefined,
       consumo: [],
       potencia: [],
       otrosConceptos: [],
       consumoTotalKwh: parseNumber(getCell('TOTAL CONSUMO (kWh)', invKey)),
-      costeTotalConsumo: parseNumber(getCell('TOTAL COSTE CONSUMO (€)', invKey)),
+      costeTotalConsumo: parseNumber(getCell('TOTAL COSTE CONSUMO (€)', invKey)) || parseNumber(getCell('Coste Neto Consumo', invKey)) || parseNumber(getCell('Coste Bruto Consumo', invKey)),
       costeTotalPotencia: parseNumber(getCell('TOTAL COSTE POTENCIA (€)', invKey)),
       totalFactura: parseNumber(getCell('TOTAL FACTURA (€)', invKey)),
     };
+
+    if (isGasSheet) {
+      // Populate gas-specific fields
+      const kwh = parseNumber(getCell('TOTAL CONSUMO (kWh)', invKey));
+      const m3 = parseNumber(getCell('Consumo M3', invKey));
+      const factor = parseNumber(getCell('Factor Conversión', invKey));
+      const lectAnt = parseNumber(getCell('Lectura Anterior', invKey));
+      const lectAct = parseNumber(getCell('Lectura Actual', invKey));
+      const tipoLecturaRaw = String(getCell('Tipo Lectura', invKey) || '').toLowerCase();
+      let tipoLectura: 'real' | 'estimada' | 'media' | undefined;
+      if (tipoLecturaRaw.includes('real')) tipoLectura = 'real';
+      else if (tipoLecturaRaw.includes('estim')) tipoLectura = 'estimada';
+      else if (tipoLecturaRaw.includes('media')) tipoLectura = 'media';
+
+      bill.gasConsumption = {
+        kwh,
+        m3: m3 > 0 ? m3 : undefined,
+        factorConversion: factor > 0 ? factor : undefined,
+        tipoLectura,
+        lecturaAnterior: lectAnt > 0 ? lectAnt : undefined,
+        lecturaActual: lectAct > 0 ? lectAct : undefined,
+      };
+
+      const precioKwh = parseNumber(getCell('Precio kWh', invKey));
+      const tfDiario = parseNumber(getCell('Término Fijo Diario', invKey));
+      const dias = parseNumber(getCell('Días Facturados', invKey));
+      const tfTotal = parseNumber(getCell('Término Fijo Total', invKey));
+      const impHC = parseNumber(getCell('Impuesto sobre Hidrocarburos', invKey));
+      const alquiler = parseNumber(getCell('Alquiler de Contador', invKey));
+      const ivaPct = parseNumber(getCell('IVA %', invKey)) || 21;
+      const ivaTotal = parseNumber(getCell('IVA Total', invKey)) || parseNumber(getCell('IVA / IGIC (€)', invKey));
+      const descTF = parseNumber(getCell('Descuento Término Fijo', invKey));
+      const descOtros = parseNumber(getCell('Descuento Otros', invKey));
+
+      bill.gasPricing = {
+        precioKwh,
+        terminoFijoDiario: tfDiario,
+        diasFacturados: dias,
+        terminoFijoTotal: tfTotal,
+        impuestoHidrocarbTotal: impHC,
+        alquilerTotal: alquiler,
+        ivaPorcentaje: ivaPct,
+        ivaTotal,
+        descuentoTerminoFijo: descTF > 0 ? descTF : undefined,
+        descuentoOtros: descOtros > 0 ? descOtros : undefined,
+      };
+
+      bill.tarifaRL = getCell('Tarifa RL', invKey) || undefined;
+      bill.costeBrutoConsumo = parseNumber(getCell('Coste Bruto Consumo', invKey)) || undefined;
+      bill.descuentoEnergia = parseNumber(getCell('Descuento Energía', invKey)) || undefined;
+      bill.costeNetoConsumo = parseNumber(getCell('Coste Neto Consumo', invKey)) || undefined;
+      if (bill.consumoTotalKwh && bill.consumoTotalKwh > 0 && bill.costeNetoConsumo) {
+        bill.costeMedioKwhNeto = bill.costeNetoConsumo / bill.consumoTotalKwh;
+      }
+
+      return bill;
+    }
 
     // Parse period consumption
     for (let p = 1; p <= 6; p++) {

@@ -9,11 +9,15 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { PoolFile, PoolGroup, PoolSession, ExtractedBill, isGasBill } from '@/lib/types';
+import { importFlexibleExcel } from '@/lib/import-flexible';
 import JSZip from 'jszip';
 
 interface PoolUploadProps {
   onClose: () => void;
-  onComplete: (projects: { name: string; bills: ExtractedBill[] }[]) => void;
+  onComplete: (
+    projects: { name: string; bills: ExtractedBill[] }[],
+    folderName: string
+  ) => void;
   existingCups: Set<string>;
 }
 
@@ -110,6 +114,10 @@ export default function PoolUpload({ onClose, onComplete, existingCups }: PoolUp
   const [totalFilesToProcess, setTotalFilesToProcess] = useState(0);
   const [currentFileName, setCurrentFileName] = useState('');
   const [extractingZip, setExtractingZip] = useState(false);
+  // NEW: ask for the parent project (folder) name before the user can drop anything.
+  // Every supply detected in the pool will land inside this folder.
+  const [folderName, setFolderName] = useState('');
+  const [folderConfirmed, setFolderConfirmed] = useState(false);
   const processingRef = useRef(false);
 
   const handleDrop = useCallback(async (acceptedFiles: File[]) => {
@@ -150,23 +158,61 @@ export default function PoolUpload({ onClose, onComplete, existingCups }: PoolUp
       return;
     }
 
+    // Split Excel spreadsheets out: each sheet can carry multiple supplies (CUPS),
+    // so we parse them up-front via importFlexibleExcel and synthesise one
+    // PoolFile per invoice. They land in the session already classified.
+    const excelFiles = allFiles.filter(f =>
+      f.name.toLowerCase().endsWith('.xlsx') || f.name.toLowerCase().endsWith('.xls')
+    );
+    const nonExcelFiles = allFiles.filter(f =>
+      !f.name.toLowerCase().endsWith('.xlsx') && !f.name.toLowerCase().endsWith('.xls')
+    );
+
+    const preClassified: PoolFile[] = [];
+    for (const xls of excelFiles) {
+      try {
+        console.log('[Pool] Parsing Excel:', xls.name);
+        const result = await importFlexibleExcel(xls);
+        result.bills.forEach((bill, bIdx) => {
+          preClassified.push({
+            id: `xls-${Date.now()}-${bIdx}-${Math.random().toString(36).slice(2, 6)}`,
+            file: xls,
+            status: 'classified',
+            extractedBill: { ...bill, fileName: bill.fileName || `${xls.name}#${bIdx + 1}` },
+          });
+        });
+        console.log(`[Pool] Excel ${xls.name} produced ${result.bills.length} facturas`);
+      } catch (err) {
+        console.error('[Pool] Excel import failed:', xls.name, err);
+        // fallback: treat as a single error PoolFile so the user sees it
+        preClassified.push({
+          id: `xls-err-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          file: xls,
+          status: 'error',
+          error: err instanceof Error ? err.message : 'Error leyendo Excel',
+        });
+      }
+    }
+
+    const regularPoolFiles: PoolFile[] = nonExcelFiles.map((file, idx) => ({
+      id: `file-${Date.now()}-${idx}`,
+      file,
+      status: 'pending' as const,
+    }));
+
     const newSession: PoolSession = {
       id: `pool-${Date.now()}`,
       startedAt: Date.now(),
-      files: allFiles.map((file, idx) => ({
-        id: `file-${Date.now()}-${idx}`,
-        file,
-        status: 'pending' as const
-      })),
+      files: [...preClassified, ...regularPoolFiles],
       groups: [],
       unassigned: [],
-      status: 'uploading'
+      status: 'uploading',
     };
 
-    console.log('[Pool] Session created with', newSession.files.length, 'files');
+    console.log('[Pool] Session created with', newSession.files.length, 'files (', preClassified.length, 'pre-classified from Excel)');
     setSession(newSession);
     setCurrentFileIndex(0);
-    setTotalFilesToProcess(newSession.files.length);
+    setTotalFilesToProcess(regularPoolFiles.length);
   }, []);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
@@ -187,16 +233,20 @@ export default function PoolUpload({ onClose, onComplete, existingCups }: PoolUp
 
     processingRef.current = true;
 
-    // Snapshot files at the moment processing starts — immune to state changes
-    const filesToProcess = [...session.files];
+    // Snapshot files at the moment processing starts — immune to state changes.
+    // Excel-derived PoolFiles already arrive with status 'classified' and an
+    // extractedBill; we don't want to re-send them through /api/extract.
+    const snapshot = [...session.files];
+    const filesToProcess = snapshot.filter(f => f.status !== 'classified');
+    const preDone = snapshot.filter(f => f.status === 'classified');
     const totalFiles = filesToProcess.length;
 
-    console.log('[Pool] Starting processing of', totalFiles, 'files');
+    console.log('[Pool] Starting processing of', totalFiles, 'files (+', preDone.length, 'pre-classified)');
     setTotalFilesToProcess(totalFiles);
     setSession(prev => prev ? { ...prev, status: 'processing' } : null);
 
     const processAllFiles = async () => {
-      const results: PoolFile[] = [];
+      const results: PoolFile[] = [...preDone];
 
       for (let i = 0; i < totalFiles; i += BATCH_SIZE) {
         const batch = filesToProcess.slice(i, i + BATCH_SIZE);
@@ -242,20 +292,33 @@ export default function PoolUpload({ onClose, onComplete, existingCups }: PoolUp
         results.push(...batchResults);
 
         // Update UI with progress after each batch
+        const processedSoFar = results.length - preDone.length;
         setSession(prev => {
           if (!prev) return null;
           return {
             ...prev,
-            files: [...results, ...filesToProcess.slice(results.length).map(f => ({ ...f, status: 'pending' as const }))]
+            files: [
+              ...results,
+              ...filesToProcess.slice(processedSoFar).map(f => ({ ...f, status: 'pending' as const })),
+            ],
           };
         });
       }
 
-      console.log('[Pool] All files processed. Grouping by CUPS...');
+      console.log('[Pool] All files processed. Grouping by CUPS/supply name...');
 
-      // Group by CUPS + supply type
+      // Group by CUPS + supply type. When CUPS is missing (typical in Excel
+      // imports reconstructed from the client's messy sheets) we fall back to
+      // the bill's titular or filename prefix so the user still gets one
+      // subproject per supply instead of every row dumped into "unassigned".
       const groups: Record<string, PoolGroup> = {};
       const unassigned: PoolFile[] = [];
+
+      const titularPrefix = (s: string | undefined): string => {
+        if (!s) return '';
+        const m = String(s).match(/^(.*?)_\d{4}-\d{2}-\d{2}/);
+        return (m ? m[1] : s).trim();
+      };
 
       results.forEach(pf => {
         if (pf.status !== 'classified' || !pf.extractedBill) {
@@ -267,22 +330,32 @@ export default function PoolUpload({ onClose, onComplete, existingCups }: PoolUp
         const cups = bill.cups?.replace(/\s+/g, '').toUpperCase() || '';
         const supplyType = bill.energyType;
 
-        if (!cups || !cups.startsWith('ES')) {
+        // Derive a grouping key: prefer CUPS, fall back to titular / fileName prefix
+        const fallbackLabel = (bill.titular || titularPrefix(bill.fileName)).trim();
+        let key: string;
+        let displayCups = cups;
+        if (cups && cups.startsWith('ES')) {
+          key = `${supplyType}-${cups}`;
+        } else if (fallbackLabel) {
+          key = `${supplyType}-NOCUPS-${fallbackLabel.toUpperCase()}`;
+          displayCups = cups || 'SIN CUPS';
+        } else {
           unassigned.push(pf);
           return;
         }
 
-        const key = `${supplyType}-${cups}`;
-
         if (!groups[key]) {
           const groupIndex = Object.keys(groups).length + 1;
+          const supplyName = (bill.titular && bill.titular.trim())
+            || fallbackLabel
+            || generateProjectName(displayCups, supplyType, groupIndex);
           groups[key] = {
             id: `group-${Date.now()}-${groupIndex}`,
             key,
             supplyType,
-            cups,
+            cups: displayCups,
             bills: [],
-            projectName: generateProjectName(cups, supplyType, groupIndex)
+            projectName: supplyName.toUpperCase().slice(0, 80),
           };
         }
 
@@ -348,7 +421,7 @@ export default function PoolUpload({ onClose, onComplete, existingCups }: PoolUp
         .map(pf => ({ ...pf.extractedBill!, projectId: group.id }))
     }));
 
-    onComplete(projects);
+    onComplete(projects, folderName.trim().toUpperCase());
   };
 
   const toggleGroup = (groupId: string) => {
@@ -414,35 +487,95 @@ export default function PoolUpload({ onClose, onComplete, existingCups }: PoolUp
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-6">
           {!session ? (
-            /* Upload Area */
-            <div
-              {...getRootProps()}
-              className={`
-                border-2 border-dashed rounded-2xl p-12 text-center cursor-pointer transition-all
-                ${isDragActive ? 'border-purple-500 bg-purple-500/10' : 'border-white/10 hover:border-purple-500/50 hover:bg-white/5'}
-              `}
-            >
-              <input {...getInputProps()} />
+            !folderConfirmed ? (
+              /* Step 1: ask for the project / folder name */
+              <div className="p-10 rounded-2xl border border-white/10 bg-white/[0.02] max-w-xl mx-auto">
+                <div className="w-14 h-14 rounded-2xl bg-purple-600/10 flex items-center justify-center mb-5">
+                  <FolderOpen className="w-7 h-7 text-purple-400" />
+                </div>
+                <h3 className="text-lg font-bold text-white mb-2">¿Cómo se llama este proyecto?</h3>
+                <p className="text-sm text-slate-500 mb-5">
+                  Se creará una carpeta con este nombre y cada suministro detectado se guardará dentro.
+                  <br />
+                  <span className="text-[11px] text-slate-600">Ejemplo: Ayuntamiento de Estella</span>
+                </p>
+                <input
+                  autoFocus
+                  type="text"
+                  value={folderName}
+                  onChange={e => setFolderName(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' && folderName.trim()) setFolderConfirmed(true);
+                  }}
+                  placeholder="Nombre del proyecto / cliente"
+                  className="w-full px-4 py-3 rounded-xl bg-black/30 border border-white/10 focus:border-purple-500 text-white placeholder:text-slate-600 text-sm font-medium focus:outline-none"
+                />
+                <div className="flex justify-end gap-3 mt-5">
+                  <button
+                    onClick={onClose}
+                    className="px-5 py-2.5 rounded-xl border border-white/10 text-slate-400 hover:bg-white/5 font-bold text-sm transition-colors"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    disabled={!folderName.trim()}
+                    onClick={() => setFolderConfirmed(true)}
+                    className="px-5 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 disabled:bg-purple-600/30 disabled:cursor-not-allowed text-white font-bold text-sm transition-colors flex items-center gap-2"
+                  >
+                    Continuar <ArrowRight className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            ) : (
+              /* Step 2: Upload area */
+              <div className="space-y-4">
+                <div className="flex items-center justify-between px-4 py-3 rounded-xl bg-purple-500/5 border border-purple-500/20">
+                  <div className="flex items-center gap-3">
+                    <FolderOpen className="w-4 h-4 text-purple-400" />
+                    <div>
+                      <p className="text-[10px] text-slate-500 uppercase tracking-wider">Proyecto</p>
+                      <p className="text-sm font-bold text-white">{folderName.toUpperCase()}</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setFolderConfirmed(false)}
+                    className="text-[10px] font-bold text-purple-400 hover:text-purple-300 uppercase"
+                  >
+                    Cambiar
+                  </button>
+                </div>
+                <div
+                  {...getRootProps()}
+                  className={`
+                    border-2 border-dashed rounded-2xl p-12 text-center cursor-pointer transition-all
+                    ${isDragActive ? 'border-purple-500 bg-purple-500/10' : 'border-white/10 hover:border-purple-500/50 hover:bg-white/5'}
+                  `}
+                >
+                  <input {...getInputProps()} />
 
-              {extractingZip ? (
-                <>
-                  <div className="w-16 h-16 rounded-2xl bg-purple-600/10 flex items-center justify-center mx-auto mb-4">
-                    <Archive className="w-8 h-8 text-purple-400 animate-pulse" />
-                  </div>
-                  <h3 className="text-lg font-bold text-white mb-2">Extrayendo archivos del ZIP...</h3>
-                  <p className="text-sm text-slate-500">Esto puede tardar unos segundos</p>
-                </>
-              ) : (
-                <>
-                  <div className="w-16 h-16 rounded-2xl bg-purple-600/10 flex items-center justify-center mx-auto mb-4">
-                    <Upload className={`w-8 h-8 ${isDragActive ? 'text-purple-400' : 'text-slate-500'}`} />
-                  </div>
-                  <h3 className="text-lg font-bold text-white mb-2">Arrastra facturas aquí</h3>
-                  <p className="text-sm text-slate-500 mb-4">o haz clic para seleccionar archivos</p>
-                  <p className="text-[10px] text-slate-600 uppercase tracking-wider">PDF, Imagen, Excel, ZIP</p>
-                </>
-              )}
-            </div>
+                  {extractingZip ? (
+                    <>
+                      <div className="w-16 h-16 rounded-2xl bg-purple-600/10 flex items-center justify-center mx-auto mb-4">
+                        <Archive className="w-8 h-8 text-purple-400 animate-pulse" />
+                      </div>
+                      <h3 className="text-lg font-bold text-white mb-2">Extrayendo archivos del ZIP...</h3>
+                      <p className="text-sm text-slate-500">Esto puede tardar unos segundos</p>
+                    </>
+                  ) : (
+                    <>
+                      <div className="w-16 h-16 rounded-2xl bg-purple-600/10 flex items-center justify-center mx-auto mb-4">
+                        <Upload className={`w-8 h-8 ${isDragActive ? 'text-purple-400' : 'text-slate-500'}`} />
+                      </div>
+                      <h3 className="text-lg font-bold text-white mb-2">Arrastra facturas aquí</h3>
+                      <p className="text-sm text-slate-500 mb-4">
+                        PDFs de distintos suministros, o un Excel consolidado
+                      </p>
+                      <p className="text-[10px] text-slate-600 uppercase tracking-wider">PDF · Imagen · Excel · ZIP</p>
+                    </>
+                  )}
+                </div>
+              </div>
+            )
           ) : (
             <div className="space-y-6">
               {/* Stats Bar */}

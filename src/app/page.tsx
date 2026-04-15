@@ -1133,20 +1133,49 @@ function EnergyBillsAppContent() {
     });
   };
 
-  const handlePoolComplete = async (projects: { name: string; bills: ExtractedBill[] }[]) => {
+  const handlePoolComplete = async (
+    projects: { name: string; bills: ExtractedBill[] }[],
+    folderNameRaw?: string
+  ) => {
     const userId = 'voltis_user_global';
     setCloudSyncStatus('syncing');
 
     try {
+      // Auto-create (or reuse) a parent folder for this pool so every supply
+      // subproject lands inside a single visible container.
+      const folderName = (folderNameRaw || '').trim().toUpperCase();
+      let folderId: string | undefined;
+      if (folderName) {
+        const existing = folders.find(f => f.name === folderName);
+        if (existing) {
+          folderId = existing.id;
+        } else {
+          const newFolderId = (typeof crypto !== 'undefined' && crypto.randomUUID)
+            ? crypto.randomUUID()
+            : `folder-${Date.now()}`;
+          const newFolder: ProjectFolder = {
+            id: newFolderId,
+            name: folderName,
+            user_id: userId,
+            projectIds: [],
+            updatedAt: Date.now(),
+          };
+          setFolders(prev => [...prev, newFolder]);
+          await syncFolderToDB(newFolder, userId);
+          folderId = newFolderId;
+        }
+      }
+
+      const createdIds: string[] = [];
       for (const proj of projects) {
-        const newId = (typeof crypto !== 'undefined' && crypto.randomUUID) 
-          ? crypto.randomUUID() 
+        const newId = (typeof crypto !== 'undefined' && crypto.randomUUID)
+          ? crypto.randomUUID()
           : `proj-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
         const project: ProjectWorkspace = {
           id: newId,
           name: proj.name,
-          folderId: undefined,
+          folderId,
           bills: proj.bills,
           customOCs: {},
           updatedAt: Date.now()
@@ -1159,10 +1188,31 @@ function EnergyBillsAppContent() {
 
         // Sync to database
         await syncProjectToDB(project, userId);
+        createdIds.push(newId);
+      }
+
+      // Attach the newly created projects to the folder's projectIds list
+      if (folderId && createdIds.length > 0) {
+        setFolders(prev => prev.map(f =>
+          f.id === folderId
+            ? { ...f, projectIds: Array.from(new Set([...f.projectIds, ...createdIds])), updatedAt: Date.now() }
+            : f
+        ));
+        const updatedFolder = folders.find(f => f.id === folderId);
+        if (updatedFolder) {
+          await syncFolderToDB(
+            { ...updatedFolder, projectIds: Array.from(new Set([...updatedFolder.projectIds, ...createdIds])), updatedAt: Date.now() },
+            userId
+          );
+        }
       }
 
       setCloudSyncStatus('synced');
-      toast.success(`${projects.length} proyecto${projects.length > 1 ? 's' : ''} creado${projects.length > 1 ? 's' : ''} desde Pool`);
+      toast.success(
+        folderName
+          ? `${projects.length} suministro${projects.length > 1 ? 's' : ''} creado${projects.length > 1 ? 's' : ''} en "${folderName}"`
+          : `${projects.length} proyecto${projects.length > 1 ? 's' : ''} creado${projects.length > 1 ? 's' : ''} desde Pool`
+      );
     } catch (err) {
       console.error('Pool creation error:', err);
       setCloudSyncStatus('error');
@@ -2802,8 +2852,8 @@ function EnergyBillsAppContent() {
         {showPool && (
           <PoolUpload
             onClose={() => setShowPool(false)}
-            onComplete={(projects) => {
-              handlePoolComplete(projects);
+            onComplete={(projects, folderName) => {
+              handlePoolComplete(projects, folderName);
               setShowPool(false);
             }}
             existingCups={new Set(
